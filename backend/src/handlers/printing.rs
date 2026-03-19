@@ -7,10 +7,27 @@ use tokio::process::Command;
 
 use crate::models::printing::{CupsPrintJob, CupsPrinter, PrintFileRequest};
 
+// Formatos que CUPS imprime bien nativamente (sin conversion)
+const PRINTABLE_EXTENSIONS: &[&str] = &[
+    "pdf", "ps", "eps", "txt", "text", "log", "conf", "cfg", "sh", "py", "rs", "js", "ts",
+    "json", "xml", "csv", "md", "c", "cpp", "h", "java", "rb", "pl", "png", "jpg", "jpeg",
+    "gif", "tiff", "tif", "bmp", "svg",
+];
+
+fn is_printable_file(filename: &str) -> bool {
+    let ext = filename
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_lowercase();
+    PRINTABLE_EXTENSIONS.contains(&ext.as_str())
+}
+
 pub async fn list_printers() -> Result<Json<Vec<CupsPrinter>>, (StatusCode, String)> {
-    // Get printer list
-    let output = Command::new("lpstat")
-        .args(["-p"])
+    // Use lpstat -e (list all printers, one per line) - locale-independent
+    let names_output = Command::new("lpstat")
+        .arg("-e")
+        .env("LANG", "C")
         .output()
         .await
         .map_err(|e| {
@@ -20,62 +37,75 @@ pub async fn list_printers() -> Result<Json<Vec<CupsPrinter>>, (StatusCode, Stri
             )
         })?;
 
-    let printers_text = String::from_utf8_lossy(&output.stdout).to_string();
+    let names_text = String::from_utf8_lossy(&names_output.stdout);
+    let printer_names: Vec<String> = names_text
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    if printer_names.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
 
     // Get default printer
     let default_output = Command::new("lpstat")
-        .args(["-d"])
+        .arg("-d")
+        .env("LANG", "C")
         .output()
         .await
         .ok();
 
-    let default_text = default_output
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+    let default_printer = default_output
+        .and_then(|o| {
+            let text = String::from_utf8_lossy(&o.stdout).to_string();
+            text.split(':').nth(1).map(|s| s.trim().to_string())
+        })
         .unwrap_or_default();
-    let default_printer = default_text
-        .strip_prefix("system default destination: ")
-        .map(|s| s.trim().to_string())
+
+    // Get status for all printers at once (LANG=C forces English output)
+    let status_output = Command::new("lpstat")
+        .arg("-p")
+        .env("LANG", "C")
+        .output()
+        .await
+        .ok();
+
+    let status_text = status_output
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
         .unwrap_or_default();
 
     let mut printers = Vec::new();
 
-    for line in printers_text.lines() {
-        // Format: "printer NAME is STATE. ..."
-        if let Some(rest) = line.strip_prefix("printer ") {
-            let parts: Vec<&str> = rest.splitn(2, " is ").collect();
-            if parts.len() == 2 {
-                let name = parts[0].trim().to_string();
-                let state_part = parts[1].trim();
-                let state = if state_part.contains("idle") {
-                    "idle".to_string()
-                } else if state_part.contains("printing") {
-                    "printing".to_string()
-                } else if state_part.contains("disabled") {
-                    "disabled".to_string()
+    for name in &printer_names {
+        // Find status line for this printer
+        let state = status_text
+            .lines()
+            .find(|line| line.contains(name.as_str()))
+            .map(|line| {
+                let lower = line.to_lowercase();
+                if lower.contains("idle") {
+                    "idle"
+                } else if lower.contains("printing") {
+                    "printing"
+                } else if lower.contains("disabled") {
+                    "disabled"
                 } else {
-                    "unknown".to_string()
-                };
+                    "unknown"
+                }
+            })
+            .unwrap_or("unknown")
+            .to_string();
 
-                let is_default = name == default_printer;
+        let is_default = *name == default_printer;
+        let description = name.replace('_', " ");
 
-                // Try to get description via lpoptions
-                let desc_output = Command::new("lpoptions")
-                    .args(["-p", &name, "-l"])
-                    .output()
-                    .await;
-                let description = desc_output
-                    .ok()
-                    .map(|_| name.replace('_', " "))
-                    .unwrap_or_else(|| name.replace('_', " "));
-
-                printers.push(CupsPrinter {
-                    name,
-                    description,
-                    is_default,
-                    state,
-                });
-            }
-        }
+        printers.push(CupsPrinter {
+            name: name.clone(),
+            description,
+            is_default,
+            state,
+        });
     }
 
     Ok(Json(printers))
@@ -165,6 +195,17 @@ pub async fn print_upload(
         "No se proporcionó archivo".to_string(),
     ))?;
 
+    // Validate file format
+    if !is_printable_file(&file_name) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Formato no soportado: '{}'. Usa PDF, imagenes (PNG/JPG) o texto plano.",
+                file_name
+            ),
+        ));
+    }
+
     // Save to temp file
     let tmp_path = format!("/tmp/labnas-print-{}", uuid::Uuid::new_v4());
     let tmp_file = format!("{}/{}", tmp_path, file_name);
@@ -175,7 +216,8 @@ pub async fn print_upload(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let result = run_lp_command(&printer_name, &tmp_file, copies, orientation, double_sided, pages).await;
+    let result =
+        run_lp_command(&printer_name, &tmp_file, copies, orientation, double_sided, pages).await;
 
     // Cleanup temp
     let _ = tokio::fs::remove_dir_all(&tmp_path).await;
@@ -202,6 +244,22 @@ pub async fn print_file_path(
         ));
     }
 
+    // Validate file format
+    let filename = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    if !is_printable_file(&filename) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Formato no soportado: '{}'. Usa PDF, imagenes (PNG/JPG) o texto plano.",
+                filename
+            ),
+        ));
+    }
+
     run_lp_command(
         &req.printer,
         &req.path,
@@ -222,7 +280,10 @@ async fn run_lp_command(
     pages: Option<String>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
     // Validate printer name (prevent injection)
-    if !printer.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+    if !printer
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+    {
         return Err((
             StatusCode::BAD_REQUEST,
             "Nombre de impresora invalido".to_string(),
@@ -255,8 +316,9 @@ async fn run_lp_command(
     }
 
     if let Some(pg) = pages {
-        // Validate page range format (e.g., "1-5", "1,3,5", "1-3,7")
-        let valid = pg.chars().all(|c| c.is_ascii_digit() || c == '-' || c == ',');
+        let valid = pg
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == '-' || c == ',');
         if valid && !pg.is_empty() {
             args.push("-o".to_string());
             args.push(format!("page-ranges={}", pg));
@@ -290,7 +352,8 @@ async fn run_lp_command(
 
 pub async fn list_jobs() -> Result<Json<Vec<CupsPrintJob>>, (StatusCode, String)> {
     let output = Command::new("lpstat")
-        .args(["-o"])
+        .arg("-o")
+        .env("LANG", "C")
         .output()
         .await
         .map_err(|e| {
@@ -308,11 +371,10 @@ pub async fn list_jobs() -> Result<Json<Vec<CupsPrintJob>>, (StatusCode, String)
         if line.is_empty() {
             continue;
         }
-        // Format: "PRINTER-ID USER SIZE DATE"
+        // LANG=C format: "PRINTER-JOBID USER SIZE DATE..."
         let parts: Vec<&str> = line.splitn(4, char::is_whitespace).collect();
         if parts.len() >= 3 {
             let job_id = parts[0].to_string();
-            // Extract printer name from job ID (e.g., "HP_LaserJet-42" -> "HP_LaserJet")
             let printer = job_id
                 .rfind('-')
                 .map(|i| job_id[..i].to_string())
@@ -332,8 +394,10 @@ pub async fn list_jobs() -> Result<Json<Vec<CupsPrintJob>>, (StatusCode, String)
 }
 
 pub async fn cancel_job(Path(id): Path<String>) -> Result<StatusCode, (StatusCode, String)> {
-    // Validate job ID format
-    if !id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+    if !id
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
         return Err((
             StatusCode::BAD_REQUEST,
             "ID de trabajo invalido".to_string(),

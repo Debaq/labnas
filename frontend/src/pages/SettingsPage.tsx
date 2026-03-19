@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Plus, Trash2, Send, Clock } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
+import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Plus, Trash2, Send, Clock, ExternalLink } from 'lucide-react'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, type ThemeName } from '../themes/themes'
 import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, installAutostart, removeAutostart, fetchNotificationConfig, addWhatsAppContact, deleteWhatsAppContact, sendTestWhatsApp, setNotificationSchedule } from '../api'
@@ -217,14 +218,82 @@ export default function SettingsPage() {
           </h2>
         </div>
 
-        {/* Info */}
+        {/* Info / Setup Guide */}
         <div
-          className="rounded-xl p-4 mb-4 text-xs"
-          style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+          className="rounded-xl p-5 mb-4"
+          style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
         >
-          Usa <strong>CallMeBot</strong> para enviar mensajes. Cada contacto debe registrarse enviando
-          <span className="font-mono mx-1" style={{ color: 'var(--accent)' }}>I allow callmebot to send me messages</span>
-          al <strong>+34 644 71 98 38</strong> en WhatsApp. Recibiran un API key.
+          <p className="text-sm font-medium mb-4" style={{ color: 'var(--text-primary)' }}>
+            Como configurar CallMeBot
+          </p>
+          <div className="flex flex-col sm:flex-row gap-5">
+            {/* QR Code */}
+            <div className="flex flex-col items-center gap-2 shrink-0">
+              <div className="rounded-lg p-3" style={{ backgroundColor: '#ffffff' }}>
+                <QRCodeSVG
+                  value="https://wa.me/34644719838?text=I%20allow%20callmebot%20to%20send%20me%20messages"
+                  size={140}
+                  level="M"
+                />
+              </div>
+              <a
+                href="https://wa.me/34644719838?text=I%20allow%20callmebot%20to%20send%20me%20messages"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 hover:opacity-80"
+                style={{ color: 'var(--accent)', border: '1px solid var(--accent)' }}
+              >
+                <ExternalLink size={12} />
+                Abrir en WhatsApp
+              </a>
+            </div>
+            {/* Steps */}
+            <div className="space-y-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
+              <div className="flex gap-3">
+                <span
+                  className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold"
+                  style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
+                >1</span>
+                <p>
+                  Escanea el QR o toca el boton para abrir WhatsApp. Envia el mensaje
+                  <span className="font-mono mx-1 px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--accent)' }}>
+                    I allow callmebot to send me messages
+                  </span>
+                  al numero <strong style={{ color: 'var(--text-primary)' }}>+34 644 71 98 38</strong>.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <span
+                  className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold"
+                  style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
+                >2</span>
+                <p>
+                  CallMeBot te respondera con tu <strong style={{ color: 'var(--text-primary)' }}>API Key</strong> (un numero). Guardalo.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <span
+                  className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold"
+                  style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
+                >3</span>
+                <p>
+                  Agrega el contacto abajo con su <strong style={{ color: 'var(--text-primary)' }}>nombre</strong>,
+                  <strong style={{ color: 'var(--text-primary)' }}> telefono</strong> (con codigo pais, ej: 56912345678) y la
+                  <strong style={{ color: 'var(--text-primary)' }}> API Key</strong>.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <span
+                  className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold"
+                  style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
+                >4</span>
+                <p>
+                  Usa <strong style={{ color: 'var(--text-primary)' }}>Enviar Test</strong> para verificar que funcione.
+                  Activa el <strong style={{ color: 'var(--text-primary)' }}>mensaje diario</strong> y elige la hora.
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Contacts */}

@@ -180,7 +180,7 @@ export default function FilesPage() {
     }
   }
 
-  const printableExts = ['pdf', 'txt', 'doc', 'docx', 'odt', 'png', 'jpg', 'jpeg', 'csv', 'html', 'xls', 'xlsx']
+  const printableExts = ['pdf', 'ps', 'eps', 'txt', 'text', 'log', 'png', 'jpg', 'jpeg', 'gif', 'tiff', 'tif', 'bmp', 'svg']
 
   function isPrintable(entry: FileEntry): boolean {
     if (entry.is_dir) return false

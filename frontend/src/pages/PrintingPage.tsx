@@ -101,11 +101,24 @@ export default function PrintingPage() {
     }
   }
 
+  const printableExts = ['pdf', 'ps', 'eps', 'txt', 'text', 'log', 'conf', 'sh', 'py', 'rs', 'js', 'ts', 'json', 'xml', 'csv', 'md', 'c', 'cpp', 'h', 'java', 'png', 'jpg', 'jpeg', 'gif', 'tiff', 'tif', 'bmp', 'svg']
+  const printableAccept = printableExts.map(e => `.${e}`).join(',')
+
+  function isPrintableFile(name: string): boolean {
+    const ext = name.split('.').pop()?.toLowerCase() || ''
+    return printableExts.includes(ext)
+  }
+
   function handleDrop(e: React.DragEvent) {
     e.preventDefault()
     setDragOver(false)
     const file = e.dataTransfer.files[0]
-    if (file) openPrintModal(file)
+    if (!file) return
+    if (!isPrintableFile(file.name)) {
+      alert('Formato no soportado. Usa PDF, imagenes (PNG/JPG) o texto plano.')
+      return
+    }
+    openPrintModal(file)
   }
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -226,11 +239,12 @@ export default function PrintingPage() {
           Arrastra un archivo aqui o haz clic para seleccionar
         </p>
         <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-          PDF, documentos, imagenes, texto
+          PDF, imagenes (PNG, JPG, GIF, BMP, TIFF, SVG), texto plano, PostScript
         </p>
         <input
           ref={fileInputRef}
           type="file"
+          accept={printableAccept}
           className="hidden"
           onChange={handleFileSelect}
         />
