@@ -54,6 +54,8 @@ export interface SystemInfo {
 export interface AutostartStatus {
   installed: boolean
   enabled: boolean
+  install_cmd: string
+  uninstall_cmd: string
 }
 
 // --- Notifications ---

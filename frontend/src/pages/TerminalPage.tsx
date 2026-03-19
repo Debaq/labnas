@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -7,6 +8,8 @@ import '@xterm/xterm/css/xterm.css'
 export default function TerminalPage() {
   const containerRef = useRef<HTMLDivElement>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
+  const location = useLocation()
+  const pendingCmd = (location.state as any)?.commands as string | undefined
 
   useEffect(() => {
     // Cleanup previous instance if any (StrictMode)
@@ -74,6 +77,13 @@ export default function TerminalPage() {
       setTimeout(() => {
         fitAddon.fit()
         ws.send('\x01' + JSON.stringify({ cols: term.cols, rows: term.rows }))
+        // Auto-type commands if navigated with state (e.g., from autostart setup)
+        if (pendingCmd) {
+          setTimeout(() => {
+            ws.send(pendingCmd + '\n')
+          }, 600)
+          window.history.replaceState({}, document.title)
+        }
       }, 150)
     }
 

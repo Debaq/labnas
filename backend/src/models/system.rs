@@ -34,4 +34,6 @@ pub struct SystemInfoResponse {
 pub struct AutostartStatus {
     pub installed: bool,
     pub enabled: bool,
+    pub install_cmd: String,
+    pub uninstall_cmd: String,
 }

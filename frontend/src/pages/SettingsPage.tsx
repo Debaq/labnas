@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
-import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Plus, Trash2, Send, Clock, ExternalLink } from 'lucide-react'
+import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Plus, Trash2, Send, Clock, TerminalSquare, ExternalLink, X } from 'lucide-react'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, type ThemeName } from '../themes/themes'
-import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, installAutostart, removeAutostart, fetchNotificationConfig, addWhatsAppContact, deleteWhatsAppContact, sendTestWhatsApp, setNotificationSchedule } from '../api'
+import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, addWhatsAppContact, deleteWhatsAppContact, sendTestWhatsApp, setNotificationSchedule } from '../api'
 import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig } from '../types'
 
 function formatBytes(bytes: number): string {
@@ -63,12 +64,11 @@ function ThemeCard({
 }
 
 export default function SettingsPage() {
+  const navigate = useNavigate()
   const { theme, setTheme, themeNames } = useTheme()
   const [disks, setDisks] = useState<DiskInfo[]>([])
   const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null)
   const [autostart, setAutostart] = useState<AutostartStatus | null>(null)
-  const [autostartLoading, setAutostartLoading] = useState(false)
-  const [autostartError, setAutostartError] = useState<string | null>(null)
 
   // WhatsApp
   const [notifConfig, setNotifConfig] = useState<NotificationConfig | null>(null)
@@ -77,6 +77,7 @@ export default function SettingsPage() {
   const [contactPhone, setContactPhone] = useState('')
   const [contactApiKey, setContactApiKey] = useState('')
   const [sendingTest, setSendingTest] = useState(false)
+  const [qrExpanded, setQrExpanded] = useState(false)
   const [testResult, setTestResult] = useState<string | null>(null)
   const [scheduleHour, setScheduleHour] = useState(8)
   const [scheduleMinute, setScheduleMinute] = useState(0)
@@ -94,22 +95,10 @@ export default function SettingsPage() {
     }).catch(() => {})
   }, [])
 
-  async function handleToggleAutostart() {
-    setAutostartLoading(true)
-    setAutostartError(null)
-    try {
-      if (autostart?.enabled) {
-        await removeAutostart()
-      } else {
-        await installAutostart()
-      }
-      const status = await fetchAutostartStatus()
-      setAutostart(status)
-    } catch (err: any) {
-      setAutostartError(err.message || 'Error al configurar autostart')
-    } finally {
-      setAutostartLoading(false)
-    }
+  function handleAutostartTerminal(install: boolean) {
+    if (!autostart) return
+    const cmd = install ? autostart.install_cmd : autostart.uninstall_cmd
+    navigate('/terminal', { state: { commands: cmd } })
   }
 
   return (
@@ -146,50 +135,16 @@ export default function SettingsPage() {
           className="rounded-xl p-6"
           style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
         >
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between mb-3">
             <div>
               <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
                 Iniciar LabNAS con el sistema
               </p>
               <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-                Instala un servicio systemd que inicia LabNAS automaticamente al arrancar
+                Instala un servicio systemd. Se abrira la terminal para ingresar la contrasena sudo.
               </p>
             </div>
-            <button
-              onClick={handleToggleAutostart}
-              disabled={autostartLoading}
-              className="relative w-14 h-7 rounded-full transition-all duration-300 focus:outline-none"
-              style={{
-                backgroundColor: autostart?.enabled ? 'var(--accent)' : 'var(--bg-tertiary)',
-                border: '1px solid var(--border)',
-              }}
-            >
-              {autostartLoading ? (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <Loader2 size={14} className="animate-spin" style={{ color: 'var(--text-secondary)' }} />
-                </div>
-              ) : (
-                <span
-                  className="absolute top-0.5 w-5 h-5 rounded-full transition-all duration-300"
-                  style={{
-                    backgroundColor: autostart?.enabled ? '#ffffff' : 'var(--text-secondary)',
-                    left: autostart?.enabled ? '30px' : '4px',
-                  }}
-                />
-              )}
-            </button>
-          </div>
-          {autostart && (
-            <div className="flex items-center gap-4 mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
-              <div className="flex items-center gap-2">
-                <span
-                  className="w-2 h-2 rounded-full"
-                  style={{ backgroundColor: autostart.installed ? 'var(--success)' : 'var(--text-secondary)' }}
-                />
-                <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                  Servicio {autostart.installed ? 'instalado' : 'no instalado'}
-                </span>
-              </div>
+            {autostart && (
               <div className="flex items-center gap-2">
                 <span
                   className="w-2 h-2 rounded-full"
@@ -199,13 +154,31 @@ export default function SettingsPage() {
                   {autostart.enabled ? 'Habilitado' : 'Deshabilitado'}
                 </span>
               </div>
-            </div>
-          )}
-          {autostartError && (
-            <div className="mt-3 text-xs rounded-lg p-3" style={{ backgroundColor: 'var(--danger-alpha)', color: 'var(--danger)' }}>
-              {autostartError}
-            </div>
-          )}
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            {!autostart?.enabled && (
+              <button
+                onClick={() => handleAutostartTerminal(true)}
+                disabled={!autostart}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90"
+                style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
+              >
+                <TerminalSquare size={16} />
+                Habilitar al inicio
+              </button>
+            )}
+            {autostart?.enabled && (
+              <button
+                onClick={() => handleAutostartTerminal(false)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90"
+                style={{ color: 'var(--danger)', border: '1px solid var(--danger)' }}
+              >
+                <TerminalSquare size={16} />
+                Deshabilitar
+              </button>
+            )}
+          </div>
         </div>
       </section>
 
@@ -229,15 +202,23 @@ export default function SettingsPage() {
           <div className="flex flex-col sm:flex-row gap-5">
             {/* QR Code */}
             <div className="flex flex-col items-center gap-2 shrink-0">
-              <div className="rounded-lg p-3" style={{ backgroundColor: '#ffffff' }}>
+              <button
+                onClick={() => setQrExpanded(true)}
+                className="rounded-lg p-3 cursor-pointer transition-all duration-200 hover:shadow-lg hover:scale-105"
+                style={{ backgroundColor: '#ffffff' }}
+                title="Click para ampliar"
+              >
                 <QRCodeSVG
-                  value="https://wa.me/34644719838?text=I%20allow%20callmebot%20to%20send%20me%20messages"
+                  value="https://wa.me/34644457057?text=I%20allow%20callmebot%20to%20send%20me%20messages"
                   size={140}
                   level="M"
                 />
-              </div>
+              </button>
+              <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+                Toca para ampliar
+              </span>
               <a
-                href="https://wa.me/34644719838?text=I%20allow%20callmebot%20to%20send%20me%20messages"
+                href="https://wa.me/34644457057?text=I%20allow%20callmebot%20to%20send%20me%20messages"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 hover:opacity-80"
@@ -247,6 +228,37 @@ export default function SettingsPage() {
                 Abrir en WhatsApp
               </a>
             </div>
+
+            {/* QR Modal */}
+            {qrExpanded && (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center"
+                style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}
+                onClick={() => setQrExpanded(false)}
+              >
+                <div
+                  className="relative rounded-2xl p-8 shadow-2xl"
+                  style={{ backgroundColor: '#ffffff' }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    onClick={() => setQrExpanded(false)}
+                    className="absolute top-3 right-3 p-1 rounded-full hover:opacity-70 transition-opacity"
+                    style={{ color: '#666' }}
+                  >
+                    <X size={20} />
+                  </button>
+                  <QRCodeSVG
+                    value="https://wa.me/34644457057?text=I%20allow%20callmebot%20to%20send%20me%20messages"
+                    size={300}
+                    level="M"
+                  />
+                  <p className="text-center text-sm mt-4" style={{ color: '#333' }}>
+                    Escanea con tu celular
+                  </p>
+                </div>
+              </div>
+            )}
             {/* Steps */}
             <div className="space-y-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
               <div className="flex gap-3">
@@ -259,7 +271,7 @@ export default function SettingsPage() {
                   <span className="font-mono mx-1 px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--accent)' }}>
                     I allow callmebot to send me messages
                   </span>
-                  al numero <strong style={{ color: 'var(--text-primary)' }}>+34 644 71 98 38</strong>.
+                  al numero <strong style={{ color: 'var(--text-primary)' }}>+34 644 45 70 57</strong>.
                 </p>
               </div>
               <div className="flex gap-3">

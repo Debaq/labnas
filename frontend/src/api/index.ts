@@ -90,19 +90,6 @@ export async function fetchAutostartStatus(): Promise<import('../types').Autosta
   return res.json()
 }
 
-export async function installAutostart(): Promise<void> {
-  const res = await fetch('/api/system/autostart', { method: 'POST' })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || 'Error instalando autostart')
-  }
-}
-
-export async function removeAutostart(): Promise<void> {
-  const res = await fetch('/api/system/autostart', { method: 'DELETE' })
-  if (!res.ok) throw new Error('Error removiendo autostart')
-}
-
 // --- Network ---
 
 export async function scanNetwork(): Promise<NetworkHost[]> {
