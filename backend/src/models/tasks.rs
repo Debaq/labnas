@@ -31,6 +31,8 @@ pub struct Task {
     pub requires_confirmation: bool,
     #[serde(default)]
     pub insistent: bool,
+    #[serde(default = "default_reminder_minutes")]
+    pub reminder_minutes: u32,
     #[serde(default)]
     pub confirmed_by: Vec<String>,
     #[serde(default)]
@@ -38,6 +40,10 @@ pub struct Task {
     pub created_at: DateTime<Utc>,
     #[serde(default)]
     pub last_reminder: Option<DateTime<Utc>>,
+}
+
+fn default_reminder_minutes() -> u32 {
+    8
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

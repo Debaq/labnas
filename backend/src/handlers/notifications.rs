@@ -542,6 +542,7 @@ async fn handle_task_command(state: &AppState, creator: &str, text: &str) -> Str
     let mut assigned = Vec::new();
     let mut requires_confirmation = false;
     let mut insistent = false;
+    let mut reminder_minutes: u32 = 8;
     let mut project_id: Option<String> = None;
 
     for word in args.split_whitespace() {
@@ -551,6 +552,13 @@ async fn handle_task_command(state: &AppState, creator: &str, text: &str) -> Str
             requires_confirmation = true;
         } else if word == "!insistente" || word == "!insistir" {
             insistent = true;
+        } else if let Some(mins) = word.strip_prefix("!cada") {
+            if let Ok(m) = mins.parse::<u32>() {
+                if m >= 1 {
+                    reminder_minutes = m;
+                    insistent = true;
+                }
+            }
         } else if let Some(pid) = word.strip_prefix('#') {
             project_id = Some(pid.to_string());
         } else {
@@ -583,6 +591,7 @@ async fn handle_task_command(state: &AppState, creator: &str, text: &str) -> Str
         due_date: None,
         requires_confirmation,
         insistent,
+        reminder_minutes,
         confirmed_by: Vec::new(),
         rejected_by: Vec::new(),
         created_at: chrono::Utc::now(),
@@ -747,7 +756,7 @@ async fn handle_progress(state: &AppState, user: &str, text: &str) -> String {
 
 pub async fn task_reminder_loop(state: AppState) {
     loop {
-        tokio::time::sleep(Duration::from_secs(300)).await; // Check every 5 minutes
+        tokio::time::sleep(Duration::from_secs(60)).await; // Check every minute
 
         let mut config = state.config.lock().await;
         let token = match &config.notifications.bot_token {
@@ -768,7 +777,7 @@ pub async fn task_reminder_loop(state: AppState) {
             }
 
             // Check if enough time passed since last reminder (30 min for insistent, 2h for confirmation)
-            let interval = if task.insistent { 1800 } else { 7200 };
+            let interval = (task.reminder_minutes as i64) * 60;
             let should_remind = task.last_reminder
                 .map(|lr| (now - lr).num_seconds() >= interval)
                 .unwrap_or(true);
@@ -827,7 +836,8 @@ fn build_help_message(role: &UserRole) -> String {
     msg.push_str("*Tareas y Proyectos*\n");
     msg.push_str("/tarea Titulo @persona - Crear tarea\n");
     msg.push_str("/tarea Titulo @all !confirmar - Confirmar\n");
-    msg.push_str("/tarea Titulo !insistente - Insistente\n");
+    msg.push_str("/tarea Titulo !insistente - Cada 8min\n");
+    msg.push_str("/tarea Titulo !cada5 - Cada 5min\n");
     msg.push_str("/tareas - Mis tareas pendientes\n");
     msg.push_str("/confirmar ID - Confirmar tarea\n");
     msg.push_str("/rechazar ID - Rechazar tarea\n");
