@@ -50,7 +50,7 @@ export default function DashboardPage() {
   const [disks, setDisks] = useState<DiskInfo[]>([])
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
   const [hosts, setHosts] = useState<NetworkHost[]>([])
-  const [health, setHealth] = useState<any>(null)
+  const [_health, setHealth] = useState<any>(null)
   const [printers3d, setPrinters3d] = useState<Printer3DConfig[]>([])
   const [printerStatuses, setPrinterStatuses] = useState<Printer3DStatus[]>([])
   const [loading, setLoading] = useState(true)
