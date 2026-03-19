@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Radar, Monitor, Wifi, WifiOff, Loader2, Box, ShieldCheck, ShieldAlert, Tag, X } from 'lucide-react'
+import { Radar, Monitor, Wifi, Loader2, Box, ShieldCheck, ShieldAlert, Tag, X } from 'lucide-react'
 import { scanNetwork, fetchHosts, labelDevice, unlabelDevice } from '../api'
 import type { NetworkHost } from '../types'
 
