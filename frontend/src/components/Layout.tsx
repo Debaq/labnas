@@ -1,19 +1,10 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power } from 'lucide-react'
+import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User } from 'lucide-react'
 import { useTheme } from '../themes/ThemeContext'
+import { useAuth } from '../auth/AuthContext'
 import { shutdownServer } from '../api'
 import type { ThemeName } from '../themes/themes'
-
-const navItems = [
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/files', label: 'Archivos', icon: FolderOpen },
-  { to: '/printing', label: 'Impresion', icon: Printer },
-  { to: '/printers3d', label: 'Impresoras 3D', icon: Box },
-  { to: '/network', label: 'Red', icon: Network },
-  { to: '/terminal', label: 'Terminal', icon: TerminalSquare },
-  { to: '/settings', label: 'Configuracion', icon: Settings },
-]
 
 const pageTitles: Record<string, string> = {
   '/dashboard': 'Dashboard',
@@ -27,6 +18,7 @@ const pageTitles: Record<string, string> = {
 
 export default function Layout() {
   const { theme, setTheme, themeNames } = useTheme()
+  const { user, logout, can, isAdmin } = useAuth()
   const location = useLocation()
   const pageTitle = pageTitles[location.pathname] || 'LabNAS'
   const [shuttingDown, setShuttingDown] = useState(false)
@@ -38,6 +30,19 @@ export default function Layout() {
       await shutdownServer()
     } catch { /* conexion se cortara */ }
   }
+
+  // Build nav items based on permissions
+  const navItems = [
+    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
+    { to: '/files', label: 'Archivos', icon: FolderOpen, show: true },
+    { to: '/printing', label: 'Impresion', icon: Printer, show: can('impresion') },
+    { to: '/printers3d', label: 'Impresoras 3D', icon: Box, show: true },
+    { to: '/network', label: 'Red', icon: Network, show: true },
+    { to: '/terminal', label: 'Terminal', icon: TerminalSquare, show: can('terminal') },
+    { to: '/settings', label: 'Configuracion', icon: Settings, show: true },
+  ]
+
+  const roleLabel = user?.role === 'admin' ? 'Admin' : user?.role === 'operador' ? 'Operador' : user?.role === 'observador' ? 'Observador' : 'Pendiente'
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--bg-primary)' }}>
@@ -56,7 +61,7 @@ export default function Layout() {
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-4 space-y-1">
-          {navItems.map((item) => (
+          {navItems.filter(i => i.show).map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -80,7 +85,7 @@ export default function Layout() {
         </nav>
 
         {/* Theme selector */}
-        <div className="px-4 py-4" style={{ borderTop: '1px solid var(--border)' }}>
+        <div className="px-4 py-3" style={{ borderTop: '1px solid var(--border)' }}>
           <label className="block text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
             Tema
           </label>
@@ -100,6 +105,25 @@ export default function Layout() {
               </option>
             ))}
           </select>
+        </div>
+
+        {/* User info */}
+        <div className="px-4 py-3 flex items-center justify-between" style={{ borderTop: '1px solid var(--border)' }}>
+          <div className="flex items-center gap-2 min-w-0">
+            <User size={16} style={{ color: 'var(--accent)' }} />
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{user?.username}</p>
+              <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>{roleLabel}</p>
+            </div>
+          </div>
+          <button
+            onClick={logout}
+            className="p-1.5 rounded-lg transition-all duration-200 hover:opacity-80"
+            style={{ color: 'var(--text-secondary)' }}
+            title="Cerrar sesion"
+          >
+            <LogOut size={16} />
+          </button>
         </div>
       </aside>
 
@@ -123,18 +147,20 @@ export default function Layout() {
                 {shuttingDown ? 'Apagando...' : 'En linea'}
               </span>
             </div>
-            <button
-              onClick={handleShutdown}
-              disabled={shuttingDown}
-              className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
-              style={{
-                backgroundColor: 'var(--danger-alpha)',
-                color: 'var(--danger)',
-              }}
-              title="Apagar LabNAS"
-            >
-              <Power size={18} />
-            </button>
+            {isAdmin && (
+              <button
+                onClick={handleShutdown}
+                disabled={shuttingDown}
+                className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
+                style={{
+                  backgroundColor: 'var(--danger-alpha)',
+                  color: 'var(--danger)',
+                }}
+                title="Apagar LabNAS"
+              >
+                <Power size={18} />
+              </button>
+            )}
           </div>
         </header>
 

@@ -28,6 +28,7 @@ async fn main() {
         http_client: reqwest::Client::new(),
         shutdown: shutdown.clone(),
         activity_log: Arc::new(Mutex::new(Vec::new())),
+        sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
 
     let cors = CorsLayer::new()
@@ -36,6 +37,14 @@ async fn main() {
         .allow_headers(Any);
 
     let api = Router::new()
+        // Auth
+        .route("/api/auth/register", post(handlers::auth::register))
+        .route("/api/auth/login", post(handlers::auth::login))
+        .route("/api/auth/me", get(handlers::auth::me))
+        .route("/api/auth/logout", post(handlers::auth::logout))
+        .route("/api/auth/users", get(handlers::auth::list_users))
+        .route("/api/auth/users/{username}/role", post(handlers::auth::set_user_role))
+        .route("/api/auth/users/{username}", delete(handlers::auth::delete_user))
         // Health
         .route("/api/health", get(handlers::system::health_handler))
         // Files
@@ -79,6 +88,7 @@ async fn main() {
         .route("/api/notifications/telegram/token", post(handlers::notifications::set_bot_token))
         .route("/api/notifications/telegram/token", delete(handlers::notifications::delete_bot_token))
         .route("/api/notifications/telegram/chat/{chat_id}", delete(handlers::notifications::delete_chat))
+        .route("/api/notifications/telegram/chat/{chat_id}/role", post(handlers::notifications::set_chat_role))
         .route("/api/notifications/telegram/test", post(handlers::notifications::send_test))
         .route("/api/notifications/schedule", post(handlers::notifications::set_schedule))
         .layer(cors)

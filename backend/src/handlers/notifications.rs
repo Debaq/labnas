@@ -67,6 +67,31 @@ pub async fn delete_bot_token(
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub async fn set_chat_role(
+    State(state): State<AppState>,
+    Path(chat_id): Path<i64>,
+    Json(req): Json<SetRoleRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let mut config = state.config.lock().await;
+    let chat = config
+        .notifications
+        .telegram_chats
+        .iter_mut()
+        .find(|c| c.chat_id == chat_id)
+        .ok_or((StatusCode::NOT_FOUND, "Chat no encontrado".to_string()))?;
+
+    chat.role = req.role;
+    if let Some(perms) = req.permissions {
+        chat.permissions = perms;
+    }
+
+    save_config(&config)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    Ok(StatusCode::OK)
+}
+
 pub async fn delete_chat(
     State(state): State<AppState>,
     Path(chat_id): Path<i64>,
@@ -276,13 +301,53 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
     let chat_id = msg.chat.id;
     let text = msg.text.as_deref().unwrap_or("").trim();
 
+    // Handle /start separately (always allowed)
+    if text.starts_with("/start") {
+        register_chat(state, token, msg).await;
+        // Check if they're pending
+        let config = state.config.lock().await;
+        let role = config
+            .notifications
+            .telegram_chats
+            .iter()
+            .find(|c| c.chat_id == chat_id)
+            .map(|c| c.role.clone())
+            .unwrap_or(UserRole::Pendiente);
+        drop(config);
+
+        let response = match role {
+            UserRole::Admin => "Hola! Eres el *administrador* de LabNAS.\n\nUsa /ayuda para ver los comandos.".to_string(),
+            UserRole::Pendiente => "Solicitud enviada. El administrador debe aprobar tu acceso desde la web.".to_string(),
+            _ => "Hola! Ya estas registrado en LabNAS.\n\nUsa /ayuda para ver los comandos.".to_string(),
+        };
+        let _ = send_telegram_message(&state.http_client, token, chat_id, &response).await;
+        return;
+    }
+
+    // Check user role
+    let config = state.config.lock().await;
+    let chat = config
+        .notifications
+        .telegram_chats
+        .iter()
+        .find(|c| c.chat_id == chat_id);
+
+    let Some(chat) = chat else {
+        drop(config);
+        let _ = send_telegram_message(&state.http_client, token, chat_id, "No estas registrado. Envia /start primero.").await;
+        return;
+    };
+
+    if chat.role == UserRole::Pendiente {
+        drop(config);
+        let _ = send_telegram_message(&state.http_client, token, chat_id, "Tu acceso esta pendiente de aprobacion.").await;
+        return;
+    }
+
+    let role = chat.role.clone();
+    drop(config);
+
     let response = match text {
-        s if s.starts_with("/start") => {
-            register_chat(state, msg).await;
-            "Hola! Soy el bot de *LabNAS*. Estoy conectado y listo.\n\n\
-             Usa /ayuda para ver los comandos disponibles."
-                .to_string()
-        }
         s if s.starts_with("/horario") => handle_schedule_command(state, chat_id, s).await,
         s if s.starts_with("/actividad") => build_activity_message(state).await,
         s if s.starts_with("/estado") => build_status_message(state).await,
@@ -292,7 +357,22 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
         s if s.starts_with("/uptime") => build_uptime_message(state),
         s if s.starts_with("/red") => build_network_message(state).await,
         s if s.starts_with("/impresoras") => build_printers_message(state).await,
-        s if s.starts_with("/ayuda") | s.starts_with("/help") => build_help_message(),
+        s if s.starts_with("/mirol") => {
+            let emoji = match role {
+                UserRole::Admin => "👑",
+                UserRole::Operador => "🔧",
+                UserRole::Observador => "👁",
+                UserRole::Pendiente => "⏳",
+            };
+            let role_name = match role {
+                UserRole::Admin => "Administrador",
+                UserRole::Operador => "Operador",
+                UserRole::Observador => "Observador",
+                UserRole::Pendiente => "Pendiente",
+            };
+            format!("{} Tu rol: *{}*", emoji, role_name)
+        }
+        s if s.starts_with("/ayuda") | s.starts_with("/help") => build_help_message(&role),
         _ => return,
     };
 
@@ -303,7 +383,7 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
     }
 }
 
-async fn register_chat(state: &AppState, msg: &TgMessage) {
+async fn register_chat(state: &AppState, token: &str, msg: &TgMessage) {
     let chat_id = msg.chat.id;
     let name = msg
         .chat
@@ -322,10 +402,9 @@ async fn register_chat(state: &AppState, msg: &TgMessage) {
         .unwrap_or_else(|| format!("Chat {}", chat_id));
 
     let username = msg.chat.username.clone();
-
     let mut config = state.config.lock().await;
 
-    // Update existing or add new
+    // Update existing
     if let Some(existing) = config
         .notifications
         .telegram_chats
@@ -334,38 +413,89 @@ async fn register_chat(state: &AppState, msg: &TgMessage) {
     {
         existing.name = name;
         existing.username = username;
-    } else {
-        config.notifications.telegram_chats.push(TelegramChat {
-            chat_id,
-            name,
-            username,
-            daily_enabled: false,
-            daily_hour: 8,
-            daily_minute: 0,
-        });
+        let _ = save_config(&config).await;
+        return;
     }
 
-    let _ = save_config(&config).await;
+    // First user ever = admin, rest = pendiente
+    let is_first = config.notifications.telegram_chats.is_empty();
+    let role = if is_first {
+        UserRole::Admin
+    } else {
+        UserRole::Pendiente
+    };
+
+    let new_chat = TelegramChat {
+        chat_id,
+        name: name.clone(),
+        username: username.clone(),
+        role: role.clone(),
+        permissions: if is_first {
+            UserPermissions {
+                terminal: true,
+                impresion: true,
+                archivos_escritura: true,
+            }
+        } else {
+            UserPermissions::default()
+        },
+        daily_enabled: false,
+        daily_hour: 8,
+        daily_minute: 0,
+    };
+
+    // Notify admins about new pending user
+    if !is_first {
+        let admins: Vec<i64> = config
+            .notifications
+            .telegram_chats
+            .iter()
+            .filter(|c| c.role == UserRole::Admin)
+            .map(|c| c.chat_id)
+            .collect();
+        let uname = username.as_deref().map(|u| format!(" (@{})", u)).unwrap_or_default();
+        let alert = format!(
+            "Nuevo usuario solicita acceso:\n*{}*{}\n\nApruebalo desde la web en Configuracion > Telegram.",
+            name, uname
+        );
+        drop(config);
+        for admin_id in &admins {
+            let _ = send_telegram_message(&state.http_client, token, *admin_id, &alert).await;
+        }
+        let mut config = state.config.lock().await;
+        config.notifications.telegram_chats.push(new_chat);
+        let _ = save_config(&config).await;
+    } else {
+        config.notifications.telegram_chats.push(new_chat);
+        let _ = save_config(&config).await;
+    }
 }
 
 // =====================
 // Command responses
 // =====================
 
-fn build_help_message() -> String {
-    "*LabNAS - Comandos*\n\n\
-     /estado - Resumen completo del sistema\n\
-     /discos - Uso de discos\n\
-     /ram - Uso de memoria RAM\n\
-     /cpu - Informacion del CPU\n\
-     /uptime - Tiempo encendido\n\
-     /red - Dispositivos en la red\n\
-     /impresoras - Estado de impresoras 3D\n\
-     /actividad - Actividad reciente\n\
-     /horario 08:00 - Reporte diario a esa hora\n\
-     /horario off - Desactivar reporte diario\n\
-     /ayuda - Este mensaje"
-        .to_string()
+fn build_help_message(role: &UserRole) -> String {
+    let mut msg = String::from("*LabNAS - Comandos*\n\n");
+    msg.push_str("/estado - Resumen del sistema\n");
+    msg.push_str("/discos - Uso de discos\n");
+    msg.push_str("/ram - Memoria RAM\n");
+    msg.push_str("/cpu - Procesador\n");
+    msg.push_str("/uptime - Tiempo encendido\n");
+    msg.push_str("/red - Dispositivos en la red\n");
+    msg.push_str("/impresoras - Impresoras 3D\n");
+    msg.push_str("/actividad - Actividad reciente\n");
+    msg.push_str("/horario HH:MM - Reporte diario\n");
+    msg.push_str("/mirol - Ver tu rol y permisos\n");
+
+    let role_name = match role {
+        UserRole::Admin => "Admin",
+        UserRole::Operador => "Operador",
+        UserRole::Observador => "Observador",
+        UserRole::Pendiente => "Pendiente",
+    };
+    msg.push_str(&format!("\nTu rol: *{}*", role_name));
+    msg
 }
 
 async fn handle_schedule_command(state: &AppState, chat_id: i64, text: &str) -> String {

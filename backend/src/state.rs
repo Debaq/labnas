@@ -1,7 +1,9 @@
 use crate::config::LabNasConfig;
 use crate::models::network::NetworkHost;
+use crate::models::notifications::{UserPermissions, UserRole};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, Notify};
@@ -16,6 +18,13 @@ pub struct ActivityEvent {
     pub user: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct SessionInfo {
+    pub username: String,
+    pub role: UserRole,
+    pub permissions: UserPermissions,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub scanned_hosts: Arc<Mutex<Vec<NetworkHost>>>,
@@ -24,6 +33,7 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub shutdown: Arc<Notify>,
     pub activity_log: Arc<Mutex<Vec<ActivityEvent>>>,
+    pub sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
 }
 
 impl AppState {

@@ -1,10 +1,39 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum UserRole {
+    Pendiente,
+    Observador,
+    Operador,
+    Admin,
+}
+
+impl Default for UserRole {
+    fn default() -> Self {
+        Self::Pendiente
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UserPermissions {
+    #[serde(default)]
+    pub terminal: bool,
+    #[serde(default)]
+    pub impresion: bool,
+    #[serde(default)]
+    pub archivos_escritura: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelegramChat {
     pub chat_id: i64,
     pub name: String,
     pub username: Option<String>,
+    #[serde(default)]
+    pub role: UserRole,
+    #[serde(default)]
+    pub permissions: UserPermissions,
     #[serde(default)]
     pub daily_enabled: bool,
     #[serde(default = "default_hour")]
@@ -21,7 +50,6 @@ pub struct NotificationConfig {
     pub bot_username: Option<String>,
     #[serde(default)]
     pub telegram_chats: Vec<TelegramChat>,
-    // Global schedule kept for backward compat / UI toggle
     #[serde(default)]
     pub daily_enabled: bool,
     #[serde(default = "default_hour")]
@@ -57,6 +85,13 @@ pub struct ScheduleRequest {
     pub daily_enabled: bool,
     pub daily_hour: u8,
     pub daily_minute: u8,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetRoleRequest {
+    pub role: UserRole,
+    #[serde(default)]
+    pub permissions: Option<UserPermissions>,
 }
 
 // --- Telegram API types ---

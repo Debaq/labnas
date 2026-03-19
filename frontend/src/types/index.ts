@@ -64,10 +64,20 @@ export interface AutostartStatus {
 
 // --- Notifications (Telegram) ---
 
+export type UserRole = 'pendiente' | 'observador' | 'operador' | 'admin'
+
+export interface UserPermissions {
+  terminal: boolean
+  impresion: boolean
+  archivos_escritura: boolean
+}
+
 export interface TelegramChat {
   chat_id: number
   name: string
   username: string | null
+  role: UserRole
+  permissions: UserPermissions
   daily_enabled: boolean
   daily_hour: number
   daily_minute: number

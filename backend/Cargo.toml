@@ -19,3 +19,4 @@ sysinfo = "0.35"
 portable-pty = "0.9"
 futures-util = "0.3"
 reqwest = { version = "0.12", features = ["json", "multipart"] }
+bcrypt = "0.17"

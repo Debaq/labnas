@@ -1,3 +1,4 @@
+use crate::models::auth::WebUser;
 use crate::models::network::KnownDevice;
 use crate::models::notifications::NotificationConfig;
 use crate::models::printers3d::Printer3DConfig;
@@ -12,6 +13,8 @@ pub struct LabNasConfig {
     pub notifications: NotificationConfig,
     #[serde(default)]
     pub known_devices: Vec<KnownDevice>,
+    #[serde(default)]
+    pub web_users: Vec<WebUser>,
 }
 
 pub fn config_path() -> PathBuf {
@@ -37,10 +40,11 @@ pub async fn load_config() -> LabNasConfig {
     match tokio::fs::read_to_string(&path).await {
         Ok(contents) => {
             let config: LabNasConfig = serde_json::from_str(&contents).unwrap_or_default();
-            println!("[LabNAS] Config cargada ({} impresoras 3D, {} chats Telegram, {} dispositivos conocidos)",
+            println!("[LabNAS] Config cargada ({} impresoras 3D, {} chats Telegram, {} dispositivos conocidos, {} usuarios web)",
                 config.printers3d.len(),
                 config.notifications.telegram_chats.len(),
                 config.known_devices.len(),
+                config.web_users.len(),
             );
             config
         }

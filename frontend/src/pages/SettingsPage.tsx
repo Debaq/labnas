@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users } from 'lucide-react'
+import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, ShieldCheck, ShieldAlert, UserCheck } from 'lucide-react'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, type ThemeName } from '../themes/themes'
-import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule } from '../api'
+import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole } from '../api'
 import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig } from '../types'
 
 function formatBytes(bytes: number): string {
@@ -360,34 +360,121 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {notifConfig.telegram_chats.map((c) => (
-              <div key={c.chat_id} className="flex items-center justify-between py-2" style={{ borderTop: '1px solid var(--border)' }}>
-                <div>
-                  <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{c.name}</span>
-                  {c.username && (
-                    <span className="text-xs font-mono ml-2" style={{ color: 'var(--text-secondary)' }}>@{c.username}</span>
-                  )}
-                  {c.daily_enabled && (
-                    <span className="text-xs ml-2 px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--accent)' + '20', color: 'var(--accent)' }}>
-                      {String(c.daily_hour).padStart(2, '0')}:{String(c.daily_minute).padStart(2, '0')}
-                    </span>
+            {notifConfig.telegram_chats.map((c) => {
+              const roleColor = c.role === 'admin' ? 'var(--accent)' : c.role === 'operador' ? 'var(--success)' : c.role === 'observador' ? 'var(--text-secondary)' : 'var(--warning)'
+              const roleLabel = c.role === 'admin' ? 'Admin' : c.role === 'operador' ? 'Operador' : c.role === 'observador' ? 'Observador' : 'Pendiente'
+              const RoleIcon = c.role === 'pendiente' ? ShieldAlert : ShieldCheck
+
+              return (
+                <div key={c.chat_id} className="py-3 space-y-2" style={{ borderTop: '1px solid var(--border)' }}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <RoleIcon size={14} style={{ color: roleColor }} />
+                      <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{c.name}</span>
+                      {c.username && (
+                        <span className="text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>@{c.username}</span>
+                      )}
+                      <span className="text-xs px-1.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: roleColor + '20', color: roleColor }}>
+                        {roleLabel}
+                      </span>
+                      {c.daily_enabled && (
+                        <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--accent)' + '20', color: 'var(--accent)' }}>
+                          {String(c.daily_hour).padStart(2, '0')}:{String(c.daily_minute).padStart(2, '0')}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await deleteTelegramChat(c.chat_id)
+                          const cfg = await fetchNotificationConfig()
+                          setNotifConfig(cfg)
+                        } catch {}
+                      }}
+                      className="p-1.5 rounded-lg transition-all duration-200 hover:opacity-80"
+                      style={{ color: 'var(--danger)' }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+
+                  {/* Role controls */}
+                  {c.role !== 'admin' && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {c.role === 'pendiente' && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              await setChatRole(c.chat_id, 'observador')
+                              const cfg = await fetchNotificationConfig()
+                              setNotifConfig(cfg)
+                            } catch {}
+                          }}
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium"
+                          style={{ color: 'var(--success)', border: '1px solid var(--success)' }}
+                        >
+                          <UserCheck size={12} />
+                          Aprobar
+                        </button>
+                      )}
+                      <select
+                        value={c.role}
+                        onChange={async (e) => {
+                          try {
+                            await setChatRole(c.chat_id, e.target.value, c.permissions)
+                            const cfg = await fetchNotificationConfig()
+                            setNotifConfig(cfg)
+                          } catch {}
+                        }}
+                        className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer"
+                        style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                      >
+                        <option value="pendiente">Pendiente</option>
+                        <option value="observador">Observador</option>
+                        <option value="operador">Operador</option>
+                      </select>
+                      {(c.role === 'operador') && (
+                        <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                          <label className="flex items-center gap-1 cursor-pointer">
+                            <input type="checkbox" checked={c.permissions.terminal}
+                              onChange={async (e) => {
+                                try {
+                                  await setChatRole(c.chat_id, c.role, { ...c.permissions, terminal: e.target.checked })
+                                  const cfg = await fetchNotificationConfig()
+                                  setNotifConfig(cfg)
+                                } catch {}
+                              }} />
+                            Terminal
+                          </label>
+                          <label className="flex items-center gap-1 cursor-pointer">
+                            <input type="checkbox" checked={c.permissions.impresion}
+                              onChange={async (e) => {
+                                try {
+                                  await setChatRole(c.chat_id, c.role, { ...c.permissions, impresion: e.target.checked })
+                                  const cfg = await fetchNotificationConfig()
+                                  setNotifConfig(cfg)
+                                } catch {}
+                              }} />
+                            Impresion
+                          </label>
+                          <label className="flex items-center gap-1 cursor-pointer">
+                            <input type="checkbox" checked={c.permissions.archivos_escritura}
+                              onChange={async (e) => {
+                                try {
+                                  await setChatRole(c.chat_id, c.role, { ...c.permissions, archivos_escritura: e.target.checked })
+                                  const cfg = await fetchNotificationConfig()
+                                  setNotifConfig(cfg)
+                                } catch {}
+                              }} />
+                            Archivos
+                          </label>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
-                <button
-                  onClick={async () => {
-                    try {
-                      await deleteTelegramChat(c.chat_id)
-                      const cfg = await fetchNotificationConfig()
-                      setNotifConfig(cfg)
-                    } catch {}
-                  }}
-                  className="p-1.5 rounded-lg transition-all duration-200 hover:opacity-80"
-                  style={{ color: 'var(--danger)' }}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
+              )
+            })}
 
             {/* Available commands reference */}
             <div className="pt-3" style={{ borderTop: '1px solid var(--border)' }}>

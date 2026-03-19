@@ -189,6 +189,15 @@ export async function deleteBotToken(): Promise<void> {
   if (!res.ok) throw new Error('Error al eliminar bot')
 }
 
+export async function setChatRole(chatId: number, role: string, permissions?: import('../types').UserPermissions): Promise<void> {
+  const res = await fetch(`/api/notifications/telegram/chat/${chatId}/role`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role, permissions }),
+  })
+  if (!res.ok) throw new Error('Error al cambiar rol')
+}
+
 export async function deleteTelegramChat(chatId: number): Promise<void> {
   const res = await fetch(`/api/notifications/telegram/chat/${chatId}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar chat')
@@ -206,6 +215,28 @@ export async function setNotificationSchedule(schedule: { daily_enabled: boolean
     body: JSON.stringify(schedule),
   })
   if (!res.ok) throw new Error('Error al configurar horario')
+}
+
+// --- Web Users ---
+
+export async function fetchWebUsers(): Promise<{ username: string; role: import('../types').UserRole; permissions: import('../types').UserPermissions }[]> {
+  const res = await fetch('/api/auth/users')
+  if (!res.ok) throw new Error('Error al obtener usuarios')
+  return res.json()
+}
+
+export async function setWebUserRole(username: string, role: string, permissions?: import('../types').UserPermissions): Promise<void> {
+  const res = await fetch(`/api/auth/users/${encodeURIComponent(username)}/role`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role, permissions }),
+  })
+  if (!res.ok) throw new Error('Error al cambiar rol')
+}
+
+export async function deleteWebUser(username: string): Promise<void> {
+  const res = await fetch(`/api/auth/users/${encodeURIComponent(username)}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar usuario')
 }
 
 // --- CUPS Printing ---
