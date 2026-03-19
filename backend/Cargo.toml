@@ -1,0 +1,21 @@
+[package]
+name = "labnas-backend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.8", features = ["multipart", "ws"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+tower = { version = "0.5", features = ["util"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+surge-ping = "0.8"
+local-ip-address = "0.6"
+dns-lookup = "2"
+sysinfo = "0.35"
+portable-pty = "0.9"
+futures-util = "0.3"
+reqwest = { version = "0.12", features = ["json", "multipart"] }

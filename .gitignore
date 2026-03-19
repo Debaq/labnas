@@ -1,0 +1,24 @@
+# Rust
+backend/target/
+backend/**/*.rs.bk
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# Storage
+storage/
