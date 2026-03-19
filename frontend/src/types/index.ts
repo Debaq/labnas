@@ -140,11 +140,17 @@ export interface CupsPrintJob {
   size: string | null
 }
 
+export interface PrinterOption {
+  key: string
+  display_name: string
+  default_value: string
+  values: string[]
+}
+
 export interface PrintFileRequest {
   path: string
   printer: string
   copies?: number
-  orientation?: string
-  double_sided?: boolean
   pages?: string
+  options: Record<string, string>
 }

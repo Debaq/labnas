@@ -7,14 +7,20 @@ import {
   FileText,
   Trash2,
   RefreshCw,
+  Settings2,
+  Play,
+  Pause,
 } from 'lucide-react'
 import {
   fetchCupsPrinters,
+  fetchPrinterOptions,
   fetchPrintJobs,
   printFileUpload,
   cancelPrintJob,
+  enablePrinter,
+  disablePrinter,
 } from '../api'
-import type { CupsPrinter, CupsPrintJob } from '../types'
+import type { CupsPrinter, CupsPrintJob, PrinterOption } from '../types'
 
 export default function PrintingPage() {
   const [printers, setPrinters] = useState<CupsPrinter[]>([])
@@ -28,9 +34,12 @@ export default function PrintingPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [selectedPrinter, setSelectedPrinter] = useState('')
   const [copies, setCopies] = useState(1)
-  const [orientation, setOrientation] = useState('portrait')
-  const [doubleSided, setDoubleSided] = useState(false)
   const [pages, setPages] = useState('')
+
+  // Dynamic printer options
+  const [printerOptions, setPrinterOptions] = useState<PrinterOption[]>([])
+  const [optionValues, setOptionValues] = useState<Record<string, string>>({})
+  const [optionsLoading, setOptionsLoading] = useState(false)
 
   // Drag & drop
   const [dragOver, setDragOver] = useState(false)
@@ -60,28 +69,62 @@ export default function PrintingPage() {
     }
   }
 
+  async function loadPrinterOptions(printerName: string) {
+    setOptionsLoading(true)
+    try {
+      const opts = await fetchPrinterOptions(printerName)
+      setPrinterOptions(opts)
+      // Set defaults
+      const defaults: Record<string, string> = {}
+      for (const opt of opts) {
+        defaults[opt.key] = opt.default_value
+      }
+      setOptionValues(defaults)
+    } catch {
+      setPrinterOptions([])
+      setOptionValues({})
+    } finally {
+      setOptionsLoading(false)
+    }
+  }
+
   function openPrintModal(file: File) {
     setSelectedFile(file)
     setCopies(1)
-    setOrientation('portrait')
-    setDoubleSided(false)
     setPages('')
     setShowModal(true)
+    if (selectedPrinter) {
+      loadPrinterOptions(selectedPrinter)
+    }
+  }
+
+  function handlePrinterChange(name: string) {
+    setSelectedPrinter(name)
+    if (showModal) {
+      loadPrinterOptions(name)
+    }
   }
 
   async function handlePrint() {
     if (!selectedFile || !selectedPrinter) return
     setPrinting(true)
     try {
+      // Only send options that differ from defaults
+      const changedOptions: Record<string, string> = {}
+      for (const opt of printerOptions) {
+        const current = optionValues[opt.key]
+        if (current && current !== opt.default_value) {
+          changedOptions[opt.key] = current
+        }
+      }
+
       await printFileUpload(selectedFile, selectedPrinter, {
         copies,
-        orientation,
-        double_sided: doubleSided,
         pages: pages || undefined,
+        options: changedOptions,
       })
       setShowModal(false)
       setSelectedFile(null)
-      // Refresh jobs
       const j = await fetchPrintJobs()
       setJobs(j)
     } catch (err) {
@@ -215,6 +258,37 @@ export default function PrintingPage() {
                   <span className="text-xs font-mono ml-auto" style={{ color: 'var(--text-secondary)' }}>
                     {p.name}
                   </span>
+                  {p.state === 'disabled' ? (
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation()
+                        try {
+                          await enablePrinter(p.name)
+                          await loadData()
+                        } catch {}
+                      }}
+                      className="p-1 rounded-lg transition-all duration-200 hover:opacity-80"
+                      style={{ color: 'var(--success)' }}
+                      title="Reanudar impresora"
+                    >
+                      <Play size={14} />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation()
+                        try {
+                          await disablePrinter(p.name)
+                          await loadData()
+                        } catch {}
+                      }}
+                      className="p-1 rounded-lg transition-all duration-200 hover:opacity-80"
+                      style={{ color: 'var(--text-secondary)' }}
+                      title="Pausar impresora"
+                    >
+                      <Pause size={14} />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -304,7 +378,7 @@ export default function PrintingPage() {
       {showModal && selectedFile && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div
-            className="rounded-xl p-6 w-full max-w-md mx-4"
+            className="rounded-xl p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto"
             style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
           >
             <div className="flex items-center justify-between mb-6">
@@ -316,6 +390,7 @@ export default function PrintingPage() {
               </button>
             </div>
 
+            {/* File info */}
             <div className="rounded-lg p-3 mb-4" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
               <div className="flex items-center gap-2">
                 <FileText size={16} style={{ color: 'var(--accent)' }} />
@@ -326,11 +401,12 @@ export default function PrintingPage() {
             </div>
 
             <div className="space-y-4">
+              {/* Printer selector */}
               <div>
                 <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Impresora</label>
                 <select
                   value={selectedPrinter}
-                  onChange={(e) => setSelectedPrinter(e.target.value)}
+                  onChange={(e) => handlePrinterChange(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
                   style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
                 >
@@ -341,6 +417,8 @@ export default function PrintingPage() {
                   ))}
                 </select>
               </div>
+
+              {/* Copies & Pages */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Copias</label>
@@ -355,43 +433,58 @@ export default function PrintingPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Orientacion</label>
-                  <select
-                    value={orientation}
-                    onChange={(e) => setOrientation(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Paginas</label>
+                  <input
+                    type="text"
+                    value={pages}
+                    onChange={(e) => setPages(e.target.value)}
+                    placeholder="Todas"
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none"
                     style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
-                  >
-                    <option value="portrait">Vertical</option>
-                    <option value="landscape">Horizontal</option>
-                  </select>
+                  />
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  id="doubleSided"
-                  checked={doubleSided}
-                  onChange={(e) => setDoubleSided(e.target.checked)}
-                  className="rounded"
-                />
-                <label htmlFor="doubleSided" className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                  Doble cara
-                </label>
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Paginas (opcional)</label>
-                <input
-                  type="text"
-                  value={pages}
-                  onChange={(e) => setPages(e.target.value)}
-                  placeholder="ej: 1-5, 8, 10-12"
-                  className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-                  style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
-                />
-              </div>
+
+              {/* Dynamic printer options */}
+              {optionsLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 size={18} className="animate-spin" style={{ color: 'var(--accent)' }} />
+                  <span className="text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>Cargando opciones...</span>
+                </div>
+              ) : printerOptions.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-3 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+                    <Settings2 size={14} style={{ color: 'var(--accent)' }} />
+                    <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+                      Opciones de la impresora
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {printerOptions.map((opt) => (
+                      <div key={opt.key}>
+                        <label className="block text-xs font-medium mb-1 truncate" title={opt.display_name} style={{ color: 'var(--text-secondary)' }}>
+                          {opt.display_name}
+                        </label>
+                        <select
+                          value={optionValues[opt.key] || opt.default_value}
+                          onChange={(e) => setOptionValues(prev => ({ ...prev, [opt.key]: e.target.value }))}
+                          className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
+                          style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                        >
+                          {opt.values.map((v) => (
+                            <option key={v} value={v}>
+                              {v}{v === opt.default_value ? ' *' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
+            {/* Actions */}
             <div className="flex items-center justify-end gap-3 mt-6">
               <button
                 onClick={() => setShowModal(false)}

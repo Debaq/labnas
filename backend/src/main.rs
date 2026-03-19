@@ -64,6 +64,9 @@ async fn main() {
         .route("/api/printers3d/{id}/upload", post(handlers::printers3d::upload_gcode))
         // CUPS Printing
         .route("/api/printing/printers", get(handlers::printing::list_printers))
+        .route("/api/printing/printers/{name}/options", get(handlers::printing::printer_options))
+        .route("/api/printing/printers/{name}/enable", post(handlers::printing::enable_printer))
+        .route("/api/printing/printers/{name}/disable", post(handlers::printing::disable_printer))
         .route("/api/printing/print", post(handlers::printing::print_upload))
         .route("/api/printing/print-file", post(handlers::printing::print_file_path))
         .route("/api/printing/jobs", get(handlers::printing::list_jobs))

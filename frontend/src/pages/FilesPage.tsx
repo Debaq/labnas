@@ -26,10 +26,11 @@ import {
   Trash,
   Printer,
   X,
+  Settings2,
   type LucideIcon,
 } from 'lucide-react'
-import { fetchFiles, uploadFile, downloadFile, deleteFile, createDirectory, fetchQuickAccess, fetchCupsPrinters, printFilePath } from '../api'
-import type { FileEntry, QuickAccess, CupsPrinter } from '../types'
+import { fetchFiles, uploadFile, downloadFile, deleteFile, createDirectory, fetchQuickAccess, fetchCupsPrinters, fetchPrinterOptions, printFilePath } from '../api'
+import type { FileEntry, QuickAccess, CupsPrinter, PrinterOption } from '../types'
 
 const iconMap: Record<string, LucideIcon> = {
   home: Home,
@@ -98,7 +99,11 @@ export default function FilesPage() {
   const [printModal, setPrintModal] = useState<{ path: string; name: string } | null>(null)
   const [printPrinter, setPrintPrinter] = useState('')
   const [printCopies, setPrintCopies] = useState(1)
+  const [printPages, setPrintPages] = useState('')
   const [printingFile, setPrintingFile] = useState(false)
+  const [printerOptions, setPrinterOptions] = useState<PrinterOption[]>([])
+  const [optionValues, setOptionValues] = useState<Record<string, string>>({})
+  const [optionsLoading, setOptionsLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -180,6 +185,22 @@ export default function FilesPage() {
     }
   }
 
+  async function loadPrinterOptions(printerName: string) {
+    setOptionsLoading(true)
+    try {
+      const opts = await fetchPrinterOptions(printerName)
+      setPrinterOptions(opts)
+      const defaults: Record<string, string> = {}
+      for (const opt of opts) defaults[opt.key] = opt.default_value
+      setOptionValues(defaults)
+    } catch {
+      setPrinterOptions([])
+      setOptionValues({})
+    } finally {
+      setOptionsLoading(false)
+    }
+  }
+
   const printableExts = ['pdf', 'ps', 'eps', 'txt', 'text', 'log', 'png', 'jpg', 'jpeg', 'gif', 'tiff', 'tif', 'bmp', 'svg']
 
   function isPrintable(entry: FileEntry): boolean {
@@ -192,10 +213,19 @@ export default function FilesPage() {
     if (!printModal || !printPrinter) return
     setPrintingFile(true)
     try {
+      const changedOptions: Record<string, string> = {}
+      for (const opt of printerOptions) {
+        const current = optionValues[opt.key]
+        if (current && current !== opt.default_value) {
+          changedOptions[opt.key] = current
+        }
+      }
       await printFilePath({
         path: printModal.path,
         printer: printPrinter,
         copies: printCopies,
+        pages: printPages || undefined,
+        options: changedOptions,
       })
       setPrintModal(null)
     } catch (err) {
@@ -444,7 +474,7 @@ export default function FilesPage() {
                       )}
                       {isPrintable(entry) && cupsPrinters.length > 0 && (
                         <button
-                          onClick={(e) => { e.stopPropagation(); setPrintModal({ path: entry.path, name: entry.name }); setPrintCopies(1) }}
+                          onClick={(e) => { e.stopPropagation(); setPrintModal({ path: entry.path, name: entry.name }); setPrintCopies(1); setPrintPages(''); if (printPrinter) loadPrinterOptions(printPrinter) }}
                           className="p-1.5 rounded-lg transition-all duration-200 hover:opacity-80"
                           style={{ color: 'var(--accent)' }}
                           title="Imprimir"
@@ -472,7 +502,7 @@ export default function FilesPage() {
       {printModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div
-            className="rounded-xl p-6 w-full max-w-sm mx-4"
+            className="rounded-xl p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto"
             style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
           >
             <div className="flex items-center justify-between mb-4">
@@ -487,7 +517,7 @@ export default function FilesPage() {
                 <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Impresora</label>
                 <select
                   value={printPrinter}
-                  onChange={(e) => setPrintPrinter(e.target.value)}
+                  onChange={(e) => { setPrintPrinter(e.target.value); loadPrinterOptions(e.target.value) }}
                   className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
                   style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
                 >
@@ -496,18 +526,65 @@ export default function FilesPage() {
                   ))}
                 </select>
               </div>
-              <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Copias</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={printCopies}
-                  onChange={(e) => setPrintCopies(parseInt(e.target.value) || 1)}
-                  className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-                  style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Copias</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={printCopies}
+                    onChange={(e) => setPrintCopies(parseInt(e.target.value) || 1)}
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                    style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Paginas</label>
+                  <input
+                    type="text"
+                    value={printPages}
+                    onChange={(e) => setPrintPages(e.target.value)}
+                    placeholder="Todas"
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                    style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                  />
+                </div>
               </div>
+
+              {/* Dynamic printer options */}
+              {optionsLoading ? (
+                <div className="flex items-center justify-center py-3">
+                  <Loader2 size={16} className="animate-spin" style={{ color: 'var(--accent)' }} />
+                  <span className="text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>Cargando opciones...</span>
+                </div>
+              ) : printerOptions.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+                    <Settings2 size={14} style={{ color: 'var(--accent)' }} />
+                    <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>Opciones de la impresora</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {printerOptions.map((opt) => (
+                      <div key={opt.key}>
+                        <label className="block text-xs font-medium mb-1 truncate" title={opt.display_name} style={{ color: 'var(--text-secondary)' }}>
+                          {opt.display_name}
+                        </label>
+                        <select
+                          value={optionValues[opt.key] || opt.default_value}
+                          onChange={(e) => setOptionValues(prev => ({ ...prev, [opt.key]: e.target.value }))}
+                          className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
+                          style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                        >
+                          {opt.values.map((v) => (
+                            <option key={v} value={v}>{v}{v === opt.default_value ? ' *' : ''}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex items-center justify-end gap-3 mt-5">
               <button

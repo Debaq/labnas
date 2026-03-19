@@ -202,19 +202,37 @@ export async function fetchCupsPrinters(): Promise<CupsPrinter[]> {
   return res.json()
 }
 
-export async function printFileUpload(file: File, printer: string, options?: {
+export async function enablePrinter(name: string): Promise<void> {
+  const res = await fetch(`/api/printing/printers/${encodeURIComponent(name)}/enable`, { method: 'POST' })
+  if (!res.ok) throw new Error('Error al habilitar impresora')
+}
+
+export async function disablePrinter(name: string): Promise<void> {
+  const res = await fetch(`/api/printing/printers/${encodeURIComponent(name)}/disable`, { method: 'POST' })
+  if (!res.ok) throw new Error('Error al deshabilitar impresora')
+}
+
+export async function fetchPrinterOptions(name: string): Promise<import('../types').PrinterOption[]> {
+  const res = await fetch(`/api/printing/printers/${encodeURIComponent(name)}/options`)
+  if (!res.ok) throw new Error('Error al obtener opciones de impresora')
+  return res.json()
+}
+
+export async function printFileUpload(file: File, printer: string, opts?: {
   copies?: number
-  orientation?: string
-  double_sided?: boolean
   pages?: string
+  options?: Record<string, string>
 }): Promise<void> {
   const formData = new FormData()
   formData.append('file', file)
   formData.append('printer', printer)
-  if (options?.copies) formData.append('copies', options.copies.toString())
-  if (options?.orientation) formData.append('orientation', options.orientation)
-  if (options?.double_sided) formData.append('double_sided', options.double_sided.toString())
-  if (options?.pages) formData.append('pages', options.pages)
+  if (opts?.copies) formData.append('copies', opts.copies.toString())
+  if (opts?.pages) formData.append('pages', opts.pages)
+  if (opts?.options) {
+    for (const [key, value] of Object.entries(opts.options)) {
+      formData.append(`opt_${key}`, value)
+    }
+  }
   const res = await fetch('/api/printing/print', {
     method: 'POST',
     body: formData,

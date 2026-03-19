@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CupsPrinter {
@@ -17,12 +18,20 @@ pub struct CupsPrintJob {
     pub size: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PrinterOption {
+    pub key: String,
+    pub display_name: String,
+    pub default_value: String,
+    pub values: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct PrintFileRequest {
     pub path: String,
     pub printer: String,
     pub copies: Option<u32>,
-    pub orientation: Option<String>,
-    pub double_sided: Option<bool>,
     pub pages: Option<String>,
+    #[serde(default)]
+    pub options: HashMap<String, String>,
 }

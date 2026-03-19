@@ -86,18 +86,22 @@ backend/src/
 | Ruta | Metodo | Funcion |
 |------|--------|---------|
 | `/api/printing/printers` | GET | Listar impresoras CUPS |
+| `/api/printing/printers/{name}/options` | GET | Opciones dinamicas de la impresora (via lpoptions -l) |
+| `/api/printing/printers/{name}/enable` | POST | Reanudar impresora pausada (cupsenable) |
+| `/api/printing/printers/{name}/disable` | POST | Pausar impresora (cupsdisable) |
 | `/api/printing/print` | POST | Imprimir archivo (multipart + opciones) |
+| `/api/printing/print-file` | POST | Imprimir archivo por ruta del servidor |
 | `/api/printing/jobs` | GET | Cola de impresion |
 | `/api/printing/jobs/{id}` | DELETE | Cancelar trabajo |
 
-**Structs:** `CupsPrinter` (name, description, is_default, state), `CupsPrintJob`, `PrintRequest` (printer, copies, orientation, double_sided, pages)
+**Structs:** `CupsPrinter` (name, description, is_default, state), `CupsPrintJob`, `PrinterOption` (key, display_name, default_value, values), `PrintFileRequest` (printer, copies, pages, options: HashMap)
 
 ### Frontend
 
 **Nueva pagina `PrintingPage.tsx`:**
 - Tarjetas de impresoras CUPS detectadas con estado
 - Zona de drag & drop para arrastrar archivos
-- Al soltar: modal con opciones (impresora, copias, orientacion, doble cara, rango paginas)
+- Al soltar: modal con opciones dinamicas de la impresora (tamano papel, calidad, color, duplex, etc. via lpoptions)
 - Cola de impresion con boton cancelar
 
 **Modificar `FilesPage.tsx`:** Boton "Imprimir" en acciones de archivos imprimibles (pdf, doc, txt, png, jpg, etc.)

@@ -27,5 +27,8 @@ storage/
 # Config con posibles API keys
 .labnas/
 
+# Release builds
+release/
+
 # Claude
 .claude/
