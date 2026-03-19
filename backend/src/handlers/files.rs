@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Multipart, Query},
+    extract::{Multipart, Query, State},
     http::{header, StatusCode},
     response::IntoResponse,
     Json,
@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use std::path::PathBuf;
 
 use crate::models::files::{FileEntry, MkdirRequest, PathQuery, QuickAccess};
+use crate::state::AppState;
 
 const PROTECTED_PATHS: &[&str] = &[
     "/", "/bin", "/sbin", "/usr", "/etc", "/boot", "/dev", "/proc", "/sys", "/lib", "/lib64",
@@ -96,6 +97,7 @@ pub async fn list_files(
 }
 
 pub async fn upload_file(
+    State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
     let mut dest_path: Option<String> = None;
@@ -155,6 +157,8 @@ pub async fn upload_file(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    state.log_activity("Subida", &format!("{}", file_path.display()), "web").await;
+
     Ok((
         StatusCode::CREATED,
         format!("Archivo '{}' subido correctamente", file_name),
@@ -205,6 +209,7 @@ pub async fn download_file(
 }
 
 pub async fn delete_file(
+    State(state): State<AppState>,
     Query(query): Query<PathQuery>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let path = query.path.ok_or((
@@ -238,16 +243,19 @@ pub async fn delete_file(
         tokio::fs::remove_dir_all(&target)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        state.log_activity("Eliminado", &format!("Carpeta: {}", path), "web").await;
     } else {
         tokio::fs::remove_file(&target)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        state.log_activity("Eliminado", &path, "web").await;
     }
 
     Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn create_directory(
+    State(state): State<AppState>,
     Json(body): Json<MkdirRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let target = PathBuf::from(&body.path);
@@ -262,6 +270,8 @@ pub async fn create_directory(
     tokio::fs::create_dir_all(&target)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    state.log_activity("Carpeta", &body.path, "web").await;
 
     Ok(StatusCode::CREATED)
 }

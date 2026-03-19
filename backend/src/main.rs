@@ -27,6 +27,7 @@ async fn main() {
         config: Arc::new(Mutex::new(config)),
         http_client: reqwest::Client::new(),
         shutdown: shutdown.clone(),
+        activity_log: Arc::new(Mutex::new(Vec::new())),
     };
 
     let cors = CorsLayer::new()

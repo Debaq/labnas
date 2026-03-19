@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Multipart, Path},
+    extract::{Multipart, Path, State},
     http::StatusCode,
     Json,
 };
@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use tokio::process::Command;
 
 use crate::models::printing::{CupsPrintJob, CupsPrinter, PrintFileRequest, PrinterOption};
+use crate::state::AppState;
 
 // Formatos que CUPS imprime bien nativamente (sin conversion)
 const PRINTABLE_EXTENSIONS: &[&str] = &[
@@ -198,6 +199,7 @@ pub async fn printer_options(
 // --- Print upload ---
 
 pub async fn print_upload(
+    State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
     let mut printer: Option<String> = None;
@@ -279,6 +281,10 @@ pub async fn print_upload(
     let result = run_lp_command(&printer_name, &tmp_file, copies, pages, &lp_options).await;
 
     let _ = tokio::fs::remove_dir_all(&tmp_path).await;
+
+    if result.is_ok() {
+        state.log_activity("Impresion", &format!("{} en {}", file_name, printer_name), "web").await;
+    }
 
     result
 }

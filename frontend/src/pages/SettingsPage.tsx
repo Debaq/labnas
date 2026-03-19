@@ -367,6 +367,11 @@ export default function SettingsPage() {
                   {c.username && (
                     <span className="text-xs font-mono ml-2" style={{ color: 'var(--text-secondary)' }}>@{c.username}</span>
                   )}
+                  {c.daily_enabled && (
+                    <span className="text-xs ml-2 px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--accent)' + '20', color: 'var(--accent)' }}>
+                      {String(c.daily_hour).padStart(2, '0')}:{String(c.daily_minute).padStart(2, '0')}
+                    </span>
+                  )}
                 </div>
                 <button
                   onClick={async () => {
@@ -388,7 +393,7 @@ export default function SettingsPage() {
             <div className="pt-3" style={{ borderTop: '1px solid var(--border)' }}>
               <p className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Comandos disponibles en el bot:</p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                {['/estado', '/discos', '/ram', '/cpu', '/uptime', '/red', '/impresoras', '/ayuda'].map((cmd) => (
+                {['/estado', '/discos', '/ram', '/cpu', '/uptime', '/red', '/impresoras', '/actividad', '/horario', '/ayuda'].map((cmd) => (
                   <span key={cmd} className="text-xs font-mono px-2 py-1 rounded text-center" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--accent)' }}>
                     {cmd}
                   </span>

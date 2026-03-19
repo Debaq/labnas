@@ -136,6 +136,10 @@ pub async fn scan_network(
     let mut stored = state.scanned_hosts.lock().await;
     *stored = hosts.clone();
 
+    let active = hosts.iter().filter(|h| h.is_alive).count();
+    let unknown = hosts.iter().filter(|h| !h.is_known && h.mac.is_some()).count();
+    state.log_activity("Escaneo", &format!("{} activos, {} desconocidos", active, unknown), "web").await;
+
     Ok(Json(hosts))
 }
 

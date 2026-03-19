@@ -5,6 +5,12 @@ pub struct TelegramChat {
     pub chat_id: i64,
     pub name: String,
     pub username: Option<String>,
+    #[serde(default)]
+    pub daily_enabled: bool,
+    #[serde(default = "default_hour")]
+    pub daily_hour: u8,
+    #[serde(default)]
+    pub daily_minute: u8,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +21,7 @@ pub struct NotificationConfig {
     pub bot_username: Option<String>,
     #[serde(default)]
     pub telegram_chats: Vec<TelegramChat>,
+    // Global schedule kept for backward compat / UI toggle
     #[serde(default)]
     pub daily_enabled: bool,
     #[serde(default = "default_hour")]
@@ -52,7 +59,7 @@ pub struct ScheduleRequest {
     pub daily_minute: u8,
 }
 
-// --- Telegram API types (for deserializing responses) ---
+// --- Telegram API types ---
 
 #[derive(Debug, Deserialize)]
 pub struct TgResponse<T> {
@@ -73,7 +80,6 @@ pub struct TgMessage {
     pub text: Option<String>,
 }
 
-
 #[derive(Debug, Deserialize)]
 pub struct TgChat {
     pub id: i64,
@@ -82,7 +88,6 @@ pub struct TgChat {
     pub username: Option<String>,
     pub title: Option<String>,
 }
-
 
 #[derive(Debug, Deserialize)]
 pub struct TgBotInfo {

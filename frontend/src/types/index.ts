@@ -68,6 +68,9 @@ export interface TelegramChat {
   chat_id: number
   name: string
   username: string | null
+  daily_enabled: boolean
+  daily_hour: number
+  daily_minute: number
 }
 
 export interface NotificationConfig {

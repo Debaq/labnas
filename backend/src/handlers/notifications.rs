@@ -214,16 +214,46 @@ async fn get_updates(
 
 pub async fn telegram_bot_loop(state: AppState) {
     let mut offset: i64 = 0;
+    let mut startup_sent = false;
 
     loop {
         let config = state.config.lock().await;
         let token = config.notifications.bot_token.clone();
+        let chats = config.notifications.telegram_chats.clone();
         drop(config);
 
         let Some(token) = token else {
             tokio::time::sleep(Duration::from_secs(5)).await;
             continue;
         };
+
+        // Send startup greeting once (retries if no internet)
+        if !startup_sent && !chats.is_empty() {
+            let local_ip = local_ip_address::local_ip()
+                .map(|ip| ip.to_string())
+                .unwrap_or_else(|_| "?".to_string());
+            let msg = format!(
+                "*LabNAS encendido*\n\nIP: `{}`\nWeb: http://{}:3001\n\nUsa /ayuda para ver comandos.",
+                local_ip, local_ip
+            );
+            let mut all_ok = true;
+            for chat in &chats {
+                if send_telegram_message(&state.http_client, &token, chat.chat_id, &msg).await.is_err() {
+                    all_ok = false;
+                }
+            }
+            if all_ok {
+                startup_sent = true;
+                println!("[Telegram] Saludo de inicio enviado");
+                state.log_activity("Sistema", "LabNAS encendido", "sistema").await;
+            } else {
+                eprintln!("[Telegram] Sin internet, reintentando saludo en 15s...");
+                tokio::time::sleep(Duration::from_secs(15)).await;
+                continue;
+            }
+        } else if chats.is_empty() {
+            startup_sent = true; // No chats, skip greeting
+        }
 
         match get_updates(&state.http_client, &token, offset).await {
             Ok(updates) => {
@@ -236,7 +266,7 @@ pub async fn telegram_bot_loop(state: AppState) {
             }
             Err(e) => {
                 eprintln!("[Telegram] Error polling: {}", e);
-                tokio::time::sleep(Duration::from_secs(10)).await;
+                tokio::time::sleep(Duration::from_secs(15)).await;
             }
         }
     }
@@ -253,6 +283,8 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
              Usa /ayuda para ver los comandos disponibles."
                 .to_string()
         }
+        s if s.starts_with("/horario") => handle_schedule_command(state, chat_id, s).await,
+        s if s.starts_with("/actividad") => build_activity_message(state).await,
         s if s.starts_with("/estado") => build_status_message(state).await,
         s if s.starts_with("/discos") => build_disks_message().await,
         s if s.starts_with("/ram") => build_ram_message().await,
@@ -261,7 +293,7 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
         s if s.starts_with("/red") => build_network_message(state).await,
         s if s.starts_with("/impresoras") => build_printers_message(state).await,
         s if s.starts_with("/ayuda") | s.starts_with("/help") => build_help_message(),
-        _ => return, // Ignore non-command messages
+        _ => return,
     };
 
     if let Err(e) =
@@ -307,6 +339,9 @@ async fn register_chat(state: &AppState, msg: &TgMessage) {
             chat_id,
             name,
             username,
+            daily_enabled: false,
+            daily_hour: 8,
+            daily_minute: 0,
         });
     }
 
@@ -326,8 +361,83 @@ fn build_help_message() -> String {
      /uptime - Tiempo encendido\n\
      /red - Dispositivos en la red\n\
      /impresoras - Estado de impresoras 3D\n\
+     /actividad - Actividad reciente\n\
+     /horario 08:00 - Reporte diario a esa hora\n\
+     /horario off - Desactivar reporte diario\n\
      /ayuda - Este mensaje"
         .to_string()
+}
+
+async fn handle_schedule_command(state: &AppState, chat_id: i64, text: &str) -> String {
+    let arg = text.strip_prefix("/horario").unwrap_or("").trim();
+
+    if arg.is_empty() {
+        // Show current schedule
+        let config = state.config.lock().await;
+        if let Some(chat) = config.notifications.telegram_chats.iter().find(|c| c.chat_id == chat_id) {
+            if chat.daily_enabled {
+                return format!("Tu reporte diario esta a las *{:02}:{:02}*\n\nUsa `/horario HH:MM` para cambiar o `/horario off` para desactivar.", chat.daily_hour, chat.daily_minute);
+            } else {
+                return "Tu reporte diario esta *desactivado*.\n\nUsa `/horario HH:MM` para activar (ej: `/horario 08:00`).".to_string();
+            }
+        }
+        return "No estas registrado. Envia /start primero.".to_string();
+    }
+
+    if arg == "off" {
+        let mut config = state.config.lock().await;
+        if let Some(chat) = config.notifications.telegram_chats.iter_mut().find(|c| c.chat_id == chat_id) {
+            chat.daily_enabled = false;
+            let _ = save_config(&config).await;
+            return "Reporte diario *desactivado*.".to_string();
+        }
+        return "No estas registrado. Envia /start primero.".to_string();
+    }
+
+    // Parse HH:MM
+    let parts: Vec<&str> = arg.split(':').collect();
+    if parts.len() != 2 {
+        return "Formato: `/horario HH:MM` (ej: `/horario 08:30`)\nPara desactivar: `/horario off`".to_string();
+    }
+
+    let hour: u8 = match parts[0].parse() {
+        Ok(h) if h <= 23 => h,
+        _ => return "Hora invalida (0-23)".to_string(),
+    };
+    let minute: u8 = match parts[1].parse() {
+        Ok(m) if m <= 59 => m,
+        _ => return "Minuto invalido (0-59)".to_string(),
+    };
+
+    let mut config = state.config.lock().await;
+    if let Some(chat) = config.notifications.telegram_chats.iter_mut().find(|c| c.chat_id == chat_id) {
+        chat.daily_enabled = true;
+        chat.daily_hour = hour;
+        chat.daily_minute = minute;
+        let _ = save_config(&config).await;
+        format!("Reporte diario activado a las *{:02}:{:02}*", hour, minute)
+    } else {
+        "No estas registrado. Envia /start primero.".to_string()
+    }
+}
+
+async fn build_activity_message(state: &AppState) -> String {
+    let log = state.activity_log.lock().await;
+
+    if log.is_empty() {
+        return "*Actividad*\n\nNo hay actividad registrada aun.".to_string();
+    }
+
+    let mut msg = String::from("*Actividad reciente*\n");
+    // Show last 15 events
+    let start = if log.len() > 15 { log.len() - 15 } else { 0 };
+
+    for event in &log[start..] {
+        let time = event.timestamp.with_timezone(&chrono::Local).format("%H:%M");
+        msg.push_str(&format!("\n`{}` {} - {}", time, event.action, event.details));
+    }
+
+    msg
 }
 
 pub async fn build_status_message(state: &AppState) -> String {
@@ -575,49 +685,45 @@ fn format_bytes(bytes: u64) -> String {
 // =====================
 
 pub async fn daily_notification_loop(state: AppState) {
-    let mut last_sent_date: Option<chrono::NaiveDate> = None;
+    // Track last sent date per chat_id
+    let mut last_sent: std::collections::HashMap<i64, chrono::NaiveDate> = std::collections::HashMap::new();
 
     loop {
         tokio::time::sleep(Duration::from_secs(30)).await;
 
         let config = state.config.lock().await;
-        let notif = config.notifications.clone();
-        drop(config);
-
-        if !notif.daily_enabled || notif.telegram_chats.is_empty() {
-            continue;
-        }
-
-        let token = match &notif.bot_token {
+        let token = match &config.notifications.bot_token {
             Some(t) => t.clone(),
-            None => continue,
+            None => { drop(config); continue; }
         };
+        let chats = config.notifications.telegram_chats.clone();
+        drop(config);
 
         let now = chrono::Local::now();
         let today = now.date_naive();
+        let current_hour = now.hour() as u8;
+        let current_minute = now.minute() as u8;
 
-        if last_sent_date == Some(today) {
-            continue;
-        }
-
-        if now.hour() == notif.daily_hour as u32 && now.minute() >= notif.daily_minute as u32 {
-            let message = build_status_message(&state).await;
-
-            for chat in &notif.telegram_chats {
-                let _ = send_telegram_message(
-                    &state.http_client,
-                    &token,
-                    chat.chat_id,
-                    &message,
-                )
-                .await;
+        for chat in &chats {
+            if !chat.daily_enabled {
+                continue;
             }
 
-            last_sent_date = Some(today);
-            println!(
-                "[LabNAS] Mensaje diario enviado a {} chat(s)",
-                notif.telegram_chats.len()
-            );
+            // Already sent today?
+            if last_sent.get(&chat.chat_id) == Some(&today) {
+                continue;
+            }
+
+            if current_hour == chat.daily_hour && current_minute >= chat.daily_minute {
+                let message = build_status_message(&state).await;
+                let activity = build_activity_message(&state).await;
+                let full_msg = format!("{}\n\n---\n{}", message, activity);
+
+                if send_telegram_message(&state.http_client, &token, chat.chat_id, &full_msg).await.is_ok() {
+                    last_sent.insert(chat.chat_id, today);
+                    println!("[LabNAS] Reporte diario enviado a {}", chat.name);
+                }
+            }
         }
     }
 }
