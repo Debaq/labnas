@@ -2,7 +2,7 @@ use crate::config::LabNasConfig;
 use crate::models::network::NetworkHost;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -10,4 +10,5 @@ pub struct AppState {
     pub start_time: Instant,
     pub config: Arc<Mutex<LabNasConfig>>,
     pub http_client: reqwest::Client,
+    pub shutdown: Arc<Notify>,
 }

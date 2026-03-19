@@ -9,7 +9,7 @@ use axum::{
     Router,
 };
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Instant};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -19,12 +19,14 @@ use state::AppState;
 #[tokio::main]
 async fn main() {
     let config = load_config().await;
+    let shutdown = Arc::new(Notify::new());
 
     let state = AppState {
         scanned_hosts: Arc::new(Mutex::new(Vec::new())),
         start_time: Instant::now(),
         config: Arc::new(Mutex::new(config)),
         http_client: reqwest::Client::new(),
+        shutdown: shutdown.clone(),
     };
 
     let cors = CorsLayer::new()
@@ -46,6 +48,7 @@ async fn main() {
         .route("/api/storage", get(handlers::system::storage_info))
         .route("/api/system/disks", get(handlers::system::system_disks))
         .route("/api/system/info", get(handlers::system::system_info_handler))
+        .route("/api/system/shutdown", post(handlers::system::shutdown_handler))
         // Network
         .route("/api/network/scan", post(handlers::network::scan_network))
         .route("/api/network/hosts", get(handlers::network::get_hosts))
@@ -111,5 +114,11 @@ async fn main() {
     println!("  Red:    http://{}:3001", local_ip);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            shutdown.notified().await;
+            println!("LabNAS apagandose...");
+        })
+        .await
+        .unwrap();
 }

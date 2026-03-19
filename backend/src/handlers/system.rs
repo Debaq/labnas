@@ -4,6 +4,15 @@ use sysinfo::{Disks, System};
 use crate::models::system::{DiskInfo, HealthResponse, SystemInfoResponse};
 use crate::state::AppState;
 
+pub async fn shutdown_handler(State(state): State<AppState>) -> &'static str {
+    let shutdown = state.shutdown.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        shutdown.notify_one();
+    });
+    "Apagando LabNAS..."
+}
+
 pub async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
     let uptime = state.start_time.elapsed();
     let secs = uptime.as_secs();

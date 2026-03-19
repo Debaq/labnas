@@ -80,6 +80,10 @@ export async function fetchHealth(): Promise<any> {
   return res.json()
 }
 
+export async function shutdownServer(): Promise<void> {
+  await fetch('/api/system/shutdown', { method: 'POST' })
+}
+
 // --- Network ---
 
 export async function scanNetwork(): Promise<NetworkHost[]> {

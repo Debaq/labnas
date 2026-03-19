@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box } from 'lucide-react'
+import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power } from 'lucide-react'
 import { useTheme } from '../themes/ThemeContext'
+import { shutdownServer } from '../api'
 import type { ThemeName } from '../themes/themes'
 
 const navItems = [
@@ -27,6 +29,15 @@ export default function Layout() {
   const { theme, setTheme, themeNames } = useTheme()
   const location = useLocation()
   const pageTitle = pageTitles[location.pathname] || 'LabNAS'
+  const [shuttingDown, setShuttingDown] = useState(false)
+
+  async function handleShutdown() {
+    if (!confirm('Apagar LabNAS? El servidor se detendrá.')) return
+    setShuttingDown(true)
+    try {
+      await shutdownServer()
+    } catch { /* conexion se cortara */ }
+  }
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--bg-primary)' }}>
@@ -102,14 +113,28 @@ export default function Layout() {
           <h1 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
             {pageTitle}
           </h1>
-          <div className="flex items-center gap-2">
-            <span
-              className="inline-block w-2 h-2 rounded-full"
-              style={{ backgroundColor: 'var(--success)' }}
-            />
-            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              En linea
-            </span>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-block w-2 h-2 rounded-full"
+                style={{ backgroundColor: shuttingDown ? 'var(--danger)' : 'var(--success)' }}
+              />
+              <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                {shuttingDown ? 'Apagando...' : 'En linea'}
+              </span>
+            </div>
+            <button
+              onClick={handleShutdown}
+              disabled={shuttingDown}
+              className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
+              style={{
+                backgroundColor: 'var(--danger-alpha)',
+                color: 'var(--danger)',
+              }}
+              title="Apagar LabNAS"
+            >
+              <Power size={18} />
+            </button>
           </div>
         </header>
 
