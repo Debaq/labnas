@@ -24,25 +24,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
 
+  function refreshFromServer(token: string, parsed: AuthUser) {
+    return fetch('/api/auth/me', {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(res => {
+      if (res.ok) {
+        return res.json().then(data => {
+          const updated = { ...parsed, role: data.role, permissions: data.permissions }
+          setUser(updated)
+          localStorage.setItem('labnas_auth', JSON.stringify(updated))
+        })
+      } else {
+        setUser(null)
+        localStorage.removeItem('labnas_auth')
+      }
+    })
+  }
+
+  // Initial load
   useEffect(() => {
     const saved = localStorage.getItem('labnas_auth')
     if (saved) {
       try {
         const parsed = JSON.parse(saved) as AuthUser
-        // Verify token still valid
-        fetch('/api/auth/me', {
-          headers: { Authorization: `Bearer ${parsed.token}` },
-        }).then(res => {
-          if (res.ok) {
-            return res.json().then(data => {
-              setUser({ ...parsed, role: data.role, permissions: data.permissions })
-            })
-          } else {
-            localStorage.removeItem('labnas_auth')
-          }
-        }).catch(() => {
-          localStorage.removeItem('labnas_auth')
-        }).finally(() => setLoading(false))
+        refreshFromServer(parsed.token, parsed)
+          .catch(() => localStorage.removeItem('labnas_auth'))
+          .finally(() => setLoading(false))
       } catch {
         localStorage.removeItem('labnas_auth')
         setLoading(false)
@@ -50,6 +57,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } else {
       setLoading(false)
     }
+  }, [])
+
+  // Poll for role/permission changes every 30s
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const saved = localStorage.getItem('labnas_auth')
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved) as AuthUser
+          refreshFromServer(parsed.token, parsed).catch(() => {})
+        } catch {}
+      }
+    }, 30000)
+    return () => clearInterval(interval)
   }, [])
 
   async function login(username: string, password: string) {
