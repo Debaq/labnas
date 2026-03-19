@@ -70,8 +70,17 @@ async fn main() {
         .route("/api/printing/print-file", post(handlers::printing::print_file_path))
         .route("/api/printing/jobs", get(handlers::printing::list_jobs))
         .route("/api/printing/jobs/{id}", delete(handlers::printing::cancel_job))
+        // Notifications
+        .route("/api/notifications/whatsapp", get(handlers::notifications::list_contacts))
+        .route("/api/notifications/whatsapp", post(handlers::notifications::add_contact))
+        .route("/api/notifications/whatsapp/{phone}", delete(handlers::notifications::delete_contact))
+        .route("/api/notifications/whatsapp/test", post(handlers::notifications::send_test))
+        .route("/api/notifications/schedule", post(handlers::notifications::set_schedule))
         .layer(cors)
-        .with_state(state);
+        .with_state(state.clone());
+
+    // Spawn daily notification scheduler
+    tokio::spawn(handlers::notifications::daily_notification_loop(state));
 
     // Static files
     let exe_dir = std::env::current_exe()

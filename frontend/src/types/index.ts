@@ -56,6 +56,21 @@ export interface AutostartStatus {
   enabled: boolean
 }
 
+// --- Notifications ---
+
+export interface WhatsAppContact {
+  name: string
+  phone: string
+  apikey: string
+}
+
+export interface NotificationConfig {
+  whatsapp_contacts: WhatsAppContact[]
+  daily_enabled: boolean
+  daily_hour: number
+  daily_minute: number
+}
+
 // --- Printers 3D ---
 
 export interface Printer3DConfig {

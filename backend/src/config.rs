@@ -1,3 +1,4 @@
+use crate::models::notifications::NotificationConfig;
 use crate::models::printers3d::Printer3DConfig;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -6,6 +7,8 @@ use std::path::PathBuf;
 pub struct LabNasConfig {
     #[serde(default)]
     pub printers3d: Vec<Printer3DConfig>,
+    #[serde(default)]
+    pub notifications: NotificationConfig,
 }
 
 fn config_path() -> PathBuf {

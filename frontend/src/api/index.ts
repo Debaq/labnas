@@ -162,6 +162,42 @@ export async function detectPrinters3D(): Promise<DetectPrintersResult[]> {
   return res.json()
 }
 
+// --- Notifications ---
+
+export async function fetchNotificationConfig(): Promise<import('../types').NotificationConfig> {
+  const res = await fetch('/api/notifications/whatsapp')
+  if (!res.ok) throw new Error('Error al obtener config de notificaciones')
+  return res.json()
+}
+
+export async function addWhatsAppContact(contact: { name: string; phone: string; apikey: string }): Promise<void> {
+  const res = await fetch('/api/notifications/whatsapp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(contact),
+  })
+  if (!res.ok) throw new Error('Error al agregar contacto')
+}
+
+export async function deleteWhatsAppContact(phone: string): Promise<void> {
+  const res = await fetch(`/api/notifications/whatsapp/${encodeURIComponent(phone)}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar contacto')
+}
+
+export async function sendTestWhatsApp(): Promise<string> {
+  const res = await fetch('/api/notifications/whatsapp/test', { method: 'POST' })
+  return res.text()
+}
+
+export async function setNotificationSchedule(schedule: { daily_enabled: boolean; daily_hour: number; daily_minute: number }): Promise<void> {
+  const res = await fetch('/api/notifications/schedule', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(schedule),
+  })
+  if (!res.ok) throw new Error('Error al configurar horario')
+}
+
 // --- CUPS Printing ---
 
 export async function fetchCupsPrinters(): Promise<CupsPrinter[]> {
