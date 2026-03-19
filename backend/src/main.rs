@@ -53,6 +53,8 @@ async fn main() {
         // Network
         .route("/api/network/scan", post(handlers::network::scan_network))
         .route("/api/network/hosts", get(handlers::network::get_hosts))
+        .route("/api/network/device/{mac}", post(handlers::network::label_host))
+        .route("/api/network/device/{mac}", delete(handlers::network::unlabel_host))
         // Terminal
         .route("/api/terminal", get(handlers::terminal::terminal_handler))
         // Printers 3D

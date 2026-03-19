@@ -1,3 +1,4 @@
+use crate::models::network::KnownDevice;
 use crate::models::notifications::NotificationConfig;
 use crate::models::printers3d::Printer3DConfig;
 use serde::{Deserialize, Serialize};
@@ -9,6 +10,8 @@ pub struct LabNasConfig {
     pub printers3d: Vec<Printer3DConfig>,
     #[serde(default)]
     pub notifications: NotificationConfig,
+    #[serde(default)]
+    pub known_devices: Vec<KnownDevice>,
 }
 
 fn config_path() -> PathBuf {

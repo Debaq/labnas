@@ -10,7 +10,11 @@ export interface FileEntry {
 export interface NetworkHost {
   ip: string
   hostname: string | null
+  mac: string | null
+  vendor: string | null
   is_alive: boolean
+  is_known: boolean
+  label: string | null
   last_seen: string
   response_time_ms: number | null
 }

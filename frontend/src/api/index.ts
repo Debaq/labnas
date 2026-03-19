@@ -104,6 +104,20 @@ export async function fetchHosts(): Promise<NetworkHost[]> {
   return res.json()
 }
 
+export async function labelDevice(mac: string, label: string): Promise<void> {
+  const res = await fetch(`/api/network/device/${encodeURIComponent(mac)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label }),
+  })
+  if (!res.ok) throw new Error('Error al etiquetar dispositivo')
+}
+
+export async function unlabelDevice(mac: string): Promise<void> {
+  const res = await fetch(`/api/network/device/${encodeURIComponent(mac)}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al quitar etiqueta')
+}
+
 // --- Printers 3D ---
 
 export async function fetchPrinters3D(): Promise<Printer3DConfig[]> {
