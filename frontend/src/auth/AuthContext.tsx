@@ -108,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   function can(perm: 'terminal' | 'impresion' | 'archivos_escritura' | 'settings'): boolean {
     if (!user) return false
     if (user.role === 'admin') return true
-    if (perm === 'settings') return user.role === 'admin'
+    if (perm === 'settings') return false
     if (user.role === 'pendiente') return false
     if (user.role === 'observador') return perm === 'impresion' && user.permissions.impresion
     return user.permissions[perm] ?? false
