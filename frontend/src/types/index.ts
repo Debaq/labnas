@@ -78,6 +78,7 @@ export interface TelegramChat {
   username: string | null
   role: UserRole
   permissions: UserPermissions
+  linked_web_user: string | null
   daily_enabled: boolean
   daily_hour: number
   daily_minute: number

@@ -350,6 +350,7 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
     drop(config);
 
     let response = match text {
+        s if s.starts_with("/vincular ") => handle_link_command(state, chat_id, &chat_name, s).await,
         s if s.starts_with("/proyecto ") => handle_project_command(state, &chat_name, s).await,
         s if s.starts_with("/proyectos") => handle_list_projects(state, &chat_name).await,
         s if s.starts_with("/tarea ") => handle_task_command(state, &chat_name, s).await,
@@ -449,6 +450,7 @@ async fn register_chat(state: &AppState, token: &str, msg: &TgMessage) {
         } else {
             UserPermissions::default()
         },
+        linked_web_user: None,
         daily_enabled: false,
         daily_hour: 8,
         daily_minute: 0,
@@ -484,6 +486,54 @@ async fn register_chat(state: &AppState, token: &str, msg: &TgMessage) {
 // =====================
 // Command responses
 // =====================
+
+// =====================
+// Account linking
+// =====================
+
+async fn handle_link_command(state: &AppState, chat_id: i64, chat_name: &str, text: &str) -> String {
+    let code = text.strip_prefix("/vincular ").unwrap_or("").trim().to_uppercase();
+    if code.is_empty() {
+        return "Uso: `/vincular CODIGO`\n\nGenera el codigo desde la web en tu perfil.".to_string();
+    }
+
+    // Check code validity (expire after 5 min)
+    let mut codes = state.link_codes.lock().await;
+    let link = codes.remove(&code);
+    drop(codes);
+
+    let Some(link) = link else {
+        return "Codigo invalido o expirado. Genera uno nuevo desde la web.".to_string();
+    };
+
+    if link.created_at.elapsed().as_secs() > 300 {
+        return "Codigo expirado. Genera uno nuevo desde la web.".to_string();
+    }
+
+    let username = link.username;
+
+    let mut config = state.config.lock().await;
+
+    // Link web user -> telegram
+    let web_user = config.web_users.iter_mut().find(|u| u.username == username);
+    let Some(web_user) = web_user else {
+        return "Usuario web no encontrado.".to_string();
+    };
+    web_user.linked_telegram = Some(chat_id);
+    let role = web_user.role.clone();
+    let perms = web_user.permissions.clone();
+
+    // Link telegram -> web user
+    if let Some(chat) = config.notifications.telegram_chats.iter_mut().find(|c| c.chat_id == chat_id) {
+        chat.linked_web_user = Some(username.clone());
+        chat.role = role;
+        chat.permissions = perms;
+    }
+
+    let _ = save_config(&config).await;
+
+    format!("Cuenta vinculada! Tu Telegram esta conectado con *{}*.", username)
+}
 
 // =====================
 // Tasks & Projects
@@ -832,7 +882,8 @@ fn build_help_message(role: &UserRole) -> String {
     msg.push_str("*Sistema*\n");
     msg.push_str("/estado /discos /ram /cpu\n");
     msg.push_str("/uptime /red /impresoras\n");
-    msg.push_str("/actividad /horario /mirol\n\n");
+    msg.push_str("/actividad /horario /mirol\n");
+    msg.push_str("/vincular CODIGO - Vincular con web\n\n");
     msg.push_str("*Tareas y Proyectos*\n");
     msg.push_str("/tarea Titulo @persona - Crear tarea\n");
     msg.push_str("/tarea Titulo @all !confirmar - Confirmar\n");

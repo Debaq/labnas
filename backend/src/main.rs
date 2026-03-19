@@ -29,6 +29,7 @@ async fn main() {
         shutdown: shutdown.clone(),
         activity_log: Arc::new(Mutex::new(Vec::new())),
         sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        link_codes: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
 
     let cors = CorsLayer::new()
@@ -45,6 +46,8 @@ async fn main() {
         .route("/api/auth/users", get(handlers::auth::list_users))
         .route("/api/auth/users/{username}/role", post(handlers::auth::set_user_role))
         .route("/api/auth/users/{username}", delete(handlers::auth::delete_user))
+        .route("/api/auth/link-code", post(handlers::auth::generate_link_code))
+        .route("/api/notifications/telegram/chat/{chat_id}/link", post(handlers::auth::admin_link_chat))
         // Health
         .route("/api/health", get(handlers::system::health_handler))
         // Files

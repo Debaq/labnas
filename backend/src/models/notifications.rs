@@ -35,6 +35,8 @@ pub struct TelegramChat {
     #[serde(default)]
     pub permissions: UserPermissions,
     #[serde(default)]
+    pub linked_web_user: Option<String>,
+    #[serde(default)]
     pub daily_enabled: bool,
     #[serde(default = "default_hour")]
     pub daily_hour: u8,

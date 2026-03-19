@@ -23,7 +23,7 @@ pub async fn health_handler(State(state): State<AppState>) -> Json<HealthRespons
 
     Json(HealthResponse {
         status: "ok".to_string(),
-        version: "0.2.0".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
         uptime: uptime_str,
     })
 }

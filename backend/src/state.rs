@@ -34,6 +34,13 @@ pub struct AppState {
     pub shutdown: Arc<Notify>,
     pub activity_log: Arc<Mutex<Vec<ActivityEvent>>>,
     pub sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
+    pub link_codes: Arc<Mutex<HashMap<String, LinkCode>>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LinkCode {
+    pub username: String,
+    pub created_at: Instant,
 }
 
 impl AppState {

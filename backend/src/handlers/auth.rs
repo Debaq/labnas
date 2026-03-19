@@ -64,6 +64,7 @@ pub async fn register(
         password_hash,
         role: role.clone(),
         permissions: permissions.clone(),
+        linked_telegram: None,
     });
 
     save_config(&config)
@@ -142,10 +143,17 @@ pub async fn me(
     let sessions = state.sessions.lock().await;
     let session = sessions.get(&token).ok_or(StatusCode::UNAUTHORIZED)?;
 
+    // Get linked telegram from config
+    let config = state.config.lock().await;
+    let linked = config.web_users.iter()
+        .find(|u| u.username == session.username)
+        .and_then(|u| u.linked_telegram);
+
     Ok(Json(MeResponse {
         username: session.username.clone(),
         role: session.role.clone(),
         permissions: session.permissions.clone(),
+        linked_telegram: linked,
     }))
 }
 
@@ -175,6 +183,7 @@ pub async fn list_users(
             username: u.username.clone(),
             role: u.role.clone(),
             permissions: u.permissions.clone(),
+            linked_telegram: u.linked_telegram,
         })
         .collect();
     Json(users)
@@ -242,4 +251,73 @@ pub async fn delete_user(
     sessions.retain(|_, s| s.username != username);
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+// --- Generate link code (user requests from web) ---
+
+pub async fn generate_link_code(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    let token = extract_token(&headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    let sessions = state.sessions.lock().await;
+    let session = sessions.get(&token)
+        .ok_or((StatusCode::UNAUTHORIZED, "Sesion invalida".to_string()))?;
+    let username = session.username.clone();
+    drop(sessions);
+
+    // Generate 4-char code
+    let code: String = uuid::Uuid::new_v4().to_string()[..4].to_uppercase();
+
+    let mut codes = state.link_codes.lock().await;
+    // Remove old codes for this user
+    codes.retain(|_, v| v.username != username);
+    codes.insert(code.clone(), crate::state::LinkCode {
+        username,
+        created_at: std::time::Instant::now(),
+    });
+
+    Ok((StatusCode::OK, code))
+}
+
+// --- Admin links a telegram chat to a web user ---
+
+#[derive(Debug, serde::Deserialize)]
+pub struct LinkRequest {
+    pub web_username: String,
+}
+
+pub async fn admin_link_chat(
+    State(state): State<AppState>,
+    Path(chat_id): Path<i64>,
+    Json(req): Json<LinkRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let mut config = state.config.lock().await;
+
+    // Verify web user exists
+    let web_user = config.web_users.iter()
+        .find(|u| u.username == req.web_username)
+        .ok_or((StatusCode::NOT_FOUND, "Usuario web no encontrado".to_string()))?;
+    let role = web_user.role.clone();
+    let perms = web_user.permissions.clone();
+
+    // Link telegram chat
+    let chat = config.notifications.telegram_chats.iter_mut()
+        .find(|c| c.chat_id == chat_id)
+        .ok_or((StatusCode::NOT_FOUND, "Chat no encontrado".to_string()))?;
+
+    chat.linked_web_user = Some(req.web_username.clone());
+    chat.role = role;
+    chat.permissions = perms;
+
+    // Link web user back
+    if let Some(wu) = config.web_users.iter_mut().find(|u| u.username == req.web_username) {
+        wu.linked_telegram = Some(chat_id);
+    }
+
+    save_config(&config).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    Ok(StatusCode::OK)
 }

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, ShieldCheck, ShieldAlert, UserCheck } from 'lucide-react'
+import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, ShieldCheck, ShieldAlert, UserCheck, Link2 } from 'lucide-react'
+import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, type ThemeName } from '../themes/themes'
-import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole } from '../api'
+import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode } from '../api'
 import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig } from '../types'
 
 function formatBytes(bytes: number): string {
@@ -65,8 +66,11 @@ function ThemeCard({
 export default function SettingsPage() {
   const navigate = useNavigate()
   const { theme, setTheme, themeNames } = useTheme()
+  const { user: authUser } = useAuth()
   const [disks, setDisks] = useState<DiskInfo[]>([])
   const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null)
+  const [webUsers, setWebUsers] = useState<string[]>([])
+  const [linkCode, setLinkCode] = useState<string | null>(null)
   const [autostart, setAutostart] = useState<AutostartStatus | null>(null)
 
   // Telegram
@@ -84,6 +88,7 @@ export default function SettingsPage() {
     fetchDisks().then(setDisks).catch(() => {})
     fetchSystemInfo().then(setSysInfo).catch(() => {})
     fetchAutostartStatus().then(setAutostart).catch(() => {})
+    fetchWebUsers().then(users => setWebUsers(users.map(u => u.username))).catch(() => {})
     fetchNotificationConfig().then((c) => {
       setNotifConfig(c)
       setDailyEnabled(c.daily_enabled)
@@ -227,6 +232,44 @@ export default function SettingsPage() {
                   Los usuarios pueden enviar comandos como <strong style={{ color: 'var(--text-primary)' }}>/estado</strong>, <strong style={{ color: 'var(--text-primary)' }}>/discos</strong>, <strong style={{ color: 'var(--text-primary)' }}>/ram</strong> y el bot respondera con info del sistema en tiempo real.
                 </p>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Link my Telegram */}
+        {notifConfig?.bot_token && notifConfig?.bot_username && (
+          <div
+            className="rounded-xl p-5 mb-4"
+            style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Link2 size={16} style={{ color: 'var(--accent)' }} />
+                <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Vincular mi Telegram</span>
+              </div>
+              {linkCode ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Envia al bot:</span>
+                  <span className="font-mono text-sm font-bold px-3 py-1 rounded-lg" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--accent)' }}>
+                    /vincular {linkCode}
+                  </span>
+                  <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Expira en 5 min</span>
+                </div>
+              ) : (
+                <button
+                  onClick={async () => {
+                    if (!authUser?.token) return
+                    try {
+                      const code = await generateLinkCode(authUser.token)
+                      setLinkCode(code)
+                    } catch {}
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 hover:opacity-90"
+                  style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
+                >
+                  Generar codigo
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -377,6 +420,11 @@ export default function SettingsPage() {
                       <span className="text-xs px-1.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: roleColor + '20', color: roleColor }}>
                         {roleLabel}
                       </span>
+                      {c.linked_web_user && (
+                        <span className="text-xs px-1.5 py-0.5 rounded flex items-center gap-1" style={{ backgroundColor: 'var(--success)' + '20', color: 'var(--success)' }}>
+                          <Link2 size={10} />{c.linked_web_user}
+                        </span>
+                      )}
                       {c.daily_enabled && (
                         <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--accent)' + '20', color: 'var(--accent)' }}>
                           {String(c.daily_hour).padStart(2, '0')}:{String(c.daily_minute).padStart(2, '0')}
@@ -470,6 +518,29 @@ export default function SettingsPage() {
                           </label>
                         </div>
                       )}
+                      {/* Link to web user */}
+                      <div className="flex items-center gap-2">
+                        <Link2 size={12} style={{ color: 'var(--text-secondary)' }} />
+                        <select
+                          value={c.linked_web_user || ''}
+                          onChange={async (e) => {
+                            try {
+                              if (e.target.value) {
+                                await adminLinkChat(c.chat_id, e.target.value)
+                              }
+                              const cfg = await fetchNotificationConfig()
+                              setNotifConfig(cfg)
+                            } catch {}
+                          }}
+                          className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer"
+                          style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                        >
+                          <option value="">Sin vincular</option>
+                          {webUsers.map(u => (
+                            <option key={u} value={u}>{u}</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                   )}
                 </div>

@@ -10,6 +10,8 @@ pub struct WebUser {
     pub role: UserRole,
     #[serde(default)]
     pub permissions: UserPermissions,
+    #[serde(default)]
+    pub linked_telegram: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -37,6 +39,7 @@ pub struct MeResponse {
     pub username: String,
     pub role: UserRole,
     pub permissions: UserPermissions,
+    pub linked_telegram: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]

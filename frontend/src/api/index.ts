@@ -217,6 +217,26 @@ export async function setNotificationSchedule(schedule: { daily_enabled: boolean
   if (!res.ok) throw new Error('Error al configurar horario')
 }
 
+// --- Linking ---
+
+export async function generateLinkCode(token: string): Promise<string> {
+  const res = await fetch('/api/auth/link-code', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error('Error al generar codigo')
+  return res.text()
+}
+
+export async function adminLinkChat(chatId: number, webUsername: string): Promise<void> {
+  const res = await fetch(`/api/notifications/telegram/chat/${chatId}/link`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ web_username: webUsername }),
+  })
+  if (!res.ok) throw new Error('Error al vincular')
+}
+
 // --- Web Users ---
 
 export async function fetchWebUsers(): Promise<{ username: string; role: import('../types').UserRole; permissions: import('../types').UserPermissions }[]> {
