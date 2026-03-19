@@ -11,6 +11,8 @@ import type {
   CupsPrinter,
   CupsPrintJob,
   PrintFileRequest,
+  Task,
+  Project,
 } from '../types'
 
 // --- Files ---
@@ -323,4 +325,96 @@ export async function fetchPrintJobs(): Promise<CupsPrintJob[]> {
 export async function cancelPrintJob(id: string): Promise<void> {
   const res = await fetch(`/api/printing/jobs/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al cancelar trabajo')
+}
+
+// --- Tasks & Projects ---
+
+export async function fetchProjects(): Promise<Project[]> {
+  const res = await fetch('/api/projects')
+  if (!res.ok) throw new Error('Error al obtener proyectos')
+  return res.json()
+}
+
+export async function createProject(data: { name: string; description?: string }): Promise<Project> {
+  const res = await fetch('/api/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Error al crear proyecto')
+  return res.json()
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar proyecto')
+}
+
+export async function fetchTasks(params?: { project?: string; status?: string }): Promise<Task[]> {
+  const query = new URLSearchParams()
+  if (params?.project) query.set('project', params.project)
+  if (params?.status) query.set('status', params.status)
+  const qs = query.toString()
+  const res = await fetch(`/api/tasks${qs ? '?' + qs : ''}`)
+  if (!res.ok) throw new Error('Error al obtener tareas')
+  return res.json()
+}
+
+export async function createTask(data: {
+  title: string
+  project_id?: string | null
+  assigned_to?: string[]
+  requires_confirmation?: boolean
+  insistent?: boolean
+  reminder_minutes?: number
+  due_date?: string | null
+}): Promise<Task> {
+  const res = await fetch('/api/tasks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Error al crear tarea')
+  return res.json()
+}
+
+export async function updateTask(id: string, data: Record<string, unknown>): Promise<Task> {
+  const res = await fetch(`/api/tasks/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Error al actualizar tarea')
+  return res.json()
+}
+
+export async function confirmTask(id: string, user: string): Promise<Task> {
+  const res = await fetch(`/api/tasks/${id}/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user }),
+  })
+  if (!res.ok) throw new Error('Error al confirmar tarea')
+  return res.json()
+}
+
+export async function rejectTask(id: string, user: string): Promise<Task> {
+  const res = await fetch(`/api/tasks/${id}/reject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user }),
+  })
+  if (!res.ok) throw new Error('Error al rechazar tarea')
+  return res.json()
+}
+
+export async function doneTask(id: string): Promise<Task> {
+  const res = await fetch(`/api/tasks/${id}/done`, { method: 'POST' })
+  if (!res.ok) throw new Error('Error al completar tarea')
+  return res.json()
+}
+
+export async function deleteTask(id: string): Promise<void> {
+  const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar tarea')
 }

@@ -172,3 +172,33 @@ export interface PrintFileRequest {
   pages?: string
   options: Record<string, string>
 }
+
+// --- Tasks & Projects ---
+
+export type TaskStatus = 'pendiente' | 'enprogreso' | 'completada' | 'rechazada'
+
+export interface Task {
+  id: string
+  project_id: string | null
+  title: string
+  description: string
+  assigned_to: string[]
+  status: TaskStatus
+  created_by: string
+  due_date: string | null
+  requires_confirmation: boolean
+  insistent: boolean
+  reminder_minutes: number
+  confirmed_by: string[]
+  rejected_by: string[]
+  created_at: string
+}
+
+export interface Project {
+  id: string
+  name: string
+  description: string
+  created_by: string
+  members: string[]
+  created_at: string
+}

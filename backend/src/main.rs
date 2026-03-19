@@ -5,7 +5,7 @@ mod state;
 
 use axum::{
     http::Method,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Instant};
@@ -34,7 +34,7 @@ async fn main() {
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
         .allow_headers(Any);
 
     let api = Router::new()
@@ -94,6 +94,17 @@ async fn main() {
         .route("/api/notifications/telegram/chat/{chat_id}/role", post(handlers::notifications::set_chat_role))
         .route("/api/notifications/telegram/test", post(handlers::notifications::send_test))
         .route("/api/notifications/schedule", post(handlers::notifications::set_schedule))
+        // Tasks & Projects
+        .route("/api/projects", get(handlers::tasks::list_projects))
+        .route("/api/projects", post(handlers::tasks::create_project))
+        .route("/api/projects/{id}", delete(handlers::tasks::delete_project))
+        .route("/api/tasks", get(handlers::tasks::list_tasks))
+        .route("/api/tasks", post(handlers::tasks::create_task))
+        .route("/api/tasks/{id}", put(handlers::tasks::update_task))
+        .route("/api/tasks/{id}", delete(handlers::tasks::delete_task))
+        .route("/api/tasks/{id}/confirm", post(handlers::tasks::confirm_task))
+        .route("/api/tasks/{id}/reject", post(handlers::tasks::reject_task))
+        .route("/api/tasks/{id}/done", post(handlers::tasks::done_task))
         .layer(cors)
         .with_state(state.clone());
 
