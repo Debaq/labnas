@@ -49,12 +49,17 @@ pub async fn system_disks() -> Result<Json<Vec<DiskInfo>>, (StatusCode, String)>
 }
 
 pub async fn system_info_handler() -> Result<Json<SystemInfoResponse>, (StatusCode, String)> {
-    let info = tokio::task::spawn_blocking(|| {
+    let local_ip = local_ip_address::local_ip()
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|_| "desconocido".to_string());
+
+    let info = tokio::task::spawn_blocking(move || {
         let mut sys = System::new_all();
         sys.refresh_all();
 
         SystemInfoResponse {
             hostname: System::host_name().unwrap_or_else(|| "desconocido".to_string()),
+            local_ip,
             os: System::long_os_version().unwrap_or_else(|| "desconocido".to_string()),
             kernel: System::kernel_version().unwrap_or_else(|| "desconocido".to_string()),
             total_memory: sys.total_memory(),

@@ -21,6 +21,7 @@ pub struct DiskInfo {
 #[derive(Debug, Serialize)]
 pub struct SystemInfoResponse {
     pub hostname: String,
+    pub local_ip: String,
     pub os: String,
     pub kernel: String,
     pub total_memory: u64,

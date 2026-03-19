@@ -204,6 +204,14 @@ export default function DashboardPage() {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                IP Local
+              </span>
+              <span className="text-sm font-medium font-mono" style={{ color: 'var(--accent)' }}>
+                {loading ? '...' : systemInfo?.local_ip ?? '--'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
                 SO
               </span>
               <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>

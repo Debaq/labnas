@@ -40,6 +40,7 @@ export interface DiskInfo {
 
 export interface SystemInfo {
   hostname: string
+  local_ip: string
   os: string
   kernel: string
   total_memory: number

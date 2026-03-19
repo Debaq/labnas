@@ -102,7 +102,13 @@ async fn main() {
         api
     };
 
-    println!("LabNAS corriendo en http://{}", addr);
+    let local_ip = local_ip_address::local_ip()
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|_| "0.0.0.0".to_string());
+
+    println!("LabNAS corriendo en:");
+    println!("  Local:  http://localhost:3001");
+    println!("  Red:    http://{}:3001", local_ip);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
