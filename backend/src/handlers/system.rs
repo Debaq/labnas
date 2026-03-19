@@ -1,7 +1,8 @@
 use axum::{extract::State, http::StatusCode, Json};
 use sysinfo::{Disks, System};
+use tokio::process::Command;
 
-use crate::models::system::{DiskInfo, HealthResponse, SystemInfoResponse};
+use crate::models::system::{AutostartStatus, DiskInfo, HealthResponse, SystemInfoResponse};
 use crate::state::AppState;
 
 pub async fn shutdown_handler(State(state): State<AppState>) -> &'static str {
@@ -81,4 +82,99 @@ pub async fn system_info_handler() -> Result<Json<SystemInfoResponse>, (StatusCo
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(info))
+}
+
+// --- Autostart ---
+
+const SERVICE_PATH: &str = "/etc/systemd/system/labnas.service";
+
+pub async fn autostart_status() -> Json<AutostartStatus> {
+    let installed = tokio::fs::metadata(SERVICE_PATH).await.is_ok();
+
+    let enabled = if installed {
+        Command::new("systemctl")
+            .args(["is-enabled", "labnas"])
+            .output()
+            .await
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    } else {
+        false
+    };
+
+    Json(AutostartStatus { installed, enabled })
+}
+
+pub async fn install_autostart() -> Result<(StatusCode, String), (StatusCode, String)> {
+    let exe_path = std::env::current_exe()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let exe_path = std::fs::canonicalize(&exe_path).unwrap_or(exe_path);
+    let work_dir = exe_path
+        .parent()
+        .unwrap_or(std::path::Path::new("/"))
+        .to_string_lossy();
+
+    let service = format!(
+        "\
+[Unit]
+Description=LabNAS - NAS de Laboratorio
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={}
+WorkingDirectory={}
+Restart=on-failure
+RestartSec=5
+AmbientCapabilities=CAP_NET_RAW
+
+[Install]
+WantedBy=multi-user.target
+",
+        exe_path.display(),
+        work_dir
+    );
+
+    tokio::fs::write(SERVICE_PATH, &service).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error escribiendo servicio: {}. Ejecuta con sudo.", e),
+        )
+    })?;
+
+    Command::new("systemctl")
+        .args(["daemon-reload"])
+        .output()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let output = Command::new("systemctl")
+        .args(["enable", "labnas"])
+        .output()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, err));
+    }
+
+    Ok((StatusCode::OK, "Servicio instalado y habilitado".to_string()))
+}
+
+pub async fn remove_autostart() -> Result<StatusCode, (StatusCode, String)> {
+    let _ = Command::new("systemctl")
+        .args(["disable", "labnas"])
+        .output()
+        .await;
+
+    let _ = tokio::fs::remove_file(SERVICE_PATH).await;
+
+    let _ = Command::new("systemctl")
+        .args(["daemon-reload"])
+        .output()
+        .await;
+
+    Ok(StatusCode::NO_CONTENT)
 }

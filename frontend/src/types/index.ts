@@ -49,6 +49,13 @@ export interface SystemInfo {
   uptime_secs: number
 }
 
+// --- System ---
+
+export interface AutostartStatus {
+  installed: boolean
+  enabled: boolean
+}
+
 // --- Printers 3D ---
 
 export interface Printer3DConfig {

@@ -49,6 +49,9 @@ async fn main() {
         .route("/api/system/disks", get(handlers::system::system_disks))
         .route("/api/system/info", get(handlers::system::system_info_handler))
         .route("/api/system/shutdown", post(handlers::system::shutdown_handler))
+        .route("/api/system/autostart", get(handlers::system::autostart_status))
+        .route("/api/system/autostart", post(handlers::system::install_autostart))
+        .route("/api/system/autostart", delete(handlers::system::remove_autostart))
         // Network
         .route("/api/network/scan", post(handlers::network::scan_network))
         .route("/api/network/hosts", get(handlers::network::get_hosts))

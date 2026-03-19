@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
@@ -28,4 +28,10 @@ pub struct SystemInfoResponse {
     pub used_memory: u64,
     pub cpu_count: usize,
     pub uptime_secs: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AutostartStatus {
+    pub installed: bool,
+    pub enabled: bool,
 }
