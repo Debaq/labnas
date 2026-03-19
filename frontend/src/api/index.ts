@@ -149,30 +149,39 @@ export async function detectPrinters3D(): Promise<DetectPrintersResult[]> {
   return res.json()
 }
 
-// --- Notifications ---
+// --- Notifications (Telegram) ---
 
 export async function fetchNotificationConfig(): Promise<import('../types').NotificationConfig> {
-  const res = await fetch('/api/notifications/whatsapp')
+  const res = await fetch('/api/notifications/telegram')
   if (!res.ok) throw new Error('Error al obtener config de notificaciones')
   return res.json()
 }
 
-export async function addWhatsAppContact(contact: { name: string; phone: string; apikey: string }): Promise<void> {
-  const res = await fetch('/api/notifications/whatsapp', {
+export async function setBotToken(token: string): Promise<import('../types').NotificationConfig> {
+  const res = await fetch('/api/notifications/telegram/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(contact),
+    body: JSON.stringify({ token }),
   })
-  if (!res.ok) throw new Error('Error al agregar contacto')
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Error al configurar bot')
+  }
+  return res.json()
 }
 
-export async function deleteWhatsAppContact(phone: string): Promise<void> {
-  const res = await fetch(`/api/notifications/whatsapp/${encodeURIComponent(phone)}`, { method: 'DELETE' })
-  if (!res.ok) throw new Error('Error al eliminar contacto')
+export async function deleteBotToken(): Promise<void> {
+  const res = await fetch('/api/notifications/telegram/token', { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar bot')
 }
 
-export async function sendTestWhatsApp(): Promise<string> {
-  const res = await fetch('/api/notifications/whatsapp/test', { method: 'POST' })
+export async function deleteTelegramChat(chatId: number): Promise<void> {
+  const res = await fetch(`/api/notifications/telegram/chat/${chatId}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar chat')
+}
+
+export async function sendTestTelegram(): Promise<string> {
+  const res = await fetch('/api/notifications/telegram/test', { method: 'POST' })
   return res.text()
 }
 

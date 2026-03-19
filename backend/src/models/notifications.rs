@@ -1,16 +1,20 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WhatsAppContact {
+pub struct TelegramChat {
+    pub chat_id: i64,
     pub name: String,
-    pub phone: String,
-    pub apikey: String,
+    pub username: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationConfig {
     #[serde(default)]
-    pub whatsapp_contacts: Vec<WhatsAppContact>,
+    pub bot_token: Option<String>,
+    #[serde(default)]
+    pub bot_username: Option<String>,
+    #[serde(default)]
+    pub telegram_chats: Vec<TelegramChat>,
     #[serde(default)]
     pub daily_enabled: bool,
     #[serde(default = "default_hour")]
@@ -26,7 +30,9 @@ fn default_hour() -> u8 {
 impl Default for NotificationConfig {
     fn default() -> Self {
         Self {
-            whatsapp_contacts: Vec::new(),
+            bot_token: None,
+            bot_username: None,
+            telegram_chats: Vec::new(),
             daily_enabled: false,
             daily_hour: 8,
             daily_minute: 0,
@@ -35,10 +41,8 @@ impl Default for NotificationConfig {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct AddContactRequest {
-    pub name: String,
-    pub phone: String,
-    pub apikey: String,
+pub struct SetBotTokenRequest {
+    pub token: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,4 +50,41 @@ pub struct ScheduleRequest {
     pub daily_enabled: bool,
     pub daily_hour: u8,
     pub daily_minute: u8,
+}
+
+// --- Telegram API types (for deserializing responses) ---
+
+#[derive(Debug, Deserialize)]
+pub struct TgResponse<T> {
+    pub ok: bool,
+    pub result: Option<T>,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TgUpdate {
+    pub update_id: i64,
+    pub message: Option<TgMessage>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TgMessage {
+    pub chat: TgChat,
+    pub text: Option<String>,
+}
+
+
+#[derive(Debug, Deserialize)]
+pub struct TgChat {
+    pub id: i64,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub username: Option<String>,
+    pub title: Option<String>,
+}
+
+
+#[derive(Debug, Deserialize)]
+pub struct TgBotInfo {
+    pub username: String,
 }

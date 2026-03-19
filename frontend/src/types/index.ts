@@ -58,16 +58,18 @@ export interface AutostartStatus {
   uninstall_cmd: string
 }
 
-// --- Notifications ---
+// --- Notifications (Telegram) ---
 
-export interface WhatsAppContact {
+export interface TelegramChat {
+  chat_id: number
   name: string
-  phone: string
-  apikey: string
+  username: string | null
 }
 
 export interface NotificationConfig {
-  whatsapp_contacts: WhatsAppContact[]
+  bot_token: string | null
+  bot_username: string | null
+  telegram_chats: TelegramChat[]
   daily_enabled: boolean
   daily_hour: number
   daily_minute: number
