@@ -19,6 +19,13 @@ Thumbs.db
 # Env
 .env
 .env.local
+.env.*
 
 # Storage
 storage/
+
+# Config con posibles API keys
+.labnas/
+
+# Claude
+.claude/
