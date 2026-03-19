@@ -94,8 +94,9 @@ async fn main() {
         .layer(cors)
         .with_state(state.clone());
 
-    // Spawn Telegram bot polling loop + daily scheduler
+    // Spawn Telegram bot polling loop + daily scheduler + task reminders
     tokio::spawn(handlers::notifications::telegram_bot_loop(state.clone()));
+    tokio::spawn(handlers::notifications::task_reminder_loop(state.clone()));
     tokio::spawn(handlers::notifications::daily_notification_loop(state));
 
     // Static files

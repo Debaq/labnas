@@ -10,6 +10,7 @@ use chrono::Timelike;
 
 use crate::config::save_config;
 use crate::models::notifications::*;
+use crate::models::tasks::{Project, Task, TaskStatus};
 use crate::state::AppState;
 
 // =====================
@@ -345,9 +346,18 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
     }
 
     let role = chat.role.clone();
+    let chat_name = chat.name.clone();
     drop(config);
 
     let response = match text {
+        s if s.starts_with("/proyecto ") => handle_project_command(state, &chat_name, s).await,
+        s if s.starts_with("/proyectos") => handle_list_projects(state, &chat_name).await,
+        s if s.starts_with("/tarea ") => handle_task_command(state, &chat_name, s).await,
+        s if s.starts_with("/tareas") => handle_list_tasks(state, &chat_name).await,
+        s if s.starts_with("/avance") => handle_progress(state, &chat_name, s).await,
+        s if s.starts_with("/confirmar ") => handle_confirm(state, &chat_name, s, true).await,
+        s if s.starts_with("/rechazar ") => handle_confirm(state, &chat_name, s, false).await,
+        s if s.starts_with("/hecho ") => handle_done(state, &chat_name, s).await,
         s if s.starts_with("/horario") => handle_schedule_command(state, chat_id, s).await,
         s if s.starts_with("/actividad") => build_activity_message(state).await,
         s if s.starts_with("/estado") => build_status_message(state).await,
@@ -475,18 +485,356 @@ async fn register_chat(state: &AppState, token: &str, msg: &TgMessage) {
 // Command responses
 // =====================
 
+// =====================
+// Tasks & Projects
+// =====================
+
+async fn handle_project_command(state: &AppState, creator: &str, text: &str) -> String {
+    let name = text.strip_prefix("/proyecto ").unwrap_or("").trim();
+    if name.is_empty() {
+        return "Uso: `/proyecto Nombre del proyecto`".to_string();
+    }
+
+    let project = Project {
+        id: uuid::Uuid::new_v4().to_string()[..8].to_string(),
+        name: name.to_string(),
+        description: String::new(),
+        created_by: creator.to_string(),
+        members: vec![creator.to_string()],
+        created_at: chrono::Utc::now(),
+    };
+
+    let mut config = state.config.lock().await;
+    let id = project.id.clone();
+    config.tasks.projects.push(project);
+    let _ = save_config(&config).await;
+
+    format!("Proyecto *{}* creado (ID: `{}`)", name, id)
+}
+
+async fn handle_list_projects(state: &AppState, user: &str) -> String {
+    let config = state.config.lock().await;
+    let projects = &config.tasks.projects;
+
+    if projects.is_empty() {
+        return "*Proyectos*\n\nNo hay proyectos. Crea uno con `/proyecto Nombre`".to_string();
+    }
+
+    let mut msg = format!("*Proyectos* ({})\n", projects.len());
+    for p in projects {
+        let task_count = config.tasks.tasks.iter().filter(|t| t.project_id.as_deref() == Some(&p.id)).count();
+        let done_count = config.tasks.tasks.iter().filter(|t| t.project_id.as_deref() == Some(&p.id) && t.status == TaskStatus::Completada).count();
+        let is_member = p.members.contains(&user.to_string()) || p.created_by == user;
+        let badge = if is_member { "" } else { " (no eres miembro)" };
+        msg.push_str(&format!("\n`{}` *{}*{}\n  {}/{} tareas completadas\n", p.id, p.name, badge, done_count, task_count));
+    }
+    msg
+}
+
+async fn handle_task_command(state: &AppState, creator: &str, text: &str) -> String {
+    let args = text.strip_prefix("/tarea ").unwrap_or("").trim();
+    if args.is_empty() {
+        return "Uso: `/tarea Titulo @persona !confirmar !insistente`\nEj: `/tarea Revisar servidor @all !confirmar`".to_string();
+    }
+
+    // Parse: title, @mentions, !flags
+    let mut title_parts = Vec::new();
+    let mut assigned = Vec::new();
+    let mut requires_confirmation = false;
+    let mut insistent = false;
+    let mut project_id: Option<String> = None;
+
+    for word in args.split_whitespace() {
+        if let Some(mention) = word.strip_prefix('@') {
+            assigned.push(mention.to_string());
+        } else if word == "!confirmar" || word == "!confirmacion" {
+            requires_confirmation = true;
+        } else if word == "!insistente" || word == "!insistir" {
+            insistent = true;
+        } else if let Some(pid) = word.strip_prefix('#') {
+            project_id = Some(pid.to_string());
+        } else {
+            title_parts.push(word);
+        }
+    }
+
+    let title = title_parts.join(" ");
+    if title.is_empty() {
+        return "La tarea necesita un titulo.".to_string();
+    }
+
+    if assigned.is_empty() {
+        assigned.push(creator.to_string());
+    }
+
+    // If insistent, it also requires confirmation
+    if insistent {
+        requires_confirmation = true;
+    }
+
+    let task = Task {
+        id: uuid::Uuid::new_v4().to_string()[..6].to_string(),
+        project_id,
+        title: title.clone(),
+        description: String::new(),
+        assigned_to: assigned.clone(),
+        status: TaskStatus::Pendiente,
+        created_by: creator.to_string(),
+        due_date: None,
+        requires_confirmation,
+        insistent,
+        confirmed_by: Vec::new(),
+        rejected_by: Vec::new(),
+        created_at: chrono::Utc::now(),
+        last_reminder: None,
+    };
+
+    let id = task.id.clone();
+    let mut config = state.config.lock().await;
+    config.tasks.tasks.push(task);
+    let _ = save_config(&config).await;
+
+    let assign_str = assigned.join(", ");
+    let flags = [
+        if requires_confirmation { "confirmar" } else { "" },
+        if insistent { "insistente" } else { "" },
+    ].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(", ");
+    let flags_str = if flags.is_empty() { String::new() } else { format!(" ({})", flags) };
+
+    format!("Tarea *{}* creada{}\nID: `{}`\nAsignada a: {}", title, flags_str, id, assign_str)
+}
+
+async fn handle_list_tasks(state: &AppState, user: &str) -> String {
+    let config = state.config.lock().await;
+    let my_tasks: Vec<&Task> = config.tasks.tasks.iter()
+        .filter(|t| {
+            t.status != TaskStatus::Completada && t.status != TaskStatus::Rechazada &&
+            (t.assigned_to.contains(&"all".to_string()) || t.assigned_to.iter().any(|a| a.to_lowercase() == user.to_lowercase()) || t.created_by == user)
+        })
+        .collect();
+
+    if my_tasks.is_empty() {
+        return "*Mis tareas*\n\nNo tienes tareas pendientes.".to_string();
+    }
+
+    let mut msg = format!("*Mis tareas* ({})\n", my_tasks.len());
+    for t in &my_tasks {
+        let status = match t.status {
+            TaskStatus::Pendiente => "pendiente",
+            TaskStatus::EnProgreso => "en progreso",
+            _ => "?",
+        };
+        let flags = [
+            if t.requires_confirmation { "confirmar" } else { "" },
+            if t.insistent { "insistente" } else { "" },
+        ].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(", ");
+        let flags_str = if flags.is_empty() { String::new() } else { format!(" [{}]", flags) };
+
+        msg.push_str(&format!("\n`{}` *{}*{}\n  Estado: {} | Por: {}\n", t.id, t.title, flags_str, status, t.created_by));
+    }
+    msg.push_str("\nUsa `/hecho ID` o `/confirmar ID`");
+    msg
+}
+
+async fn handle_confirm(state: &AppState, user: &str, text: &str, accept: bool) -> String {
+    let cmd = if accept { "/confirmar " } else { "/rechazar " };
+    let id = text.strip_prefix(cmd).unwrap_or("").trim();
+    if id.is_empty() {
+        return format!("Uso: `{}<ID>`", cmd);
+    }
+
+    let mut config = state.config.lock().await;
+    let task = config.tasks.tasks.iter_mut().find(|t| t.id == id);
+
+    let Some(task) = task else {
+        return format!("Tarea `{}` no encontrada.", id);
+    };
+
+    let title = task.title.clone();
+    if accept {
+        if !task.confirmed_by.contains(&user.to_string()) {
+            task.confirmed_by.push(user.to_string());
+        }
+        let _ = save_config(&config).await;
+        format!("Tarea *{}* confirmada por ti.", title)
+    } else {
+        if !task.rejected_by.contains(&user.to_string()) {
+            task.rejected_by.push(user.to_string());
+        }
+        task.status = TaskStatus::Rechazada;
+        let _ = save_config(&config).await;
+        format!("Tarea *{}* rechazada.", title)
+    }
+}
+
+async fn handle_done(state: &AppState, user: &str, text: &str) -> String {
+    let id = text.strip_prefix("/hecho ").unwrap_or("").trim();
+    if id.is_empty() {
+        return "Uso: `/hecho <ID>`".to_string();
+    }
+
+    let mut config = state.config.lock().await;
+    let task = config.tasks.tasks.iter_mut().find(|t| t.id == id);
+
+    let Some(task) = task else {
+        return format!("Tarea `{}` no encontrada.", id);
+    };
+
+    // Only creator or assigned can mark done
+    let is_assigned = task.assigned_to.contains(&"all".to_string()) || task.assigned_to.iter().any(|a| a.to_lowercase() == user.to_lowercase());
+    if task.created_by != user && !is_assigned {
+        return "No tienes permiso para completar esta tarea.".to_string();
+    }
+
+    let title = task.title.clone();
+    task.status = TaskStatus::Completada;
+    let _ = save_config(&config).await;
+    format!("Tarea *{}* completada!", title)
+}
+
+async fn handle_progress(state: &AppState, user: &str, text: &str) -> String {
+    let project_name = text.strip_prefix("/avance").unwrap_or("").trim();
+
+    let config = state.config.lock().await;
+
+    if project_name.is_empty() {
+        // Show all projects progress
+        if config.tasks.projects.is_empty() {
+            return "*Avance*\n\nNo hay proyectos.".to_string();
+        }
+        let mut msg = String::from("*Avance de proyectos*\n");
+        for p in &config.tasks.projects {
+            let tasks: Vec<&Task> = config.tasks.tasks.iter().filter(|t| t.project_id.as_deref() == Some(&p.id)).collect();
+            let total = tasks.len();
+            let done = tasks.iter().filter(|t| t.status == TaskStatus::Completada).count();
+            let pct = if total > 0 { (done as f64 / total as f64 * 100.0) as u64 } else { 0 };
+            let bar = progress_bar(pct as f64);
+            msg.push_str(&format!("\n*{}*\n{} {}% ({}/{})\n", p.name, bar, pct, done, total));
+        }
+        return msg;
+    }
+
+    // Find specific project
+    let project = config.tasks.projects.iter().find(|p| p.name.to_lowercase().contains(&project_name.to_lowercase()) || p.id == project_name);
+    let Some(project) = project else {
+        return format!("Proyecto '{}' no encontrado.", project_name);
+    };
+
+    let tasks: Vec<&Task> = config.tasks.tasks.iter().filter(|t| t.project_id.as_deref() == Some(&project.id)).collect();
+    let total = tasks.len();
+    let done = tasks.iter().filter(|t| t.status == TaskStatus::Completada).count();
+    let pct = if total > 0 { (done as f64 / total as f64 * 100.0) as u64 } else { 0 };
+    let bar = progress_bar(pct as f64);
+
+    let mut msg = format!("*{}*\n{} {}% ({}/{})\n", project.name, bar, pct, done, total);
+    let _ = user; // suppress warning
+
+    for t in &tasks {
+        let icon = match t.status {
+            TaskStatus::Completada => "done",
+            TaskStatus::Rechazada => "x",
+            TaskStatus::EnProgreso => ">>",
+            TaskStatus::Pendiente => "  ",
+        };
+        msg.push_str(&format!("\n[{}] `{}` {}", icon, t.id, t.title));
+    }
+    msg
+}
+
+// =====================
+// Reminder loop for insistent tasks
+// =====================
+
+pub async fn task_reminder_loop(state: AppState) {
+    loop {
+        tokio::time::sleep(Duration::from_secs(300)).await; // Check every 5 minutes
+
+        let mut config = state.config.lock().await;
+        let token = match &config.notifications.bot_token {
+            Some(t) => t.clone(),
+            None => { drop(config); continue; }
+        };
+        let chats = config.notifications.telegram_chats.clone();
+
+        let now = chrono::Utc::now();
+        let mut to_remind: Vec<(String, Vec<i64>)> = Vec::new(); // (message, chat_ids)
+
+        for task in &mut config.tasks.tasks {
+            if task.status == TaskStatus::Completada || task.status == TaskStatus::Rechazada {
+                continue;
+            }
+            if !task.requires_confirmation && !task.insistent {
+                continue;
+            }
+
+            // Check if enough time passed since last reminder (30 min for insistent, 2h for confirmation)
+            let interval = if task.insistent { 1800 } else { 7200 };
+            let should_remind = task.last_reminder
+                .map(|lr| (now - lr).num_seconds() >= interval)
+                .unwrap_or(true);
+
+            if !should_remind {
+                continue;
+            }
+
+            // Find chat_ids for assigned users
+            let target_ids: Vec<i64> = if task.assigned_to.contains(&"all".to_string()) {
+                chats.iter()
+                    .filter(|c| c.role != UserRole::Pendiente && !task.confirmed_by.contains(&c.name))
+                    .map(|c| c.chat_id)
+                    .collect()
+            } else {
+                chats.iter()
+                    .filter(|c| {
+                        task.assigned_to.iter().any(|a| a.to_lowercase() == c.name.to_lowercase()) && !task.confirmed_by.contains(&c.name)
+                    })
+                    .map(|c| c.chat_id)
+                    .collect()
+            };
+
+            if target_ids.is_empty() {
+                continue;
+            }
+
+            let icon = if task.insistent { "🔔" } else { "📋" };
+            let msg = format!(
+                "{} *Recordatorio*\n\nTarea: *{}*\nID: `{}`\nPor: {}\n\n`/confirmar {}` o `/rechazar {}`",
+                icon, task.title, task.id, task.created_by, task.id, task.id
+            );
+
+            to_remind.push((msg, target_ids));
+            task.last_reminder = Some(now);
+        }
+
+        let _ = save_config(&config).await;
+        drop(config);
+
+        // Send reminders
+        for (msg, ids) in &to_remind {
+            for id in ids {
+                let _ = send_telegram_message(&state.http_client, &token, *id, msg).await;
+            }
+        }
+    }
+}
+
 fn build_help_message(role: &UserRole) -> String {
     let mut msg = String::from("*LabNAS - Comandos*\n\n");
-    msg.push_str("/estado - Resumen del sistema\n");
-    msg.push_str("/discos - Uso de discos\n");
-    msg.push_str("/ram - Memoria RAM\n");
-    msg.push_str("/cpu - Procesador\n");
-    msg.push_str("/uptime - Tiempo encendido\n");
-    msg.push_str("/red - Dispositivos en la red\n");
-    msg.push_str("/impresoras - Impresoras 3D\n");
-    msg.push_str("/actividad - Actividad reciente\n");
-    msg.push_str("/horario HH:MM - Reporte diario\n");
-    msg.push_str("/mirol - Ver tu rol y permisos\n");
+    msg.push_str("*Sistema*\n");
+    msg.push_str("/estado /discos /ram /cpu\n");
+    msg.push_str("/uptime /red /impresoras\n");
+    msg.push_str("/actividad /horario /mirol\n\n");
+    msg.push_str("*Tareas y Proyectos*\n");
+    msg.push_str("/tarea Titulo @persona - Crear tarea\n");
+    msg.push_str("/tarea Titulo @all !confirmar - Confirmar\n");
+    msg.push_str("/tarea Titulo !insistente - Insistente\n");
+    msg.push_str("/tareas - Mis tareas pendientes\n");
+    msg.push_str("/confirmar ID - Confirmar tarea\n");
+    msg.push_str("/rechazar ID - Rechazar tarea\n");
+    msg.push_str("/hecho ID - Marcar completada\n");
+    msg.push_str("/proyecto Nombre - Crear proyecto\n");
+    msg.push_str("/proyectos - Ver proyectos\n");
+    msg.push_str("/avance Proyecto - Progreso\n");
 
     let role_name = match role {
         UserRole::Admin => "Admin",

@@ -2,6 +2,7 @@ use crate::models::auth::WebUser;
 use crate::models::network::KnownDevice;
 use crate::models::notifications::NotificationConfig;
 use crate::models::printers3d::Printer3DConfig;
+use crate::models::tasks::TasksConfig;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -15,6 +16,8 @@ pub struct LabNasConfig {
     pub known_devices: Vec<KnownDevice>,
     #[serde(default)]
     pub web_users: Vec<WebUser>,
+    #[serde(default)]
+    pub tasks: TasksConfig,
 }
 
 pub fn config_path() -> PathBuf {
