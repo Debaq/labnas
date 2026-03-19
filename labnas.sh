@@ -19,7 +19,7 @@ header() {
     clear
     echo -e "${PURPLE}${BOLD}"
     echo "  ╔═══════════════════════════════════════╗"
-    echo "  ║             LabNAS v0.3.0             ║"
+    echo "  ║             LabNAS v0.4.0             ║"
     echo "  ║   NAS de Laboratorio + Scanner Red    ║"
     echo "  ╚═══════════════════════════════════════╝"
     echo -e "${NC}"

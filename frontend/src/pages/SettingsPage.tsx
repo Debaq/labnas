@@ -550,7 +550,7 @@ export default function SettingsPage() {
               Version
             </span>
             <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-              LabNAS v0.3.0
+              LabNAS v0.4.0
             </span>
           </div>
           {sysInfo && (
