@@ -392,3 +392,107 @@ pub async fn delete_task(
 
     Ok(StatusCode::NO_CONTENT)
 }
+
+// ---- Eventos / Calendario ----
+
+#[derive(Debug, Deserialize)]
+pub struct CreateEventRequest {
+    pub title: String,
+    pub date: String,
+    pub time: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub invitees: Vec<String>,
+    #[serde(default = "default_event_rem")]
+    pub remind_before_min: u32,
+}
+
+fn default_event_rem() -> u32 { 15 }
+
+pub async fn list_events(State(state): State<AppState>) -> Json<Vec<CalendarEvent>> {
+    let config = state.config.lock().await;
+    Json(config.tasks.events.clone())
+}
+
+pub async fn create_event(
+    State(state): State<AppState>,
+    Json(req): Json<CreateEventRequest>,
+) -> Result<Json<CalendarEvent>, (StatusCode, String)> {
+    if req.title.trim().is_empty() || req.date.is_empty() || req.time.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Titulo, fecha y hora requeridos".to_string()));
+    }
+    let event = CalendarEvent {
+        id: uuid::Uuid::new_v4().to_string()[..6].to_string(),
+        title: req.title.trim().to_string(),
+        description: req.description,
+        date: req.date,
+        time: req.time,
+        created_by: "web".to_string(),
+        invitees: req.invitees,
+        accepted: Vec::new(),
+        declined: Vec::new(),
+        remind_before_min: req.remind_before_min,
+        reminded: false,
+        created_at: Utc::now(),
+    };
+    let mut config = state.config.lock().await;
+    config.tasks.events.push(event.clone());
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    drop(config);
+    state.log_activity("evento", &event.title, "web").await;
+    Ok(Json(event))
+}
+
+pub async fn delete_event(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let mut config = state.config.lock().await;
+    let before = config.tasks.events.len();
+    config.tasks.events.retain(|e| e.id != id);
+    if config.tasks.events.len() == before {
+        return Err((StatusCode::NOT_FOUND, "Evento no encontrado".to_string()));
+    }
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EventUserAction {
+    pub user: String,
+}
+
+pub async fn accept_event(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<EventUserAction>,
+) -> Result<Json<CalendarEvent>, (StatusCode, String)> {
+    let mut config = state.config.lock().await;
+    let event = config.tasks.events.iter_mut().find(|e| e.id == id)
+        .ok_or((StatusCode::NOT_FOUND, "Evento no encontrado".to_string()))?;
+    event.declined.retain(|u| u != &req.user);
+    if !event.accepted.contains(&req.user) {
+        event.accepted.push(req.user);
+    }
+    let result = event.clone();
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(result))
+}
+
+pub async fn decline_event(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<EventUserAction>,
+) -> Result<Json<CalendarEvent>, (StatusCode, String)> {
+    let mut config = state.config.lock().await;
+    let event = config.tasks.events.iter_mut().find(|e| e.id == id)
+        .ok_or((StatusCode::NOT_FOUND, "Evento no encontrado".to_string()))?;
+    event.accepted.retain(|u| u != &req.user);
+    if !event.declined.contains(&req.user) {
+        event.declined.push(req.user);
+    }
+    let result = event.clone();
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(result))
+}

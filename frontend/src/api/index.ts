@@ -13,6 +13,7 @@ import type {
   PrintFileRequest,
   Task,
   Project,
+  CalendarEvent,
 } from '../types'
 
 // --- Files ---
@@ -417,4 +418,50 @@ export async function doneTask(id: string): Promise<Task> {
 export async function deleteTask(id: string): Promise<void> {
   const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar tarea')
+}
+
+// --- Calendar Events ---
+
+export async function fetchEvents(): Promise<CalendarEvent[]> {
+  const res = await fetch('/api/events')
+  if (!res.ok) throw new Error('Error al obtener eventos')
+  return res.json()
+}
+
+export async function createEvent(data: {
+  title: string; date: string; time: string;
+  description?: string; invitees?: string[]; remind_before_min?: number
+}): Promise<CalendarEvent> {
+  const res = await fetch('/api/events', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Error al crear evento')
+  return res.json()
+}
+
+export async function deleteEvent(id: string): Promise<void> {
+  const res = await fetch(`/api/events/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar evento')
+}
+
+export async function acceptEvent(id: string, user: string): Promise<CalendarEvent> {
+  const res = await fetch(`/api/events/${id}/accept`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user }),
+  })
+  if (!res.ok) throw new Error('Error al aceptar evento')
+  return res.json()
+}
+
+export async function declineEvent(id: string, user: string): Promise<CalendarEvent> {
+  const res = await fetch(`/api/events/${id}/decline`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user }),
+  })
+  if (!res.ok) throw new Error('Error al rechazar evento')
+  return res.json()
 }

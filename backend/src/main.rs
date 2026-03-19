@@ -105,6 +105,12 @@ async fn main() {
         .route("/api/tasks/{id}/confirm", post(handlers::tasks::confirm_task))
         .route("/api/tasks/{id}/reject", post(handlers::tasks::reject_task))
         .route("/api/tasks/{id}/done", post(handlers::tasks::done_task))
+        // Calendar Events
+        .route("/api/events", get(handlers::tasks::list_events))
+        .route("/api/events", post(handlers::tasks::create_event))
+        .route("/api/events/{id}", delete(handlers::tasks::delete_event))
+        .route("/api/events/{id}/accept", post(handlers::tasks::accept_event))
+        .route("/api/events/{id}/decline", post(handlers::tasks::decline_event))
         .layer(cors)
         .with_state(state.clone());
 

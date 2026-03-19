@@ -350,6 +350,10 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
     drop(config);
 
     let response = match text {
+        s if s.starts_with("/evento ") => handle_event_command(state, &chat_name, s).await,
+        s if s.starts_with("/eventos") => handle_list_events(state, &chat_name).await,
+        s if s.starts_with("/aceptar ") => handle_event_rsvp(state, &chat_name, s, true).await,
+        s if s.starts_with("/declinar ") => handle_event_rsvp(state, &chat_name, s, false).await,
         s if s.starts_with("/vincular ") => handle_link_command(state, chat_id, &chat_name, s).await,
         s if s.starts_with("/proyecto ") => handle_project_command(state, &chat_name, s).await,
         s if s.starts_with("/proyectos") => handle_list_projects(state, &chat_name).await,
@@ -486,6 +490,137 @@ async fn register_chat(state: &AppState, token: &str, msg: &TgMessage) {
 // =====================
 // Command responses
 // =====================
+
+// =====================
+// Calendar events (Telegram)
+// =====================
+
+use crate::models::tasks::CalendarEvent;
+
+async fn handle_event_command(state: &AppState, creator: &str, text: &str) -> String {
+    let args = text.strip_prefix("/evento ").unwrap_or("").trim();
+    // Format: /evento 2026-03-20 14:30 Titulo @persona
+    let parts: Vec<&str> = args.splitn(3, ' ').collect();
+    if parts.len() < 3 {
+        return "Uso: `/evento 2026-03-20 14:30 Titulo @persona`\nEj: `/evento 2026-03-25 10:00 Reunion equipo @all`".to_string();
+    }
+    let date = parts[0].to_string();
+    let time = parts[1].to_string();
+    let rest = parts[2];
+
+    let mut title_parts = Vec::new();
+    let mut invitees = Vec::new();
+    for word in rest.split_whitespace() {
+        if let Some(mention) = word.strip_prefix('@') {
+            invitees.push(mention.to_string());
+        } else {
+            title_parts.push(word);
+        }
+    }
+    let title = title_parts.join(" ");
+    if title.is_empty() {
+        return "El evento necesita un titulo.".to_string();
+    }
+
+    let event = CalendarEvent {
+        id: uuid::Uuid::new_v4().to_string()[..6].to_string(),
+        title: title.clone(),
+        description: String::new(),
+        date: date.clone(),
+        time: time.clone(),
+        created_by: creator.to_string(),
+        invitees: invitees.clone(),
+        accepted: Vec::new(),
+        declined: Vec::new(),
+        remind_before_min: 15,
+        reminded: false,
+        created_at: chrono::Utc::now(),
+    };
+    let id = event.id.clone();
+
+    let mut config = state.config.lock().await;
+    config.tasks.events.push(event);
+    let _ = save_config(&config).await;
+
+    // Notify invitees
+    let token = config.notifications.bot_token.clone();
+    let chats = config.notifications.telegram_chats.clone();
+    drop(config);
+
+    if let Some(token) = token {
+        let inv_str = if invitees.contains(&"all".to_string()) { "todos".to_string() } else { invitees.join(", ") };
+        let alert = format!("📅 *Nuevo evento*\n\n*{}*\nFecha: {} {}\nDe: {}\nInvitados: {}\n\n`/aceptar {}` o `/declinar {}`",
+            title, date, time, creator, inv_str, id, id);
+        let targets: Vec<i64> = if invitees.contains(&"all".to_string()) {
+            chats.iter().filter(|c| c.role != UserRole::Pendiente && c.name != creator).map(|c| c.chat_id).collect()
+        } else {
+            chats.iter().filter(|c| invitees.iter().any(|i| i.to_lowercase() == c.name.to_lowercase())).map(|c| c.chat_id).collect()
+        };
+        for cid in &targets {
+            let _ = send_telegram_message(&state.http_client, &token, *cid, &alert).await;
+        }
+    }
+
+    format!("📅 Evento *{}* creado\n{} {}\nID: `{}`", title, date, time, id)
+}
+
+async fn handle_list_events(state: &AppState, user: &str) -> String {
+    let config = state.config.lock().await;
+    let events: Vec<&CalendarEvent> = config.tasks.events.iter()
+        .filter(|e| {
+            e.created_by == user || e.invitees.contains(&"all".to_string()) ||
+            e.invitees.iter().any(|i| i.to_lowercase() == user.to_lowercase())
+        })
+        .collect();
+
+    if events.is_empty() {
+        return "📅 *Mis eventos*\n\nNo tienes eventos. Crea uno con `/evento`".to_string();
+    }
+
+    let mut msg = format!("📅 *Mis eventos* ({})\n", events.len());
+    for e in &events {
+        let status = if e.accepted.iter().any(|a| a.to_lowercase() == user.to_lowercase()) {
+            "aceptado"
+        } else if e.declined.iter().any(|d| d.to_lowercase() == user.to_lowercase()) {
+            "rechazado"
+        } else if e.created_by == user {
+            "creador"
+        } else {
+            "pendiente"
+        };
+        msg.push_str(&format!("\n`{}` *{}*\n  {} {} | {}\n", e.id, e.title, e.date, e.time, status));
+    }
+    msg
+}
+
+async fn handle_event_rsvp(state: &AppState, user: &str, text: &str, accept: bool) -> String {
+    let cmd = if accept { "/aceptar " } else { "/declinar " };
+    let id = text.strip_prefix(cmd).unwrap_or("").trim();
+    if id.is_empty() {
+        return format!("Uso: `{}<ID>`", cmd);
+    }
+    let mut config = state.config.lock().await;
+    let event = config.tasks.events.iter_mut().find(|e| e.id == id);
+    let Some(event) = event else {
+        return format!("Evento `{}` no encontrado.", id);
+    };
+    let title = event.title.clone();
+    if accept {
+        event.declined.retain(|u| u != user);
+        if !event.accepted.contains(&user.to_string()) {
+            event.accepted.push(user.to_string());
+        }
+        let _ = save_config(&config).await;
+        format!("Evento *{}* aceptado.", title)
+    } else {
+        event.accepted.retain(|u| u != user);
+        if !event.declined.contains(&user.to_string()) {
+            event.declined.push(user.to_string());
+        }
+        let _ = save_config(&config).await;
+        format!("Evento *{}* rechazado.", title)
+    }
+}
 
 // =====================
 // Account linking
@@ -868,7 +1003,57 @@ pub async fn task_reminder_loop(state: AppState) {
         let _ = save_config(&config).await;
         drop(config);
 
-        // Send reminders
+        // Check calendar events
+        let mut config = state.config.lock().await;
+        let local_now = chrono::Local::now();
+        let today = local_now.format("%Y-%m-%d").to_string();
+
+        for event in &mut config.tasks.events {
+            if event.reminded || event.date != today {
+                continue;
+            }
+            // Parse event time
+            let parts: Vec<&str> = event.time.split(':').collect();
+            if parts.len() != 2 {
+                continue;
+            }
+            let (eh, em) = match (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                (Ok(h), Ok(m)) => (h, m),
+                _ => continue,
+            };
+            let event_min = eh * 60 + em;
+            let now_min = local_now.format("%H").to_string().parse::<u32>().unwrap_or(0) * 60
+                + local_now.format("%M").to_string().parse::<u32>().unwrap_or(0);
+            let remind_at = event_min.saturating_sub(event.remind_before_min);
+
+            if now_min >= remind_at && now_min < event_min {
+                let mins_left = event_min.saturating_sub(now_min);
+                let msg = format!(
+                    "📅 *Evento en {} min*\n\n*{}*\nHora: {}\n{}",
+                    mins_left, event.title, event.time,
+                    if event.description.is_empty() { String::new() } else { format!("\n{}", event.description) }
+                );
+
+                // Send to creator + invitees
+                let targets: Vec<i64> = if event.invitees.contains(&"all".to_string()) {
+                    chats.iter().filter(|c| c.role != UserRole::Pendiente).map(|c| c.chat_id).collect()
+                } else {
+                    let mut ids: Vec<i64> = chats.iter()
+                        .filter(|c| event.invitees.iter().any(|i| i.to_lowercase() == c.name.to_lowercase()) || c.name == event.created_by)
+                        .map(|c| c.chat_id)
+                        .collect();
+                    ids.dedup();
+                    ids
+                };
+
+                to_remind.push((msg, targets));
+                event.reminded = true;
+            }
+        }
+        let _ = save_config(&config).await;
+        drop(config);
+
+        // Send all reminders
         for (msg, ids) in &to_remind {
             for id in ids {
                 let _ = send_telegram_message(&state.http_client, &token, *id, msg).await;
@@ -884,6 +1069,11 @@ fn build_help_message(role: &UserRole) -> String {
     msg.push_str("/uptime /red /impresoras\n");
     msg.push_str("/actividad /horario /mirol\n");
     msg.push_str("/vincular CODIGO - Vincular con web\n\n");
+    msg.push_str("*Calendario*\n");
+    msg.push_str("/evento FECHA HORA Titulo @persona\n");
+    msg.push_str("/eventos - Mis eventos\n");
+    msg.push_str("/aceptar ID - Aceptar invitacion\n");
+    msg.push_str("/declinar ID - Rechazar invitacion\n\n");
     msg.push_str("*Tareas y Proyectos*\n");
     msg.push_str("/tarea Titulo @persona - Crear tarea\n");
     msg.push_str("/tarea Titulo @all !confirmar - Confirmar\n");

@@ -25,8 +25,13 @@ import {
   rejectTask,
   doneTask,
   deleteTask,
+  fetchEvents,
+  createEvent,
+  deleteEvent,
+  acceptEvent,
+  declineEvent,
 } from '../api'
-import type { Task, Project, TaskStatus } from '../types'
+import type { Task, Project, TaskStatus, CalendarEvent } from '../types'
 import { useAuth } from '../auth/AuthContext'
 
 const STATUS_CONFIG: Record<TaskStatus, { label: string; color: string; alpha: string }> = {
@@ -40,6 +45,7 @@ const STATUS_ORDER: TaskStatus[] = ['pendiente', 'enprogreso', 'completada', 're
 
 export default function TasksPage() {
   const { user } = useAuth()
+  const [tab, setTab] = useState<'tareas' | 'calendario'>('tareas')
   const [projects, setProjects] = useState<Project[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
@@ -47,6 +53,15 @@ export default function TasksPage() {
   const [showNewProject, setShowNewProject] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
   const [showTaskModal, setShowTaskModal] = useState(false)
+
+  // Calendario
+  const [events, setEvents] = useState<CalendarEvent[]>([])
+  const [showEventModal, setShowEventModal] = useState(false)
+  const [eventTitle, setEventTitle] = useState('')
+  const [eventDate, setEventDate] = useState('')
+  const [eventTime, setEventTime] = useState('')
+  const [eventInvitees, setEventInvitees] = useState('')
+  const [eventRemind, setEventRemind] = useState(15)
 
   // Formulario de nueva tarea
   const [taskTitle, setTaskTitle] = useState('')
@@ -60,9 +75,10 @@ export default function TasksPage() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [p, t] = await Promise.all([fetchProjects(), fetchTasks()])
+      const [p, t, e] = await Promise.all([fetchProjects(), fetchTasks(), fetchEvents()])
       setProjects(p)
       setTasks(t)
+      setEvents(e)
     } catch {
       // silenciar
     } finally {
@@ -182,6 +198,190 @@ export default function TasksPage() {
   }
 
   return (
+    <div className="space-y-6">
+      {/* Tabs */}
+      <div className="flex gap-1 p-1 rounded-lg w-fit" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+        <button
+          onClick={() => setTab('tareas')}
+          className="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+          style={{
+            backgroundColor: tab === 'tareas' ? 'var(--card-bg)' : 'transparent',
+            color: tab === 'tareas' ? 'var(--accent)' : 'var(--text-secondary)',
+            boxShadow: tab === 'tareas' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+          }}
+        >
+          <span className="flex items-center gap-2"><ClipboardList size={16} />Tareas</span>
+        </button>
+        <button
+          onClick={() => setTab('calendario')}
+          className="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+          style={{
+            backgroundColor: tab === 'calendario' ? 'var(--card-bg)' : 'transparent',
+            color: tab === 'calendario' ? 'var(--accent)' : 'var(--text-secondary)',
+            boxShadow: tab === 'calendario' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+          }}
+        >
+          <span className="flex items-center gap-2"><Calendar size={16} />Calendario</span>
+        </button>
+      </div>
+
+      {/* Calendario */}
+      {tab === 'calendario' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+              {events.length} evento{events.length !== 1 ? 's' : ''}
+            </span>
+            <button
+              onClick={() => { setShowEventModal(true); setEventTitle(''); setEventDate(''); setEventTime(''); setEventInvitees(''); setEventRemind(15) }}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
+              style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
+            >
+              <Plus size={16} />Nuevo Evento
+            </button>
+          </div>
+
+          {events.length === 0 ? (
+            <div className="rounded-xl p-12 text-center" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
+              <Calendar size={40} className="mx-auto mb-3" style={{ color: 'var(--text-secondary)' }} />
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>No hay eventos</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {events
+                .slice()
+                .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))
+                .map(ev => {
+                  const isPast = `${ev.date} ${ev.time}` < new Date().toISOString().slice(0, 16).replace('T', ' ')
+                  return (
+                    <div
+                      key={ev.id}
+                      className="rounded-xl p-5"
+                      style={{
+                        backgroundColor: 'var(--card-bg)',
+                        border: '1px solid var(--card-border)',
+                        opacity: isPast ? 0.5 : 1,
+                      }}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{ev.title}</h3>
+                          <p className="text-xs mt-1 font-mono" style={{ color: 'var(--accent)' }}>
+                            {ev.date} {ev.time}
+                          </p>
+                          <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
+                            Por: {ev.created_by} | Aviso: {ev.remind_before_min}min antes
+                          </p>
+                          {ev.invitees.length > 0 && (
+                            <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
+                              Invitados: {ev.invitees.join(', ')}
+                            </p>
+                          )}
+                          {(ev.accepted.length > 0 || ev.declined.length > 0) && (
+                            <div className="flex gap-3 mt-2 text-xs">
+                              {ev.accepted.length > 0 && (
+                                <span style={{ color: 'var(--success)' }}>Aceptaron: {ev.accepted.join(', ')}</span>
+                              )}
+                              {ev.declined.length > 0 && (
+                                <span style={{ color: 'var(--danger)' }}>Rechazaron: {ev.declined.join(', ')}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {user && !ev.accepted.includes(user.username) && !ev.declined.includes(user.username) && ev.created_by !== user.username && (
+                            <>
+                              <button
+                                onClick={async () => { await acceptEvent(ev.id, user!.username); await loadData() }}
+                                className="px-2 py-1 rounded-lg text-xs font-medium"
+                                style={{ color: 'var(--success)', border: '1px solid var(--success)' }}
+                              >Aceptar</button>
+                              <button
+                                onClick={async () => { await declineEvent(ev.id, user!.username); await loadData() }}
+                                className="px-2 py-1 rounded-lg text-xs font-medium"
+                                style={{ color: 'var(--danger)', border: '1px solid var(--danger)' }}
+                              >Rechazar</button>
+                            </>
+                          )}
+                          <button
+                            onClick={async () => { await deleteEvent(ev.id); await loadData() }}
+                            className="p-1.5 rounded-lg hover:opacity-80"
+                            style={{ color: 'var(--danger)' }}
+                          ><Trash2 size={14} /></button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+            </div>
+          )}
+
+          {/* Event Modal */}
+          {showEventModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+              <div className="rounded-xl p-6 w-full max-w-md mx-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Nuevo Evento</h3>
+                  <button onClick={() => setShowEventModal(false)} style={{ color: 'var(--text-secondary)' }}><X size={20} /></button>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Titulo</label>
+                    <input value={eventTitle} onChange={e => setEventTitle(e.target.value)} placeholder="Reunion de equipo"
+                      className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Fecha</label>
+                      <input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                        style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Hora</label>
+                      <input type="time" value={eventTime} onChange={e => setEventTime(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                        style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Invitados (separar con comas, o "all")</label>
+                    <input value={eventInvitees} onChange={e => setEventInvitees(e.target.value)} placeholder="nick, ana, all"
+                      className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Avisar (minutos antes)</label>
+                    <input type="number" min={1} value={eventRemind} onChange={e => setEventRemind(parseInt(e.target.value) || 15)}
+                      className="w-24 px-3 py-2 rounded-lg text-sm outline-none"
+                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-3 mt-5">
+                  <button onClick={() => setShowEventModal(false)} className="px-4 py-2 rounded-lg text-sm font-medium"
+                    style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>Cancelar</button>
+                  <button
+                    onClick={async () => {
+                      if (!eventTitle.trim() || !eventDate || !eventTime) return
+                      const invitees = eventInvitees.split(',').map(s => s.trim()).filter(Boolean)
+                      await createEvent({ title: eventTitle, date: eventDate, time: eventTime, invitees, remind_before_min: eventRemind })
+                      setShowEventModal(false)
+                      await loadData()
+                    }}
+                    disabled={!eventTitle.trim() || !eventDate || !eventTime}
+                    className="px-4 py-2 rounded-lg text-sm font-medium"
+                    style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
+                  >Crear</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tareas */}
+      {tab === 'tareas' && (
     <div className="flex gap-6 h-full" style={{ minHeight: 0 }}>
       {/* Sidebar de proyectos */}
       <div
@@ -537,6 +737,8 @@ export default function TasksPage() {
             </div>
           </div>
         </div>
+      )}
+    </div>
       )}
     </div>
   )

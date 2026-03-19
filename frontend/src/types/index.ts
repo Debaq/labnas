@@ -194,6 +194,20 @@ export interface Task {
   created_at: string
 }
 
+export interface CalendarEvent {
+  id: string
+  title: string
+  description: string
+  date: string
+  time: string
+  created_by: string
+  invitees: string[]
+  accepted: string[]
+  declined: string[]
+  remind_before_min: number
+  created_at: string
+}
+
 export interface Project {
   id: string
   name: string

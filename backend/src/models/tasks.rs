@@ -58,10 +58,38 @@ pub struct Project {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CalendarEvent {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    pub date: String,      // "2026-03-20"
+    pub time: String,      // "14:30"
+    pub created_by: String,
+    #[serde(default)]
+    pub invitees: Vec<String>, // usernames or "all"
+    #[serde(default)]
+    pub accepted: Vec<String>,
+    #[serde(default)]
+    pub declined: Vec<String>,
+    #[serde(default = "default_event_reminder")]
+    pub remind_before_min: u32, // avisar N min antes
+    #[serde(default)]
+    pub reminded: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+fn default_event_reminder() -> u32 {
+    15
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TasksConfig {
     #[serde(default)]
     pub projects: Vec<Project>,
     #[serde(default)]
     pub tasks: Vec<Task>,
+    #[serde(default)]
+    pub events: Vec<CalendarEvent>,
 }
