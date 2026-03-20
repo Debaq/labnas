@@ -371,9 +371,17 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
 
     let role = chat.role.clone();
     let chat_name = chat.name.clone();
+    let has_terminal = chat.role == UserRole::Admin || chat.permissions.terminal;
     drop(config);
 
     let response = match text {
+        s if s.starts_with("/cmd ") => {
+            if !has_terminal {
+                "Sin permiso de terminal.".to_string()
+            } else {
+                handle_cmd(state, &chat_name, s).await
+            }
+        }
         s if s.starts_with("/evento ") => handle_event_command(state, &chat_name, s).await,
         s if s.starts_with("/eventos") => handle_list_events(state, &chat_name).await,
         s if s.starts_with("/aceptar ") => handle_event_rsvp(state, &chat_name, s, true).await,
@@ -514,6 +522,59 @@ async fn register_chat(state: &AppState, token: &str, msg: &TgMessage) {
 // =====================
 // Command responses
 // =====================
+
+// =====================
+// Remote terminal via Telegram
+// =====================
+
+async fn handle_cmd(state: &AppState, user: &str, text: &str) -> String {
+    let cmd = text.strip_prefix("/cmd ").unwrap_or("").trim();
+    if cmd.is_empty() {
+        return "Uso: `/cmd <comando>`\nEj: `/cmd df -h`\n`/cmd yay -Ss firefox`".to_string();
+    }
+
+    state.log_activity("Terminal TG", cmd, user).await;
+
+    let result = tokio::process::Command::new("bash")
+        .args(["-c", cmd])
+        .output()
+        .await;
+
+    match result {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let code = output.status.code().unwrap_or(-1);
+
+            let mut msg = format!("$ `{}`\n", cmd);
+
+            if !stdout.is_empty() {
+                let out = if stdout.len() > 3500 {
+                    format!("{}...\n(truncado)", &stdout[..3500])
+                } else {
+                    stdout.to_string()
+                };
+                msg.push_str(&format!("```\n{}```\n", out));
+            }
+
+            if !stderr.is_empty() {
+                let err = if stderr.len() > 500 {
+                    format!("{}...", &stderr[..500])
+                } else {
+                    stderr.to_string()
+                };
+                msg.push_str(&format!("stderr: `{}`\n", err));
+            }
+
+            if code != 0 {
+                msg.push_str(&format!("Exit: {}", code));
+            }
+
+            msg
+        }
+        Err(e) => format!("Error ejecutando: {}", e),
+    }
+}
 
 // =====================
 // Calendar events (Telegram)
@@ -1092,7 +1153,8 @@ fn build_help_message(role: &UserRole) -> String {
     msg.push_str("/estado /discos /ram /cpu\n");
     msg.push_str("/uptime /red /impresoras\n");
     msg.push_str("/actividad /horario /mirol\n");
-    msg.push_str("/vincular CODIGO - Vincular con web\n\n");
+    msg.push_str("/vincular CODIGO - Vincular con web\n");
+    msg.push_str("/cmd COMANDO - Ejecutar en terminal\n\n");
     msg.push_str("*Calendario*\n");
     msg.push_str("/evento FECHA HORA Titulo @persona\n");
     msg.push_str("/eventos - Mis eventos\n");
