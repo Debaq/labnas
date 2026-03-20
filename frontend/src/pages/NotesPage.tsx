@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { Plus, Trash2, Save, FileText, Eye, Edit3, Loader2, X } from 'lucide-react'
+import { Plus, Trash2, Save, FileText, Edit3, Loader2, X } from 'lucide-react'
 import { fetchNotes, createNote, updateNote, deleteNote } from '../api'
 import type { Note } from '../types/notes'
 
