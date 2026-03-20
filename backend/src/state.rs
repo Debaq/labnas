@@ -37,6 +37,14 @@ pub struct AppState {
     pub sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
     pub link_codes: Arc<Mutex<HashMap<String, LinkCode>>>,
     pub share_links: Arc<Mutex<HashMap<String, ShareLink>>>,
+    pub tg_terminals: Arc<Mutex<HashMap<i64, TgTerminal>>>,
+}
+
+pub struct TgTerminal {
+    pub stdin: tokio::process::ChildStdin,
+    pub output_rx: tokio::sync::mpsc::Receiver<String>,
+    pub child: tokio::process::Child,
+    pub created_at: Instant,
 }
 
 #[derive(Debug, Clone)]

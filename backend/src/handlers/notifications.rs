@@ -379,7 +379,16 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
             if !has_terminal {
                 "Sin permiso de terminal.".to_string()
             } else {
-                handle_cmd(state, &chat_name, s).await
+                handle_cmd(state, chat_id, &chat_name, s).await
+            }
+        }
+        "/kill" => {
+            let mut terms = state.tg_terminals.lock().await;
+            if let Some(mut session) = terms.remove(&chat_id) {
+                let _ = session.child.kill().await;
+                "Proceso terminado.".to_string()
+            } else {
+                "No hay proceso activo.".to_string()
             }
         }
         s if s.starts_with("/evento ") => handle_event_command(state, &chat_name, s).await,
@@ -420,7 +429,18 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
             format!("{} Tu rol: *{}*", emoji, role_name)
         }
         s if s.starts_with("/ayuda") | s.starts_with("/help") => build_help_message(&role),
-        _ => return,
+        _ => {
+            // Check if user has active terminal session - pipe input
+            if has_terminal {
+                if let Some(output) = pipe_terminal_input(state, chat_id, text).await {
+                    output
+                } else {
+                    return; // No session, ignore non-command
+                }
+            } else {
+                return;
+            }
+        }
     };
 
     if let Err(e) =
@@ -527,53 +547,192 @@ async fn register_chat(state: &AppState, token: &str, msg: &TgMessage) {
 // Remote terminal via Telegram
 // =====================
 
-async fn handle_cmd(state: &AppState, user: &str, text: &str) -> String {
+async fn handle_cmd(state: &AppState, chat_id: i64, user: &str, text: &str) -> String {
+    use tokio::io::AsyncBufReadExt;
+    use tokio::process::Command as TokioCmd;
+    use std::process::Stdio;
+
     let cmd = text.strip_prefix("/cmd ").unwrap_or("").trim();
     if cmd.is_empty() {
-        return "Uso: `/cmd <comando>`\nEj: `/cmd df -h`\n`/cmd yay -Ss firefox`".to_string();
+        return "Uso: `/cmd <comando>`\nEj: `/cmd df -h`\n`/cmd sudo pacman -Syu`\n\nSi pide input, envia texto normal (sin /).\n`/kill` para terminar proceso.".to_string();
+    }
+
+    // Kill existing session if any
+    {
+        let mut terms = state.tg_terminals.lock().await;
+        if let Some(mut old) = terms.remove(&chat_id) {
+            let _ = old.child.kill().await;
+        }
     }
 
     state.log_activity("Terminal TG", cmd, user).await;
 
-    let result = tokio::process::Command::new("bash")
+    // Spawn process with piped I/O
+    let child_result = TokioCmd::new("bash")
         .args(["-c", cmd])
-        .output()
-        .await;
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
 
-    match result {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let code = output.status.code().unwrap_or(-1);
+    let mut child = match child_result {
+        Ok(c) => c,
+        Err(e) => return format!("Error: {}", e),
+    };
 
-            let mut msg = format!("$ `{}`\n", cmd);
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let stdin = child.stdin.take().unwrap();
 
-            if !stdout.is_empty() {
-                let out = if stdout.len() > 3500 {
-                    format!("{}...\n(truncado)", &stdout[..3500])
-                } else {
-                    stdout.to_string()
-                };
-                msg.push_str(&format!("```\n{}```\n", out));
-            }
+    // Channel for output
+    let (tx, rx) = tokio::sync::mpsc::channel::<String>(100);
 
-            if !stderr.is_empty() {
-                let err = if stderr.len() > 500 {
-                    format!("{}...", &stderr[..500])
-                } else {
-                    stderr.to_string()
-                };
-                msg.push_str(&format!("stderr: `{}`\n", err));
-            }
-
-            if code != 0 {
-                msg.push_str(&format!("Exit: {}", code));
-            }
-
-            msg
+    // Read stdout
+    let tx2 = tx.clone();
+    tokio::spawn(async move {
+        let reader = tokio::io::BufReader::new(stdout);
+        let mut lines = reader.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if tx2.send(line).await.is_err() { break; }
         }
-        Err(e) => format!("Error ejecutando: {}", e),
+    });
+
+    // Read stderr
+    tokio::spawn(async move {
+        let reader = tokio::io::BufReader::new(stderr);
+        let mut lines = reader.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if tx.send(format!("[err] {}", line)).await.is_err() { break; }
+        }
+    });
+
+    // Wait a bit for initial output
+    let output = collect_output(rx, child, stdin, state, chat_id, cmd).await;
+    output
+}
+
+async fn collect_output(
+    mut rx: tokio::sync::mpsc::Receiver<String>,
+    child: tokio::process::Child,
+    stdin: tokio::process::ChildStdin,
+    state: &AppState,
+    chat_id: i64,
+    cmd: &str,
+) -> String {
+    let mut lines = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+
+    loop {
+        let timeout = tokio::time::timeout_at(deadline, rx.recv()).await;
+        match timeout {
+            Ok(Some(line)) => lines.push(line),
+            _ => break,
+        }
     }
+
+    // Check if process is still running
+    let mut terms = state.tg_terminals.lock().await;
+
+    // Try to check if child exited
+    let mut child = child;
+    let still_alive = child.try_wait().map(|s| s.is_none()).unwrap_or(false);
+
+    let mut msg = format!("$ `{}`\n", cmd);
+    if !lines.is_empty() {
+        let output = lines.join("\n");
+        let output = if output.len() > 3500 {
+            format!("{}...(truncado)", &output[..3500])
+        } else {
+            output
+        };
+        msg.push_str(&format!("```\n{}```", output));
+    }
+
+    if still_alive {
+        // Process waiting for input - save session
+        terms.insert(chat_id, crate::state::TgTerminal {
+            stdin,
+            output_rx: rx,
+            child,
+            created_at: std::time::Instant::now(),
+        });
+        msg.push_str("\n_Proceso activo. Envia texto para input o /kill para terminar._");
+    } else {
+        let code = child.wait().await.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
+        if lines.is_empty() {
+            msg.push_str("_(sin salida)_");
+        }
+        if code != 0 {
+            msg.push_str(&format!("\nExit: {}", code));
+        }
+    }
+
+    msg
+}
+
+async fn pipe_terminal_input(state: &AppState, chat_id: i64, input: &str) -> Option<String> {
+    use tokio::io::AsyncWriteExt;
+
+    let mut terms = state.tg_terminals.lock().await;
+    let session = terms.get_mut(&chat_id)?;
+
+    // Check timeout (5 min)
+    if session.created_at.elapsed().as_secs() > 300 {
+        let mut session = terms.remove(&chat_id).unwrap();
+        let _ = session.child.kill().await;
+        return Some("Sesion expirada (5 min).".to_string());
+    }
+
+    // Write input to stdin
+    let write_result = session.stdin.write_all(format!("{}\n", input).as_bytes()).await;
+    if write_result.is_err() {
+        let mut session = terms.remove(&chat_id).unwrap();
+        let _ = session.child.kill().await;
+        return Some("Proceso termino.".to_string());
+    }
+
+    // Collect output
+    let mut lines = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+
+    loop {
+        let timeout = tokio::time::timeout_at(deadline, session.output_rx.recv()).await;
+        match timeout {
+            Ok(Some(line)) => lines.push(line),
+            _ => break,
+        }
+    }
+
+    // Check if still alive
+    let still_alive = session.child.try_wait().map(|s| s.is_none()).unwrap_or(false);
+
+    let mut msg = String::new();
+    if !lines.is_empty() {
+        let output = lines.join("\n");
+        let output = if output.len() > 3500 {
+            format!("{}...(truncado)", &output[..3500])
+        } else {
+            output
+        };
+        msg.push_str(&format!("```\n{}```", output));
+    }
+
+    if !still_alive {
+        let mut session = terms.remove(&chat_id).unwrap();
+        let code = session.child.wait().await.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
+        if code != 0 {
+            msg.push_str(&format!("\nExit: {}", code));
+        }
+        if msg.is_empty() {
+            msg = "Proceso termino.".to_string();
+        }
+    }
+
+    if msg.is_empty() {
+        msg = "_Esperando..._".to_string();
+    }
+
+    Some(msg)
 }
 
 // =====================

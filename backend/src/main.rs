@@ -33,6 +33,7 @@ async fn main() {
         sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
         link_codes: Arc::new(Mutex::new(std::collections::HashMap::new())),
         share_links: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        tg_terminals: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
 
     let cors = CorsLayer::new()
