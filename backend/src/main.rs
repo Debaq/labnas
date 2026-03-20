@@ -1,10 +1,12 @@
 mod config;
 mod handlers;
+mod middleware;
 mod models;
 mod state;
 
 use axum::{
     http::Method,
+    middleware as axum_mw,
     routing::{delete, get, post, put},
     Router,
 };
@@ -111,6 +113,7 @@ async fn main() {
         .route("/api/events/{id}", delete(handlers::tasks::delete_event))
         .route("/api/events/{id}/accept", post(handlers::tasks::accept_event))
         .route("/api/events/{id}/decline", post(handlers::tasks::decline_event))
+        .layer(axum_mw::from_fn_with_state(state.clone(), middleware::permission_check))
         .layer(cors)
         .with_state(state.clone());
 
