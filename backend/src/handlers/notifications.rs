@@ -13,19 +13,43 @@ use crate::models::notifications::*;
 use crate::models::tasks::{Project, Task, TaskStatus};
 use crate::state::AppState;
 
+/// Respuesta sanitizada de NotificationConfig que nunca expone el bot_token
+#[derive(serde::Serialize)]
+pub struct NotificationConfigResponse {
+    pub bot_configured: bool,
+    pub bot_username: Option<String>,
+    pub telegram_chats: Vec<TelegramChat>,
+    pub daily_enabled: bool,
+    pub daily_hour: u8,
+    pub daily_minute: u8,
+}
+
+impl From<&NotificationConfig> for NotificationConfigResponse {
+    fn from(config: &NotificationConfig) -> Self {
+        Self {
+            bot_configured: config.bot_token.is_some(),
+            bot_username: config.bot_username.clone(),
+            telegram_chats: config.telegram_chats.clone(),
+            daily_enabled: config.daily_enabled,
+            daily_hour: config.daily_hour,
+            daily_minute: config.daily_minute,
+        }
+    }
+}
+
 // =====================
 // API Handlers
 // =====================
 
-pub async fn get_config(State(state): State<AppState>) -> Json<NotificationConfig> {
+pub async fn get_config(State(state): State<AppState>) -> Json<NotificationConfigResponse> {
     let config = state.config.lock().await;
-    Json(config.notifications.clone())
+    Json(NotificationConfigResponse::from(&config.notifications))
 }
 
 pub async fn set_bot_token(
     State(state): State<AppState>,
     Json(req): Json<SetBotTokenRequest>,
-) -> Result<(StatusCode, Json<NotificationConfig>), (StatusCode, String)> {
+) -> Result<(StatusCode, Json<NotificationConfigResponse>), (StatusCode, String)> {
     let token = req.token.trim().to_string();
     if token.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Token vacio".to_string()));
@@ -49,8 +73,8 @@ pub async fn set_bot_token(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
-    let notif = config.notifications.clone();
-    Ok((StatusCode::OK, Json(notif)))
+    let resp = NotificationConfigResponse::from(&config.notifications);
+    Ok((StatusCode::OK, Json(resp)))
 }
 
 pub async fn delete_bot_token(

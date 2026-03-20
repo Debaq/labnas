@@ -1,14 +1,26 @@
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Json,
 };
 use chrono::Utc;
 use serde::Deserialize;
 
 use crate::config::save_config;
+use crate::models::notifications::UserRole;
 use crate::models::tasks::*;
 use crate::state::AppState;
+
+/// Extrae el username de la sesión a partir del header Authorization
+fn extract_username(_state: &AppState, sessions: &std::collections::HashMap<String, crate::state::SessionInfo>, headers: &HeaderMap) -> Option<(String, UserRole)> {
+    let token = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string())?;
+    let session = sessions.get(&token)?;
+    Some((session.username.clone(), session.role.clone()))
+}
 
 // ---- Proyectos ----
 
@@ -26,14 +38,20 @@ pub struct CreateProjectRequest {
 
 pub async fn create_project(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<CreateProjectRequest>,
 ) -> Result<(StatusCode, Json<Project>), (StatusCode, String)> {
+    let sessions = state.sessions.lock().await;
+    let (username, _role) = extract_username(&state, &sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
     let project = Project {
         id: uuid::Uuid::new_v4().to_string(),
         name: req.name.clone(),
         description: req.description,
-        created_by: "web".to_string(),
-        members: Vec::new(),
+        created_by: username.clone(),
+        members: vec![username.clone()],
         created_at: Utc::now(),
     };
 
@@ -44,7 +62,7 @@ pub async fn create_project(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
     state
-        .log_activity("proyecto_creado", &format!("Proyecto: {}", req.name), "web")
+        .log_activity("proyecto_creado", &format!("Proyecto: {}", req.name), &username)
         .await;
 
     Ok((StatusCode::CREATED, Json(project)))
@@ -52,25 +70,29 @@ pub async fn create_project(
 
 pub async fn delete_project(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    let sessions = state.sessions.lock().await;
+    let (username, role) = extract_username(&state, &sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
     let mut config = state.config.lock().await;
-    let before = config.tasks.projects.len();
-    let name = config
+    let project = config
         .tasks
         .projects
         .iter()
         .find(|p| p.id == id)
-        .map(|p| p.name.clone())
-        .unwrap_or_default();
+        .ok_or((StatusCode::NOT_FOUND, "Proyecto no encontrado".to_string()))?;
 
-    config.tasks.projects.retain(|p| p.id != id);
-    if config.tasks.projects.len() == before {
-        return Err((
-            StatusCode::NOT_FOUND,
-            "Proyecto no encontrado".to_string(),
-        ));
+    // Solo el creador o admin puede eliminar
+    if project.created_by != username && role != UserRole::Admin {
+        return Err((StatusCode::FORBIDDEN, "Sin permisos para eliminar este proyecto".to_string()));
     }
+
+    let name = project.name.clone();
+    config.tasks.projects.retain(|p| p.id != id);
 
     save_config(&config)
         .await
@@ -78,7 +100,7 @@ pub async fn delete_project(
 
     drop(config);
     state
-        .log_activity("proyecto_eliminado", &format!("Proyecto: {}", name), "web")
+        .log_activity("proyecto_eliminado", &format!("Proyecto: {}", name), &username)
         .await;
 
     Ok(StatusCode::NO_CONTENT)
@@ -142,8 +164,14 @@ fn default_reminder() -> u32 {
 
 pub async fn create_task(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<CreateTaskRequest>,
 ) -> Result<(StatusCode, Json<Task>), (StatusCode, String)> {
+    let sessions = state.sessions.lock().await;
+    let (username, _role) = extract_username(&state, &sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
     let task = Task {
         id: uuid::Uuid::new_v4().to_string(),
         project_id: req.project_id,
@@ -151,7 +179,7 @@ pub async fn create_task(
         description: String::new(),
         assigned_to: req.assigned_to,
         status: TaskStatus::Pendiente,
-        created_by: "web".to_string(),
+        created_by: username.clone(),
         due_date: req.due_date,
         requires_confirmation: req.requires_confirmation,
         insistent: req.insistent,
@@ -170,7 +198,7 @@ pub async fn create_task(
 
     drop(config);
     state
-        .log_activity("tarea_creada", &format!("Tarea: {}", req.title), "web")
+        .log_activity("tarea_creada", &format!("Tarea: {}", req.title), &username)
         .await;
 
     Ok((StatusCode::CREATED, Json(task)))
@@ -190,9 +218,15 @@ pub struct UpdateTaskRequest {
 
 pub async fn update_task(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     Json(req): Json<UpdateTaskRequest>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
+    let sessions = state.sessions.lock().await;
+    let (username, role) = extract_username(&state, &sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
     let mut config = state.config.lock().await;
     let task = config
         .tasks
@@ -200,6 +234,13 @@ pub async fn update_task(
         .iter_mut()
         .find(|t| t.id == id)
         .ok_or((StatusCode::NOT_FOUND, "Tarea no encontrada".to_string()))?;
+
+    // Solo el creador, asignados o admin pueden actualizar
+    let is_assigned = task.assigned_to.contains(&"all".to_string())
+        || task.assigned_to.iter().any(|a| a.to_lowercase() == username.to_lowercase());
+    if task.created_by != username && !is_assigned && role != UserRole::Admin {
+        return Err((StatusCode::FORBIDDEN, "Sin permisos para modificar esta tarea".to_string()));
+    }
 
     if let Some(title) = req.title {
         task.title = title;
@@ -247,7 +288,7 @@ pub async fn update_task(
         .log_activity(
             "tarea_actualizada",
             &format!("Tarea: {}", updated.title),
-            "web",
+            &username,
         )
         .await;
 
@@ -255,15 +296,23 @@ pub async fn update_task(
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub struct ConfirmRejectRequest {
     pub user: String,
 }
 
 pub async fn confirm_task(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
-    Json(req): Json<ConfirmRejectRequest>,
+    Json(_req): Json<ConfirmRejectRequest>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
+    // Ignorar user del body, usar el de la sesion
+    let sessions = state.sessions.lock().await;
+    let (username, _role) = extract_username(&state, &sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
     let mut config = state.config.lock().await;
     let task = config
         .tasks
@@ -272,11 +321,11 @@ pub async fn confirm_task(
         .find(|t| t.id == id)
         .ok_or((StatusCode::NOT_FOUND, "Tarea no encontrada".to_string()))?;
 
-    if !task.confirmed_by.contains(&req.user) {
-        task.confirmed_by.push(req.user.clone());
+    if !task.confirmed_by.contains(&username) {
+        task.confirmed_by.push(username.clone());
     }
     // Quitar de rechazados si estaba
-    task.rejected_by.retain(|u| u != &req.user);
+    task.rejected_by.retain(|u| u != &username);
 
     let updated = task.clone();
     save_config(&config)
@@ -287,8 +336,8 @@ pub async fn confirm_task(
     state
         .log_activity(
             "tarea_confirmada",
-            &format!("{} confirmo: {}", req.user, updated.title),
-            "web",
+            &format!("{} confirmo: {}", username, updated.title),
+            &username,
         )
         .await;
 
@@ -297,9 +346,16 @@ pub async fn confirm_task(
 
 pub async fn reject_task(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
-    Json(req): Json<ConfirmRejectRequest>,
+    Json(_req): Json<ConfirmRejectRequest>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
+    // Ignorar user del body, usar el de la sesion
+    let sessions = state.sessions.lock().await;
+    let (username, _role) = extract_username(&state, &sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
     let mut config = state.config.lock().await;
     let task = config
         .tasks
@@ -308,11 +364,11 @@ pub async fn reject_task(
         .find(|t| t.id == id)
         .ok_or((StatusCode::NOT_FOUND, "Tarea no encontrada".to_string()))?;
 
-    if !task.rejected_by.contains(&req.user) {
-        task.rejected_by.push(req.user.clone());
+    if !task.rejected_by.contains(&username) {
+        task.rejected_by.push(username.clone());
     }
     // Quitar de confirmados si estaba
-    task.confirmed_by.retain(|u| u != &req.user);
+    task.confirmed_by.retain(|u| u != &username);
 
     let updated = task.clone();
     save_config(&config)
@@ -323,8 +379,8 @@ pub async fn reject_task(
     state
         .log_activity(
             "tarea_rechazada",
-            &format!("{} rechazo: {}", req.user, updated.title),
-            "web",
+            &format!("{} rechazo: {}", username, updated.title),
+            &username,
         )
         .await;
 
@@ -333,8 +389,14 @@ pub async fn reject_task(
 
 pub async fn done_task(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
+    let sessions = state.sessions.lock().await;
+    let (username, _role) = extract_username(&state, &sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
     let mut config = state.config.lock().await;
     let task = config
         .tasks
@@ -342,6 +404,13 @@ pub async fn done_task(
         .iter_mut()
         .find(|t| t.id == id)
         .ok_or((StatusCode::NOT_FOUND, "Tarea no encontrada".to_string()))?;
+
+    // Solo asignados o creador pueden marcar completada
+    let is_assigned = task.assigned_to.contains(&"all".to_string())
+        || task.assigned_to.iter().any(|a| a.to_lowercase() == username.to_lowercase());
+    if task.created_by != username && !is_assigned {
+        return Err((StatusCode::FORBIDDEN, "Sin permisos para completar esta tarea".to_string()));
+    }
 
     task.status = TaskStatus::Completada;
     let updated = task.clone();
@@ -355,7 +424,7 @@ pub async fn done_task(
         .log_activity(
             "tarea_completada",
             &format!("Tarea: {}", updated.title),
-            "web",
+            &username,
         )
         .await;
 
@@ -364,22 +433,29 @@ pub async fn done_task(
 
 pub async fn delete_task(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    let sessions = state.sessions.lock().await;
+    let (username, role) = extract_username(&state, &sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
     let mut config = state.config.lock().await;
-    let before = config.tasks.tasks.len();
-    let title = config
+    let task = config
         .tasks
         .tasks
         .iter()
         .find(|t| t.id == id)
-        .map(|t| t.title.clone())
-        .unwrap_or_default();
+        .ok_or((StatusCode::NOT_FOUND, "Tarea no encontrada".to_string()))?;
 
-    config.tasks.tasks.retain(|t| t.id != id);
-    if config.tasks.tasks.len() == before {
-        return Err((StatusCode::NOT_FOUND, "Tarea no encontrada".to_string()));
+    // Solo el creador o admin puede eliminar
+    if task.created_by != username && role != UserRole::Admin {
+        return Err((StatusCode::FORBIDDEN, "Sin permisos para eliminar esta tarea".to_string()));
     }
+
+    let title = task.title.clone();
+    config.tasks.tasks.retain(|t| t.id != id);
 
     save_config(&config)
         .await
@@ -387,7 +463,7 @@ pub async fn delete_task(
 
     drop(config);
     state
-        .log_activity("tarea_eliminada", &format!("Tarea: {}", title), "web")
+        .log_activity("tarea_eliminada", &format!("Tarea: {}", title), &username)
         .await;
 
     Ok(StatusCode::NO_CONTENT)
@@ -417,8 +493,14 @@ pub async fn list_events(State(state): State<AppState>) -> Json<Vec<CalendarEven
 
 pub async fn create_event(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<CreateEventRequest>,
 ) -> Result<Json<CalendarEvent>, (StatusCode, String)> {
+    let sessions = state.sessions.lock().await;
+    let (username, _role) = extract_username(&state, &sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
     if req.title.trim().is_empty() || req.date.is_empty() || req.time.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Titulo, fecha y hora requeridos".to_string()));
     }
@@ -428,7 +510,7 @@ pub async fn create_event(
         description: req.description,
         date: req.date,
         time: req.time,
-        created_by: "web".to_string(),
+        created_by: username.clone(),
         invitees: req.invitees,
         accepted: Vec::new(),
         declined: Vec::new(),
@@ -440,40 +522,62 @@ pub async fn create_event(
     config.tasks.events.push(event.clone());
     save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     drop(config);
-    state.log_activity("evento", &event.title, "web").await;
+    state.log_activity("evento", &event.title, &username).await;
     Ok(Json(event))
 }
 
 pub async fn delete_event(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    let sessions = state.sessions.lock().await;
+    let (username, role) = extract_username(&state, &sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
     let mut config = state.config.lock().await;
-    let before = config.tasks.events.len();
-    config.tasks.events.retain(|e| e.id != id);
-    if config.tasks.events.len() == before {
-        return Err((StatusCode::NOT_FOUND, "Evento no encontrado".to_string()));
+    let event = config
+        .tasks
+        .events
+        .iter()
+        .find(|e| e.id == id)
+        .ok_or((StatusCode::NOT_FOUND, "Evento no encontrado".to_string()))?;
+
+    // Solo el creador o admin puede eliminar
+    if event.created_by != username && role != UserRole::Admin {
+        return Err((StatusCode::FORBIDDEN, "Sin permisos para eliminar este evento".to_string()));
     }
+
+    config.tasks.events.retain(|e| e.id != id);
     save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct EventUserAction {
     pub user: String,
 }
 
 pub async fn accept_event(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
-    Json(req): Json<EventUserAction>,
+    Json(_req): Json<EventUserAction>,
 ) -> Result<Json<CalendarEvent>, (StatusCode, String)> {
+    // Ignorar user del body, usar el de la sesion
+    let sessions = state.sessions.lock().await;
+    let (username, _role) = extract_username(&state, &sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
     let mut config = state.config.lock().await;
     let event = config.tasks.events.iter_mut().find(|e| e.id == id)
         .ok_or((StatusCode::NOT_FOUND, "Evento no encontrado".to_string()))?;
-    event.declined.retain(|u| u != &req.user);
-    if !event.accepted.contains(&req.user) {
-        event.accepted.push(req.user);
+    event.declined.retain(|u| u != &username);
+    if !event.accepted.contains(&username) {
+        event.accepted.push(username);
     }
     let result = event.clone();
     save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
@@ -482,15 +586,22 @@ pub async fn accept_event(
 
 pub async fn decline_event(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
-    Json(req): Json<EventUserAction>,
+    Json(_req): Json<EventUserAction>,
 ) -> Result<Json<CalendarEvent>, (StatusCode, String)> {
+    // Ignorar user del body, usar el de la sesion
+    let sessions = state.sessions.lock().await;
+    let (username, _role) = extract_username(&state, &sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
     let mut config = state.config.lock().await;
     let event = config.tasks.events.iter_mut().find(|e| e.id == id)
         .ok_or((StatusCode::NOT_FOUND, "Evento no encontrado".to_string()))?;
-    event.accepted.retain(|u| u != &req.user);
-    if !event.declined.contains(&req.user) {
-        event.declined.push(req.user);
+    event.accepted.retain(|u| u != &username);
+    if !event.declined.contains(&username) {
+        event.declined.push(username);
     }
     let result = event.clone();
     save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;

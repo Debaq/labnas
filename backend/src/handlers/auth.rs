@@ -79,6 +79,7 @@ pub async fn register(
         username: username.clone(),
         role: role.clone(),
         permissions: permissions.clone(),
+        created_at: std::time::Instant::now(),
     });
 
     state.log_activity("Registro", &username, &username).await;
@@ -103,13 +104,22 @@ pub async fn login(
     let user = config
         .web_users
         .iter()
-        .find(|u| u.username == username)
-        .ok_or((StatusCode::UNAUTHORIZED, "Usuario o contrasena incorrectos".to_string()))?;
+        .find(|u| u.username == username);
+
+    let Some(user) = user else {
+        drop(config);
+        // Rate limiting: frenar fuerza bruta (mismo delay que password incorrecto)
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        return Err((StatusCode::UNAUTHORIZED, "Usuario o contrasena incorrectos".to_string()));
+    };
 
     let valid = bcrypt::verify(&req.password, &user.password_hash)
         .unwrap_or(false);
 
     if !valid {
+        drop(config);
+        // Rate limiting: frenar fuerza bruta
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         return Err((StatusCode::UNAUTHORIZED, "Usuario o contrasena incorrectos".to_string()));
     }
 
@@ -123,6 +133,7 @@ pub async fn login(
         username: username.clone(),
         role: role.clone(),
         permissions: permissions.clone(),
+        created_at: std::time::Instant::now(),
     });
 
     Ok(Json(AuthResponse {
@@ -267,8 +278,8 @@ pub async fn generate_link_code(
     let username = session.username.clone();
     drop(sessions);
 
-    // Generate 4-char code
-    let code: String = uuid::Uuid::new_v4().to_string()[..4].to_uppercase();
+    // Generate 8-char code
+    let code: String = uuid::Uuid::new_v4().to_string()[..8].to_uppercase();
 
     let mut codes = state.link_codes.lock().await;
     // Remove old codes for this user

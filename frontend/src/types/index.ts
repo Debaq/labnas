@@ -85,7 +85,7 @@ export interface TelegramChat {
 }
 
 export interface NotificationConfig {
-  bot_token: string | null
+  bot_configured: boolean
   bot_username: string | null
   telegram_chats: TelegramChat[]
   daily_enabled: boolean

@@ -23,6 +23,7 @@ pub struct SessionInfo {
     pub username: String,
     pub role: UserRole,
     pub permissions: UserPermissions,
+    pub created_at: Instant,
 }
 
 #[derive(Clone)]

@@ -34,23 +34,24 @@ pub async fn permission_check(
         .map(|s| s.to_string());
 
     let Some(token) = token else {
-        // Allow unauthenticated GET for read-only public data
-        if method == Method::GET
-            && (path.starts_with("/api/system")
-                || path == "/api/health")
-        {
-            return next.run(request).await;
-        }
         return (StatusCode::UNAUTHORIZED, "No autorizado").into_response();
     };
 
-    let sessions = state.sessions.lock().await;
+    let mut sessions = state.sessions.lock().await;
     let session = sessions.get(&token).cloned();
-    drop(sessions);
 
     let Some(session) = session else {
+        drop(sessions);
         return (StatusCode::UNAUTHORIZED, "Sesion invalida").into_response();
     };
+
+    // Verificar expiración de sesión (24 horas)
+    if session.created_at.elapsed() > std::time::Duration::from_secs(24 * 60 * 60) {
+        sessions.remove(&token);
+        drop(sessions);
+        return (StatusCode::UNAUTHORIZED, "Sesion expirada").into_response();
+    }
+    drop(sessions);
 
     // Pendiente: only self-service
     if session.role == UserRole::Pendiente {

@@ -194,7 +194,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Setup Guide */}
-        {!notifConfig?.bot_token && (
+        {!notifConfig?.bot_configured && (
           <div
             className="rounded-xl p-5 mb-4"
             style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
@@ -237,7 +237,7 @@ export default function SettingsPage() {
         )}
 
         {/* Link my Telegram */}
-        {notifConfig?.bot_token && notifConfig?.bot_username && (
+        {notifConfig?.bot_configured && notifConfig?.bot_username && (
           <div
             className="rounded-xl p-5 mb-4"
             style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
@@ -282,14 +282,14 @@ export default function SettingsPage() {
           <div className="flex items-center gap-2 mb-3">
             <Key size={16} style={{ color: 'var(--accent)' }} />
             <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Bot Token</span>
-            {notifConfig?.bot_token && (
+            {notifConfig?.bot_configured && (
               <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: 'var(--success)' + '25', color: 'var(--success)' }}>
                 Conectado
               </span>
             )}
           </div>
 
-          {notifConfig?.bot_token ? (
+          {notifConfig?.bot_configured ? (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <div>
@@ -357,7 +357,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Chats + Test */}
-        {notifConfig?.bot_token && (
+        {notifConfig?.bot_configured && (
           <div
             className="rounded-xl p-6 space-y-4 mb-4"
             style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
@@ -562,7 +562,7 @@ export default function SettingsPage() {
         )}
 
         {/* Schedule */}
-        {notifConfig?.bot_token && (
+        {notifConfig?.bot_configured && (
           <div
             className="rounded-xl p-6"
             style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
