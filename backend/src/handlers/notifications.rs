@@ -396,6 +396,17 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
         s if s.starts_with("/aceptar ") => handle_event_rsvp(state, &chat_name, s, true).await,
         s if s.starts_with("/declinar ") => handle_event_rsvp(state, &chat_name, s, false).await,
         s if s.starts_with("/vincular ") => handle_link_command(state, chat_id, &chat_name, s).await,
+        s if s.starts_with("/correo2tarea ") => {
+            let uid_str = s.strip_prefix("/correo2tarea ").unwrap_or("").trim();
+            crate::handlers::email::telegram_email_to_task(state, &chat_name, uid_str).await
+        }
+        s if s.starts_with("/leer ") => {
+            let uid_str = s.strip_prefix("/leer ").unwrap_or("").trim();
+            crate::handlers::email::get_email_detail(state, &chat_name, uid_str).await
+        }
+        s if s.starts_with("/correos") => {
+            crate::handlers::email::get_emails_summary(state, &chat_name).await
+        }
         s if s.starts_with("/proyecto ") => handle_project_command(state, &chat_name, s).await,
         s if s.starts_with("/proyectos") => handle_list_projects(state, &chat_name).await,
         s if s.starts_with("/tarea ") => handle_task_command(state, &chat_name, s).await,
@@ -1314,6 +1325,10 @@ fn build_help_message(role: &UserRole) -> String {
     msg.push_str("/actividad /horario /mirol\n");
     msg.push_str("/vincular CODIGO - Vincular con web\n");
     msg.push_str("/cmd COMANDO - Ejecutar en terminal\n\n");
+    msg.push_str("*Correo*\n");
+    msg.push_str("/correos - Resumen de bandeja\n");
+    msg.push_str("/leer UID - Detalle de un correo\n");
+    msg.push_str("/correo2tarea UID - Email a tarea\n\n");
     msg.push_str("*Calendario*\n");
     msg.push_str("/evento FECHA HORA Titulo @persona\n");
     msg.push_str("/eventos - Mis eventos\n");

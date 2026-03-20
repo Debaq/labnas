@@ -20,3 +20,6 @@ portable-pty = "0.9"
 futures-util = "0.3"
 reqwest = { version = "0.12", features = ["json", "multipart"] }
 bcrypt = "0.17"
+imap = "2.4.1"
+mailparse = "0.16.1"
+native-tls = "0.2"

@@ -1,4 +1,5 @@
 use crate::config::LabNasConfig;
+use crate::models::email::EmailMessage;
 use crate::models::network::NetworkHost;
 use crate::models::notifications::{UserPermissions, UserRole};
 use chrono::{DateTime, Utc};
@@ -38,6 +39,7 @@ pub struct AppState {
     pub link_codes: Arc<Mutex<HashMap<String, LinkCode>>>,
     pub share_links: Arc<Mutex<HashMap<String, ShareLink>>>,
     pub tg_terminals: Arc<Mutex<HashMap<i64, TgTerminal>>>,
+    pub email_inbox: Arc<Mutex<HashMap<String, Vec<EmailMessage>>>>,
 }
 
 pub struct TgTerminal {

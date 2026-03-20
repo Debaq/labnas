@@ -34,6 +34,7 @@ async fn main() {
         link_codes: Arc::new(Mutex::new(std::collections::HashMap::new())),
         share_links: Arc::new(Mutex::new(std::collections::HashMap::new())),
         tg_terminals: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        email_inbox: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
 
     let cors = CorsLayer::new()
@@ -128,13 +129,22 @@ async fn main() {
         .route("/api/notes", post(handlers::extras::create_note))
         .route("/api/notes/{id}", put(handlers::extras::update_note))
         .route("/api/notes/{id}", delete(handlers::extras::delete_note))
+        // Email / IMAP
+        .route("/api/email/account", post(handlers::email::configure_account))
+        .route("/api/email/account", delete(handlers::email::delete_account))
+        .route("/api/email/inbox", get(handlers::email::get_inbox))
+        .route("/api/email/check", post(handlers::email::check_now))
+        .route("/api/email/classify/{uid}", post(handlers::email::classify_email))
+        .route("/api/email/to-task/{uid}", post(handlers::email::email_to_task))
+        .route("/api/email/groq-key", post(handlers::email::set_groq_key))
         .layer(axum_mw::from_fn_with_state(state.clone(), middleware::permission_check))
         .layer(cors)
         .with_state(state.clone());
 
-    // Spawn Telegram bot polling loop + daily scheduler + task reminders
+    // Spawn Telegram bot polling loop + daily scheduler + task reminders + email check
     tokio::spawn(handlers::notifications::telegram_bot_loop(state.clone()));
     tokio::spawn(handlers::notifications::task_reminder_loop(state.clone()));
+    tokio::spawn(handlers::email::email_check_loop(state.clone()));
     tokio::spawn(handlers::notifications::daily_notification_loop(state));
 
     // Static files

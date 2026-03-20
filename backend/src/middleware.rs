@@ -98,6 +98,9 @@ pub async fn permission_check(
         // Admin only: printer enable/disable
         (&Method::POST, p) if p.contains("/enable") || p.contains("/disable") => is_admin,
 
+        // Email: groq-key solo admin, el resto cualquier autenticado
+        (&Method::POST, "/api/email/groq-key") => is_admin,
+
         // File write: need archivos_escritura
         (&Method::POST, "/api/files/upload") => is_admin || session.permissions.archivos_escritura,
         (&Method::DELETE, p) if p.starts_with("/api/files") => is_admin || session.permissions.archivos_escritura,

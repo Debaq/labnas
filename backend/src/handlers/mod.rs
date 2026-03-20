@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod email;
 pub mod extras;
 pub mod files;
 pub mod network;

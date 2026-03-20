@@ -1,4 +1,5 @@
 use crate::models::auth::WebUser;
+use crate::models::email::EmailConfig;
 use crate::models::network::KnownDevice;
 use crate::models::notes::Note;
 use crate::models::notifications::NotificationConfig;
@@ -21,6 +22,8 @@ pub struct LabNasConfig {
     pub tasks: TasksConfig,
     #[serde(default)]
     pub notes: Vec<Note>,
+    #[serde(default)]
+    pub email: EmailConfig,
 }
 
 pub fn config_path() -> PathBuf {
