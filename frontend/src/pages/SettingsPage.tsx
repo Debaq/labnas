@@ -4,7 +4,7 @@ import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, 
 import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, type ThemeName } from '../themes/themes'
-import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode } from '../api'
+import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword } from '../api'
 import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig } from '../types'
 
 function formatBytes(bytes: number): string {
@@ -71,6 +71,9 @@ export default function SettingsPage() {
   const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null)
   const [webUsers, setWebUsers] = useState<string[]>([])
   const [linkCode, setLinkCode] = useState<string | null>(null)
+  const [currentPw, setCurrentPw] = useState('')
+  const [newPw, setNewPw] = useState('')
+  const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [autostart, setAutostart] = useState<AutostartStatus | null>(null)
 
   // Telegram
@@ -122,6 +125,66 @@ export default function SettingsPage() {
               onClick={() => setTheme(t)}
             />
           ))}
+        </div>
+      </section>
+
+      {/* Change password */}
+      <section>
+        <div className="flex items-center gap-3 mb-4">
+          <Key size={22} style={{ color: 'var(--accent)' }} />
+          <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+            Cambiar Contrasena
+          </h2>
+        </div>
+        <div
+          className="rounded-xl p-6"
+          style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
+        >
+          <div className="flex items-end gap-3 flex-wrap">
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Actual</label>
+              <input
+                type="password"
+                value={currentPw}
+                onChange={e => { setCurrentPw(e.target.value); setPwMsg(null) }}
+                className="px-3 py-2 rounded-lg text-sm outline-none w-44"
+                style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Nueva</label>
+              <input
+                type="password"
+                value={newPw}
+                onChange={e => { setNewPw(e.target.value); setPwMsg(null) }}
+                className="px-3 py-2 rounded-lg text-sm outline-none w-44"
+                style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+              />
+            </div>
+            <button
+              onClick={async () => {
+                if (!currentPw || !newPw) return
+                try {
+                  await changePassword(currentPw, newPw)
+                  setPwMsg({ ok: true, text: 'Contrasena cambiada' })
+                  setCurrentPw('')
+                  setNewPw('')
+                } catch (e: any) {
+                  setPwMsg({ ok: false, text: e.message })
+                }
+              }}
+              disabled={!currentPw || !newPw}
+              className="px-4 py-2 rounded-lg text-sm font-medium"
+              style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
+            >
+              Cambiar
+            </button>
+          </div>
+          {pwMsg && (
+            <p className="text-xs mt-3" style={{ color: pwMsg.ok ? 'var(--success)' : 'var(--danger)' }}>
+              {pwMsg.text}
+            </p>
+          )}
         </div>
       </section>
 

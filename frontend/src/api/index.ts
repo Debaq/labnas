@@ -253,6 +253,20 @@ export async function setNotificationSchedule(schedule: { daily_enabled: boolean
   if (!res.ok) throw new Error('Error al configurar horario')
 }
 
+// --- Password ---
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const res = await api('/api/auth/password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Error al cambiar contrasena')
+  }
+}
+
 // --- Linking ---
 
 export async function generateLinkCode(token: string): Promise<string> {

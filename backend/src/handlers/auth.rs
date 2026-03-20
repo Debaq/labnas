@@ -181,6 +181,50 @@ pub async fn logout(
     StatusCode::OK
 }
 
+// --- Change password ---
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+pub async fn change_password(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<ChangePasswordRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let token = extract_token(&headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    let sessions = state.sessions.lock().await;
+    let session = sessions.get(&token)
+        .ok_or((StatusCode::UNAUTHORIZED, "Sesion invalida".to_string()))?;
+    let username = session.username.clone();
+    drop(sessions);
+
+    if req.new_password.len() < 4 {
+        return Err((StatusCode::BAD_REQUEST, "La nueva contrasena debe tener al menos 4 caracteres".to_string()));
+    }
+
+    let mut config = state.config.lock().await;
+    let user = config.web_users.iter_mut()
+        .find(|u| u.username == username)
+        .ok_or((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()))?;
+
+    let valid = bcrypt::verify(&req.current_password, &user.password_hash).unwrap_or(false);
+    if !valid {
+        return Err((StatusCode::UNAUTHORIZED, "Contrasena actual incorrecta".to_string()));
+    }
+
+    user.password_hash = bcrypt::hash(&req.new_password, 8)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Error hasheando".to_string()))?;
+
+    save_config(&config).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    Ok(StatusCode::OK)
+}
+
 // --- List users (admin) ---
 
 pub async fn list_users(
