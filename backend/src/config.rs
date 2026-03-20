@@ -1,5 +1,6 @@
 use crate::models::auth::WebUser;
 use crate::models::network::KnownDevice;
+use crate::models::notes::Note;
 use crate::models::notifications::NotificationConfig;
 use crate::models::printers3d::Printer3DConfig;
 use crate::models::tasks::TasksConfig;
@@ -18,6 +19,8 @@ pub struct LabNasConfig {
     pub web_users: Vec<WebUser>,
     #[serde(default)]
     pub tasks: TasksConfig,
+    #[serde(default)]
+    pub notes: Vec<Note>,
 }
 
 pub fn config_path() -> PathBuf {

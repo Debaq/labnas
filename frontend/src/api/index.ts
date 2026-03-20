@@ -465,3 +465,71 @@ export async function declineEvent(id: string, user: string): Promise<CalendarEv
   if (!res.ok) throw new Error('Error al rechazar evento')
   return res.json()
 }
+
+// --- File Sharing ---
+
+export async function createShare(path: string, expiresHours?: number): Promise<{ token: string; url: string; expires_hours: number }> {
+  const res = await fetch('/api/shares', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, expires_hours: expiresHours || 24 }),
+  })
+  if (!res.ok) throw new Error('Error al compartir')
+  return res.json()
+}
+
+export async function fetchShares(): Promise<import('../types/notes').ShareLink[]> {
+  const res = await fetch('/api/shares')
+  if (!res.ok) throw new Error('Error al obtener links')
+  return res.json()
+}
+
+export async function deleteShare(token: string): Promise<void> {
+  const res = await fetch(`/api/shares/${token}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar link')
+}
+
+// --- Download URL ---
+
+export async function downloadFromUrl(url: string, destination: string): Promise<string> {
+  const res = await fetch('/api/download-url', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, destination }),
+  })
+  if (!res.ok) throw new Error('Error al descargar')
+  return res.text()
+}
+
+// --- Notes ---
+
+export async function fetchNotes(): Promise<import('../types/notes').Note[]> {
+  const res = await fetch('/api/notes')
+  if (!res.ok) throw new Error('Error al obtener notas')
+  return res.json()
+}
+
+export async function createNote(title: string, content?: string): Promise<import('../types/notes').Note> {
+  const res = await fetch('/api/notes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, content: content || '' }),
+  })
+  if (!res.ok) throw new Error('Error al crear nota')
+  return res.json()
+}
+
+export async function updateNote(id: string, data: { title?: string; content?: string }): Promise<import('../types/notes').Note> {
+  const res = await fetch(`/api/notes/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Error al actualizar nota')
+  return res.json()
+}
+
+export async function deleteNote(id: string): Promise<void> {
+  const res = await fetch(`/api/notes/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar nota')
+}

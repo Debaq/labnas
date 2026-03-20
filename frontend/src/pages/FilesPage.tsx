@@ -27,9 +27,11 @@ import {
   Printer,
   X,
   Settings2,
+  Share2,
+  Link,
   type LucideIcon,
 } from 'lucide-react'
-import { fetchFiles, uploadFile, downloadFile, deleteFile, createDirectory, fetchQuickAccess, fetchCupsPrinters, fetchPrinterOptions, printFilePath } from '../api'
+import { fetchFiles, uploadFile, downloadFile, deleteFile, createDirectory, fetchQuickAccess, fetchCupsPrinters, fetchPrinterOptions, printFilePath, createShare, downloadFromUrl } from '../api'
 import type { FileEntry, QuickAccess, CupsPrinter, PrinterOption } from '../types'
 
 const iconMap: Record<string, LucideIcon> = {
@@ -101,6 +103,10 @@ export default function FilesPage() {
   const [printCopies, setPrintCopies] = useState(1)
   const [printPages, setPrintPages] = useState('')
   const [printingFile, setPrintingFile] = useState(false)
+  const [shareUrl, setShareUrl] = useState<string | null>(null)
+  const [showDownloadUrl, setShowDownloadUrl] = useState(false)
+  const [downloadUrlInput, setDownloadUrlInput] = useState('')
+  const [downloading, setDownloading] = useState(false)
   const [printerOptions, setPrinterOptions] = useState<PrinterOption[]>([])
   const [optionValues, setOptionValues] = useState<Record<string, string>>({})
   const [optionsLoading, setOptionsLoading] = useState(false)
@@ -331,6 +337,18 @@ export default function FilesPage() {
             Nueva Carpeta
           </button>
           <button
+            onClick={() => setShowDownloadUrl(!showDownloadUrl)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90"
+            style={{
+              backgroundColor: 'var(--card-bg)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border)',
+            }}
+          >
+            <Link size={16} />
+            Descargar URL
+          </button>
+          <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90"
@@ -385,6 +403,54 @@ export default function FilesPage() {
           >
             Cancelar
           </button>
+        </div>
+      )}
+
+      {/* Download URL */}
+      {showDownloadUrl && (
+        <div className="flex items-center gap-3 p-4 rounded-lg" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
+          <Link size={16} style={{ color: 'var(--accent)' }} />
+          <input
+            value={downloadUrlInput}
+            onChange={e => setDownloadUrlInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && downloadUrlInput && !downloading && (async () => {
+              setDownloading(true)
+              try { await downloadFromUrl(downloadUrlInput, currentPath); setShowDownloadUrl(false); setDownloadUrlInput(''); await loadFiles() } catch {} finally { setDownloading(false) }
+            })()}
+            placeholder="https://ejemplo.com/archivo.zip"
+            className="flex-1 px-3 py-2 rounded-lg text-sm outline-none font-mono"
+            style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+            autoFocus
+          />
+          <button
+            onClick={async () => {
+              if (!downloadUrlInput || downloading) return
+              setDownloading(true)
+              try { await downloadFromUrl(downloadUrlInput, currentPath); setShowDownloadUrl(false); setDownloadUrlInput(''); await loadFiles() } catch {} finally { setDownloading(false) }
+            }}
+            disabled={downloading || !downloadUrlInput}
+            className="px-4 py-2 rounded-lg text-sm font-medium"
+            style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
+          >
+            {downloading ? <Loader2 size={16} className="animate-spin" /> : 'Descargar'}
+          </button>
+          <button
+            onClick={() => { setShowDownloadUrl(false); setDownloadUrlInput('') }}
+            className="px-4 py-2 rounded-lg text-sm font-medium"
+            style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+          >
+            Cancelar
+          </button>
+        </div>
+      )}
+
+      {/* Share URL banner */}
+      {shareUrl && (
+        <div className="flex items-center gap-3 p-3 rounded-lg" style={{ backgroundColor: 'var(--success)' + '15', border: '1px solid var(--success)' }}>
+          <Share2 size={16} style={{ color: 'var(--success)' }} />
+          <span className="text-xs font-mono flex-1 select-all" style={{ color: 'var(--text-primary)' }}>{shareUrl}</span>
+          <span className="text-xs" style={{ color: 'var(--success)' }}>Copiado!</span>
+          <button onClick={() => setShareUrl(null)} style={{ color: 'var(--text-secondary)' }}><X size={14} /></button>
         </div>
       )}
 
@@ -470,6 +536,23 @@ export default function FilesPage() {
                           title="Descargar"
                         >
                           <Download size={16} />
+                        </button>
+                      )}
+                      {!entry.is_dir && (
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation()
+                            try {
+                              const result = await createShare(entry.path)
+                              setShareUrl(result.url)
+                              navigator.clipboard.writeText(result.url).catch(() => {})
+                            } catch {}
+                          }}
+                          className="p-1.5 rounded-lg transition-all duration-200 hover:opacity-80"
+                          style={{ color: 'var(--success)' }}
+                          title="Compartir link"
+                        >
+                          <Share2 size={16} />
                         </button>
                       )}
                       {isPrintable(entry) && cupsPrinters.length > 0 && (

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList } from 'lucide-react'
+import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText } from 'lucide-react'
 import { useTheme } from '../themes/ThemeContext'
 import { useAuth } from '../auth/AuthContext'
 import { shutdownServer } from '../api'
@@ -13,6 +13,7 @@ const pageTitles: Record<string, string> = {
   '/printers3d': 'Impresoras 3D',
   '/network': 'Red Local',
   '/tasks': 'Tareas y Proyectos',
+  '/notes': 'Notas',
   '/terminal': 'Terminal',
   '/settings': 'Configuracion',
 }
@@ -40,6 +41,7 @@ export default function Layout() {
     { to: '/printers3d', label: 'Impresoras 3D', icon: Box, show: true },
     { to: '/network', label: 'Red', icon: Network, show: true },
     { to: '/tasks', label: 'Tareas', icon: ClipboardList, show: true },
+    { to: '/notes', label: 'Notas', icon: FileText, show: true },
     { to: '/terminal', label: 'Terminal', icon: TerminalSquare, show: can('terminal') },
     { to: '/settings', label: 'Configuracion', icon: Settings, show: true },
   ]

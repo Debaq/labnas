@@ -11,6 +11,7 @@ import TerminalPage from './pages/TerminalPage'
 import Printers3DPage from './pages/Printers3DPage'
 import PrintingPage from './pages/PrintingPage'
 import TasksPage from './pages/TasksPage'
+import NotesPage from './pages/NotesPage'
 import { Loader2 } from 'lucide-react'
 
 function AppRoutes() {
@@ -38,6 +39,7 @@ function AppRoutes() {
         <Route path="/printers3d" element={<Printers3DPage />} />
         <Route path="/network" element={<NetworkPage />} />
         <Route path="/tasks" element={<TasksPage />} />
+        <Route path="/notes" element={<NotesPage />} />
         <Route path="/terminal" element={<TerminalPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>

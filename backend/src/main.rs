@@ -32,6 +32,7 @@ async fn main() {
         activity_log: Arc::new(Mutex::new(Vec::new())),
         sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
         link_codes: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        share_links: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
 
     let cors = CorsLayer::new()
@@ -113,6 +114,18 @@ async fn main() {
         .route("/api/events/{id}", delete(handlers::tasks::delete_event))
         .route("/api/events/{id}/accept", post(handlers::tasks::accept_event))
         .route("/api/events/{id}/decline", post(handlers::tasks::decline_event))
+        // File sharing
+        .route("/api/shares", get(handlers::extras::list_shares))
+        .route("/api/shares", post(handlers::extras::create_share))
+        .route("/api/shares/{token}", delete(handlers::extras::delete_share))
+        .route("/api/share/{token}", get(handlers::extras::download_share))
+        // Download from URL
+        .route("/api/download-url", post(handlers::extras::download_url))
+        // Notes
+        .route("/api/notes", get(handlers::extras::list_notes))
+        .route("/api/notes", post(handlers::extras::create_note))
+        .route("/api/notes/{id}", put(handlers::extras::update_note))
+        .route("/api/notes/{id}", delete(handlers::extras::delete_note))
         .layer(axum_mw::from_fn_with_state(state.clone(), middleware::permission_check))
         .layer(cors)
         .with_state(state.clone());

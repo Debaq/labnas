@@ -20,7 +20,8 @@ pub async fn permission_check(
     if matches!(
         path.as_str(),
         "/api/health" | "/api/auth/login" | "/api/auth/register"
-    ) || !path.starts_with("/api/")
+    ) || path.starts_with("/api/share/")
+    || !path.starts_with("/api/")
     {
         return next.run(request).await;
     }

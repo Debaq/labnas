@@ -36,6 +36,15 @@ pub struct AppState {
     pub activity_log: Arc<Mutex<Vec<ActivityEvent>>>,
     pub sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
     pub link_codes: Arc<Mutex<HashMap<String, LinkCode>>>,
+    pub share_links: Arc<Mutex<HashMap<String, ShareLink>>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ShareLink {
+    pub file_path: String,
+    pub file_name: String,
+    pub created_at: Instant,
+    pub expires_secs: u64,
 }
 
 #[derive(Debug, Clone)]
