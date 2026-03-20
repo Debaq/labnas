@@ -174,6 +174,9 @@ async fn main() {
         .map(|ip| ip.to_string())
         .unwrap_or_else(|_| "0.0.0.0".to_string());
 
+    // Check firewall
+    check_firewall().await;
+
     println!("LabNAS corriendo en:");
     println!("  Local:  http://localhost:3001");
     println!("  Red:    http://{}:3001", local_ip);
@@ -186,4 +189,48 @@ async fn main() {
         })
         .await
         .unwrap();
+}
+
+async fn check_firewall() {
+    // Check if ufw is active
+    let Ok(output) = tokio::process::Command::new("ufw")
+        .arg("status")
+        .output()
+        .await
+    else {
+        return; // ufw not installed, no problem
+    };
+
+    let text = String::from_utf8_lossy(&output.stdout).to_string();
+    if !text.contains("Status: active") {
+        return; // ufw inactive
+    }
+
+    if text.contains("3001") {
+        return; // port already allowed
+    }
+
+    println!("\n  \x1b[33m⚠ FIREWALL: ufw esta activo pero el puerto 3001 NO esta permitido.\x1b[0m");
+    println!("  \x1b[33m  Los dispositivos de la red no podran acceder a LabNAS.\x1b[0m");
+    println!("  \x1b[36m  Ejecuta: sudo ufw allow 3001\x1b[0m\n");
+
+    // Try to open it automatically if running as root
+    if std::env::var("USER").unwrap_or_default() == "root"
+        || std::env::var("SUDO_USER").is_ok()
+    {
+        println!("  Intentando abrir puerto automaticamente...");
+        let result = tokio::process::Command::new("ufw")
+            .args(["allow", "3001"])
+            .output()
+            .await;
+
+        match result {
+            Ok(out) if out.status.success() => {
+                println!("  \x1b[32m✓ Puerto 3001 abierto en el firewall\x1b[0m\n");
+            }
+            _ => {
+                println!("  \x1b[31m✗ No se pudo abrir automaticamente. Hazlo manual.\x1b[0m\n");
+            }
+        }
+    }
 }

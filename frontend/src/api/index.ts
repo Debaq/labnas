@@ -16,11 +16,44 @@ import type {
   CalendarEvent,
 } from '../types'
 
+// Auth-aware fetch wrapper
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { ...extra }
+  try {
+    const saved = localStorage.getItem('labnas_auth')
+    if (saved) {
+      const { token } = JSON.parse(saved)
+      if (token) headers['Authorization'] = `Bearer ${token}`
+    }
+  } catch {}
+  return headers
+}
+
+async function api(url: string, opts?: RequestInit): Promise<Response> {
+  const headers = authHeaders(
+    opts?.headers ? Object.fromEntries(
+      opts.headers instanceof Headers
+        ? opts.headers.entries()
+        : Object.entries(opts.headers as Record<string, string>)
+    ) : undefined
+  )
+
+  // Don't set auth header for FormData (browser sets content-type with boundary)
+  const isFormData = opts?.body instanceof FormData
+
+  return fetch(url, {
+    ...opts,
+    headers: isFormData
+      ? { Authorization: headers['Authorization'] || '' }
+      : headers,
+  })
+}
+
 // --- Files ---
 
 export async function fetchFiles(path?: string): Promise<FileEntry[]> {
   const params = path ? `?path=${encodeURIComponent(path)}` : ''
-  const res = await fetch(`/api/files${params}`)
+  const res = await api(`/api/files${params}`)
   if (!res.ok) throw new Error('Error al obtener archivos')
   return res.json()
 }
@@ -29,7 +62,7 @@ export async function uploadFile(file: File, path?: string): Promise<void> {
   const formData = new FormData()
   formData.append('file', file)
   if (path) formData.append('path', path)
-  const res = await fetch('/api/files/upload', {
+  const res = await api('/api/files/upload', {
     method: 'POST',
     body: formData,
   })
@@ -42,14 +75,14 @@ export function downloadFile(path: string): void {
 }
 
 export async function deleteFile(path: string): Promise<void> {
-  const res = await fetch(`/api/files?path=${encodeURIComponent(path)}`, {
+  const res = await api(`/api/files?path=${encodeURIComponent(path)}`, {
     method: 'DELETE',
   })
   if (!res.ok) throw new Error('Error al eliminar archivo')
 }
 
 export async function createDirectory(path: string): Promise<void> {
-  const res = await fetch('/api/files/directory', {
+  const res = await api('/api/files/directory', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path }),
@@ -58,7 +91,7 @@ export async function createDirectory(path: string): Promise<void> {
 }
 
 export async function fetchQuickAccess(): Promise<QuickAccess[]> {
-  const res = await fetch('/api/files/quickaccess')
+  const res = await api('/api/files/quickaccess')
   if (!res.ok) throw new Error('Error al obtener accesos rapidos')
   return res.json()
 }
@@ -66,19 +99,19 @@ export async function fetchQuickAccess(): Promise<QuickAccess[]> {
 // --- System ---
 
 export async function fetchDisks(): Promise<DiskInfo[]> {
-  const res = await fetch('/api/system/disks')
+  const res = await api('/api/system/disks')
   if (!res.ok) throw new Error('Error al obtener discos')
   return res.json()
 }
 
 export async function fetchSystemInfo(): Promise<SystemInfo> {
-  const res = await fetch('/api/system/info')
+  const res = await api('/api/system/info')
   if (!res.ok) throw new Error('Error al obtener info del sistema')
   return res.json()
 }
 
 export async function fetchHealth(): Promise<any> {
-  const res = await fetch('/api/health')
+  const res = await api('/api/health')
   if (!res.ok) throw new Error('Error al obtener estado')
   return res.json()
 }
@@ -88,7 +121,7 @@ export async function shutdownServer(): Promise<void> {
 }
 
 export async function fetchAutostartStatus(): Promise<import('../types').AutostartStatus> {
-  const res = await fetch('/api/system/autostart')
+  const res = await api('/api/system/autostart')
   if (!res.ok) throw new Error('Error al obtener estado de autostart')
   return res.json()
 }
@@ -96,19 +129,19 @@ export async function fetchAutostartStatus(): Promise<import('../types').Autosta
 // --- Network ---
 
 export async function scanNetwork(): Promise<NetworkHost[]> {
-  const res = await fetch('/api/network/scan', { method: 'POST' })
+  const res = await api('/api/network/scan', { method: 'POST' })
   if (!res.ok) throw new Error('Error al escanear red')
   return res.json()
 }
 
 export async function fetchHosts(): Promise<NetworkHost[]> {
-  const res = await fetch('/api/network/hosts')
+  const res = await api('/api/network/hosts')
   if (!res.ok) throw new Error('Error al obtener hosts')
   return res.json()
 }
 
 export async function labelDevice(mac: string, label: string): Promise<void> {
-  const res = await fetch(`/api/network/device/${encodeURIComponent(mac)}`, {
+  const res = await api(`/api/network/device/${encodeURIComponent(mac)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ label }),
@@ -117,20 +150,20 @@ export async function labelDevice(mac: string, label: string): Promise<void> {
 }
 
 export async function unlabelDevice(mac: string): Promise<void> {
-  const res = await fetch(`/api/network/device/${encodeURIComponent(mac)}`, { method: 'DELETE' })
+  const res = await api(`/api/network/device/${encodeURIComponent(mac)}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al quitar etiqueta')
 }
 
 // --- Printers 3D ---
 
 export async function fetchPrinters3D(): Promise<Printer3DConfig[]> {
-  const res = await fetch('/api/printers3d')
+  const res = await api('/api/printers3d')
   if (!res.ok) throw new Error('Error al obtener impresoras 3D')
   return res.json()
 }
 
 export async function addPrinter3D(printer: AddPrinter3DRequest): Promise<Printer3DConfig> {
-  const res = await fetch('/api/printers3d', {
+  const res = await api('/api/printers3d', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(printer),
@@ -140,12 +173,12 @@ export async function addPrinter3D(printer: AddPrinter3DRequest): Promise<Printe
 }
 
 export async function deletePrinter3D(id: string): Promise<void> {
-  const res = await fetch(`/api/printers3d/${id}`, { method: 'DELETE' })
+  const res = await api(`/api/printers3d/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar impresora 3D')
 }
 
 export async function fetchPrinter3DStatus(id: string): Promise<Printer3DStatus> {
-  const res = await fetch(`/api/printers3d/${id}/status`)
+  const res = await api(`/api/printers3d/${id}/status`)
   if (!res.ok) throw new Error('Error al obtener estado de impresora')
   return res.json()
 }
@@ -153,7 +186,7 @@ export async function fetchPrinter3DStatus(id: string): Promise<Printer3DStatus>
 export async function uploadGcode(id: string, file: File): Promise<void> {
   const formData = new FormData()
   formData.append('file', file)
-  const res = await fetch(`/api/printers3d/${id}/upload`, {
+  const res = await api(`/api/printers3d/${id}/upload`, {
     method: 'POST',
     body: formData,
   })
@@ -161,7 +194,7 @@ export async function uploadGcode(id: string, file: File): Promise<void> {
 }
 
 export async function detectPrinters3D(): Promise<DetectPrintersResult[]> {
-  const res = await fetch('/api/printers3d/detect', { method: 'POST' })
+  const res = await api('/api/printers3d/detect', { method: 'POST' })
   if (!res.ok) throw new Error('Error al detectar impresoras')
   return res.json()
 }
@@ -169,13 +202,13 @@ export async function detectPrinters3D(): Promise<DetectPrintersResult[]> {
 // --- Notifications (Telegram) ---
 
 export async function fetchNotificationConfig(): Promise<import('../types').NotificationConfig> {
-  const res = await fetch('/api/notifications/telegram')
+  const res = await api('/api/notifications/telegram')
   if (!res.ok) throw new Error('Error al obtener config de notificaciones')
   return res.json()
 }
 
 export async function setBotToken(token: string): Promise<import('../types').NotificationConfig> {
-  const res = await fetch('/api/notifications/telegram/token', {
+  const res = await api('/api/notifications/telegram/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ token }),
@@ -188,12 +221,12 @@ export async function setBotToken(token: string): Promise<import('../types').Not
 }
 
 export async function deleteBotToken(): Promise<void> {
-  const res = await fetch('/api/notifications/telegram/token', { method: 'DELETE' })
+  const res = await api('/api/notifications/telegram/token', { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar bot')
 }
 
 export async function setChatRole(chatId: number, role: string, permissions?: import('../types').UserPermissions): Promise<void> {
-  const res = await fetch(`/api/notifications/telegram/chat/${chatId}/role`, {
+  const res = await api(`/api/notifications/telegram/chat/${chatId}/role`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role, permissions }),
@@ -202,17 +235,17 @@ export async function setChatRole(chatId: number, role: string, permissions?: im
 }
 
 export async function deleteTelegramChat(chatId: number): Promise<void> {
-  const res = await fetch(`/api/notifications/telegram/chat/${chatId}`, { method: 'DELETE' })
+  const res = await api(`/api/notifications/telegram/chat/${chatId}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar chat')
 }
 
 export async function sendTestTelegram(): Promise<string> {
-  const res = await fetch('/api/notifications/telegram/test', { method: 'POST' })
+  const res = await api('/api/notifications/telegram/test', { method: 'POST' })
   return res.text()
 }
 
 export async function setNotificationSchedule(schedule: { daily_enabled: boolean; daily_hour: number; daily_minute: number }): Promise<void> {
-  const res = await fetch('/api/notifications/schedule', {
+  const res = await api('/api/notifications/schedule', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(schedule),
@@ -223,7 +256,7 @@ export async function setNotificationSchedule(schedule: { daily_enabled: boolean
 // --- Linking ---
 
 export async function generateLinkCode(token: string): Promise<string> {
-  const res = await fetch('/api/auth/link-code', {
+  const res = await api('/api/auth/link-code', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   })
@@ -232,7 +265,7 @@ export async function generateLinkCode(token: string): Promise<string> {
 }
 
 export async function adminLinkChat(chatId: number, webUsername: string): Promise<void> {
-  const res = await fetch(`/api/notifications/telegram/chat/${chatId}/link`, {
+  const res = await api(`/api/notifications/telegram/chat/${chatId}/link`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ web_username: webUsername }),
@@ -243,13 +276,13 @@ export async function adminLinkChat(chatId: number, webUsername: string): Promis
 // --- Web Users ---
 
 export async function fetchWebUsers(): Promise<{ username: string; role: import('../types').UserRole; permissions: import('../types').UserPermissions }[]> {
-  const res = await fetch('/api/auth/users')
+  const res = await api('/api/auth/users')
   if (!res.ok) throw new Error('Error al obtener usuarios')
   return res.json()
 }
 
 export async function setWebUserRole(username: string, role: string, permissions?: import('../types').UserPermissions): Promise<void> {
-  const res = await fetch(`/api/auth/users/${encodeURIComponent(username)}/role`, {
+  const res = await api(`/api/auth/users/${encodeURIComponent(username)}/role`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role, permissions }),
@@ -258,30 +291,30 @@ export async function setWebUserRole(username: string, role: string, permissions
 }
 
 export async function deleteWebUser(username: string): Promise<void> {
-  const res = await fetch(`/api/auth/users/${encodeURIComponent(username)}`, { method: 'DELETE' })
+  const res = await api(`/api/auth/users/${encodeURIComponent(username)}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar usuario')
 }
 
 // --- CUPS Printing ---
 
 export async function fetchCupsPrinters(): Promise<CupsPrinter[]> {
-  const res = await fetch('/api/printing/printers')
+  const res = await api('/api/printing/printers')
   if (!res.ok) throw new Error('Error al obtener impresoras CUPS')
   return res.json()
 }
 
 export async function enablePrinter(name: string): Promise<void> {
-  const res = await fetch(`/api/printing/printers/${encodeURIComponent(name)}/enable`, { method: 'POST' })
+  const res = await api(`/api/printing/printers/${encodeURIComponent(name)}/enable`, { method: 'POST' })
   if (!res.ok) throw new Error('Error al habilitar impresora')
 }
 
 export async function disablePrinter(name: string): Promise<void> {
-  const res = await fetch(`/api/printing/printers/${encodeURIComponent(name)}/disable`, { method: 'POST' })
+  const res = await api(`/api/printing/printers/${encodeURIComponent(name)}/disable`, { method: 'POST' })
   if (!res.ok) throw new Error('Error al deshabilitar impresora')
 }
 
 export async function fetchPrinterOptions(name: string): Promise<import('../types').PrinterOption[]> {
-  const res = await fetch(`/api/printing/printers/${encodeURIComponent(name)}/options`)
+  const res = await api(`/api/printing/printers/${encodeURIComponent(name)}/options`)
   if (!res.ok) throw new Error('Error al obtener opciones de impresora')
   return res.json()
 }
@@ -301,7 +334,7 @@ export async function printFileUpload(file: File, printer: string, opts?: {
       formData.append(`opt_${key}`, value)
     }
   }
-  const res = await fetch('/api/printing/print', {
+  const res = await api('/api/printing/print', {
     method: 'POST',
     body: formData,
   })
@@ -309,7 +342,7 @@ export async function printFileUpload(file: File, printer: string, opts?: {
 }
 
 export async function printFilePath(req: PrintFileRequest): Promise<void> {
-  const res = await fetch('/api/printing/print-file', {
+  const res = await api('/api/printing/print-file', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
@@ -318,26 +351,26 @@ export async function printFilePath(req: PrintFileRequest): Promise<void> {
 }
 
 export async function fetchPrintJobs(): Promise<CupsPrintJob[]> {
-  const res = await fetch('/api/printing/jobs')
+  const res = await api('/api/printing/jobs')
   if (!res.ok) throw new Error('Error al obtener cola de impresion')
   return res.json()
 }
 
 export async function cancelPrintJob(id: string): Promise<void> {
-  const res = await fetch(`/api/printing/jobs/${id}`, { method: 'DELETE' })
+  const res = await api(`/api/printing/jobs/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al cancelar trabajo')
 }
 
 // --- Tasks & Projects ---
 
 export async function fetchProjects(): Promise<Project[]> {
-  const res = await fetch('/api/projects')
+  const res = await api('/api/projects')
   if (!res.ok) throw new Error('Error al obtener proyectos')
   return res.json()
 }
 
 export async function createProject(data: { name: string; description?: string }): Promise<Project> {
-  const res = await fetch('/api/projects', {
+  const res = await api('/api/projects', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -347,7 +380,7 @@ export async function createProject(data: { name: string; description?: string }
 }
 
 export async function deleteProject(id: string): Promise<void> {
-  const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' })
+  const res = await api(`/api/projects/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar proyecto')
 }
 
@@ -356,7 +389,7 @@ export async function fetchTasks(params?: { project?: string; status?: string })
   if (params?.project) query.set('project', params.project)
   if (params?.status) query.set('status', params.status)
   const qs = query.toString()
-  const res = await fetch(`/api/tasks${qs ? '?' + qs : ''}`)
+  const res = await api(`/api/tasks${qs ? '?' + qs : ''}`)
   if (!res.ok) throw new Error('Error al obtener tareas')
   return res.json()
 }
@@ -370,7 +403,7 @@ export async function createTask(data: {
   reminder_minutes?: number
   due_date?: string | null
 }): Promise<Task> {
-  const res = await fetch('/api/tasks', {
+  const res = await api('/api/tasks', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -380,7 +413,7 @@ export async function createTask(data: {
 }
 
 export async function updateTask(id: string, data: Record<string, unknown>): Promise<Task> {
-  const res = await fetch(`/api/tasks/${id}`, {
+  const res = await api(`/api/tasks/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -390,7 +423,7 @@ export async function updateTask(id: string, data: Record<string, unknown>): Pro
 }
 
 export async function confirmTask(id: string, user: string): Promise<Task> {
-  const res = await fetch(`/api/tasks/${id}/confirm`, {
+  const res = await api(`/api/tasks/${id}/confirm`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ user }),
@@ -400,7 +433,7 @@ export async function confirmTask(id: string, user: string): Promise<Task> {
 }
 
 export async function rejectTask(id: string, user: string): Promise<Task> {
-  const res = await fetch(`/api/tasks/${id}/reject`, {
+  const res = await api(`/api/tasks/${id}/reject`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ user }),
@@ -410,20 +443,20 @@ export async function rejectTask(id: string, user: string): Promise<Task> {
 }
 
 export async function doneTask(id: string): Promise<Task> {
-  const res = await fetch(`/api/tasks/${id}/done`, { method: 'POST' })
+  const res = await api(`/api/tasks/${id}/done`, { method: 'POST' })
   if (!res.ok) throw new Error('Error al completar tarea')
   return res.json()
 }
 
 export async function deleteTask(id: string): Promise<void> {
-  const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' })
+  const res = await api(`/api/tasks/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar tarea')
 }
 
 // --- Calendar Events ---
 
 export async function fetchEvents(): Promise<CalendarEvent[]> {
-  const res = await fetch('/api/events')
+  const res = await api('/api/events')
   if (!res.ok) throw new Error('Error al obtener eventos')
   return res.json()
 }
@@ -432,7 +465,7 @@ export async function createEvent(data: {
   title: string; date: string; time: string;
   description?: string; invitees?: string[]; remind_before_min?: number
 }): Promise<CalendarEvent> {
-  const res = await fetch('/api/events', {
+  const res = await api('/api/events', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -442,12 +475,12 @@ export async function createEvent(data: {
 }
 
 export async function deleteEvent(id: string): Promise<void> {
-  const res = await fetch(`/api/events/${id}`, { method: 'DELETE' })
+  const res = await api(`/api/events/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar evento')
 }
 
 export async function acceptEvent(id: string, user: string): Promise<CalendarEvent> {
-  const res = await fetch(`/api/events/${id}/accept`, {
+  const res = await api(`/api/events/${id}/accept`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ user }),
@@ -457,7 +490,7 @@ export async function acceptEvent(id: string, user: string): Promise<CalendarEve
 }
 
 export async function declineEvent(id: string, user: string): Promise<CalendarEvent> {
-  const res = await fetch(`/api/events/${id}/decline`, {
+  const res = await api(`/api/events/${id}/decline`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ user }),
@@ -469,7 +502,7 @@ export async function declineEvent(id: string, user: string): Promise<CalendarEv
 // --- File Sharing ---
 
 export async function createShare(path: string, expiresHours?: number): Promise<{ token: string; url: string; expires_hours: number }> {
-  const res = await fetch('/api/shares', {
+  const res = await api('/api/shares', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, expires_hours: expiresHours || 24 }),
@@ -479,20 +512,20 @@ export async function createShare(path: string, expiresHours?: number): Promise<
 }
 
 export async function fetchShares(): Promise<import('../types/notes').ShareLink[]> {
-  const res = await fetch('/api/shares')
+  const res = await api('/api/shares')
   if (!res.ok) throw new Error('Error al obtener links')
   return res.json()
 }
 
 export async function deleteShare(token: string): Promise<void> {
-  const res = await fetch(`/api/shares/${token}`, { method: 'DELETE' })
+  const res = await api(`/api/shares/${token}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar link')
 }
 
 // --- Download URL ---
 
 export async function downloadFromUrl(url: string, destination: string): Promise<string> {
-  const res = await fetch('/api/download-url', {
+  const res = await api('/api/download-url', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url, destination }),
@@ -504,13 +537,13 @@ export async function downloadFromUrl(url: string, destination: string): Promise
 // --- Notes ---
 
 export async function fetchNotes(): Promise<import('../types/notes').Note[]> {
-  const res = await fetch('/api/notes')
+  const res = await api('/api/notes')
   if (!res.ok) throw new Error('Error al obtener notas')
   return res.json()
 }
 
 export async function createNote(title: string, content?: string): Promise<import('../types/notes').Note> {
-  const res = await fetch('/api/notes', {
+  const res = await api('/api/notes', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title, content: content || '' }),
@@ -520,7 +553,7 @@ export async function createNote(title: string, content?: string): Promise<impor
 }
 
 export async function updateNote(id: string, data: { title?: string; content?: string }): Promise<import('../types/notes').Note> {
-  const res = await fetch(`/api/notes/${id}`, {
+  const res = await api(`/api/notes/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -530,6 +563,6 @@ export async function updateNote(id: string, data: { title?: string; content?: s
 }
 
 export async function deleteNote(id: string): Promise<void> {
-  const res = await fetch(`/api/notes/${id}`, { method: 'DELETE' })
+  const res = await api(`/api/notes/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar nota')
 }
