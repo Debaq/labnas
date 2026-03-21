@@ -27,8 +27,8 @@ Una plataforma self-hosted para gestionar un servidor NAS de laboratorio. Combin
 
 ```bash
 # Descargar ultimo release
-wget https://github.com/Debaq/labnas/releases/latest/download/labnas-v1.5.0-linux-x86_64.tar.gz
-tar xzf labnas-v1.5.0-linux-x86_64.tar.gz
+wget https://github.com/Debaq/labnas/releases/latest/download/labnas-v1.6.0-linux-x86_64.tar.gz
+tar xzf labnas-v1.6.0-linux-x86_64.tar.gz
 cd labnas
 sudo ./labnas-backend
 ```
@@ -37,7 +37,7 @@ La primera cuenta que crees en la web sera administrador.
 
 ## Funcionalidades
 
-### Bot Telegram (35+ comandos)
+### Bot Telegram (40+ comandos)
 Bot bidireccional que funciona como asistente personal del laboratorio:
 
 | Comando | Descripcion |
@@ -45,6 +45,9 @@ Bot bidireccional que funciona como asistente personal del laboratorio:
 | `/estado` `/discos` `/ram` `/cpu` `/uptime` | Info del sistema |
 | `/red` | Dispositivos en la red |
 | `/impresoras` | Estado impresoras 3D |
+| `/camara` `/foto` | Snapshot de webcam de impresora 3D |
+| `/temp` | Temperaturas de todas las impresoras |
+| `/imprimir` `/pausar` `/cancelar3d` | Control de impresion 3D |
 | `/cmd <comando>` | Terminal remota interactiva (soporta sudo) |
 | `/tarea Titulo @persona !insistente` | Crear tarea con recordatorios |
 | `/tareas` `/hecho ID` `/confirmar ID` | Gestionar tareas |
@@ -96,11 +99,18 @@ Bot bidireccional que funciona como asistente personal del laboratorio:
 - Cola de impresion con cancelacion
 - Drag & drop para imprimir
 
-### Impresoras 3D
+### Impresoras 3D (sistema completo)
 - Soporte OctoPrint y Moonraker
-- Monitoreo en tiempo real: temperaturas, progreso
+- Control de impresion: iniciar, pausar, reanudar, cancelar
+- Temperaturas en tiempo real con barras visuales (hotend + cama)
+- Precalentar y enfriar con un click
+- Jog pad para mover ejes (0.1, 1, 10, 100mm)
+- Home de ejes y envio de G-code manual
+- Archivos en la impresora: listar, imprimir, eliminar
+- Snapshot de webcam en la web y por Telegram (`/camara`)
+- Monitor automatico: notifica por Telegram al terminar o si hay error
 - Auto-deteccion en la red
-- Subida de .gcode
+- Upload de .gcode con drag & drop
 
 ### Red y seguridad ("sistema inmune")
 - Escaneo de red con deteccion de MAC y fabricante
@@ -176,7 +186,7 @@ labnas/
 │   │   ├── network.rs       # Escaner de red + MAC + vendor
 │   │   ├── system.rs        # Info sistema + autostart + auto-update
 │   │   ├── terminal.rs      # Terminal WebSocket
-│   │   ├── notifications.rs # Bot Telegram (35+ comandos)
+│   │   ├── notifications.rs # Bot Telegram (40+ comandos)
 │   │   ├── tasks.rs         # Tareas, proyectos, calendario
 │   │   ├── email.rs         # IMAP + Groq IA + filtros
 │   │   ├── extras.rs        # Links temporales, download URL, notas
