@@ -30,7 +30,11 @@ export default function Layout() {
   useEffect(() => {
     getBranding().then(b => {
       if (b.lab_name) { setLabName(b.lab_name); document.title = b.lab_name }
-      if (b.logo_url) setLogoUrl(b.logo_url)
+      if (b.logo_url) {
+        setLogoUrl(b.logo_url)
+        const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement
+        if (link) link.href = b.logo_url
+      }
     }).catch(() => {})
   }, [])
 
