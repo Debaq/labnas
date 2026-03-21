@@ -10,6 +10,24 @@ import {
   Wifi,
   WifiOff,
   X,
+  Play,
+  Pause,
+  Square,
+  RotateCcw,
+  Home,
+  Send,
+  Camera,
+  RefreshCw,
+  FileText,
+  Printer,
+  ChevronDown,
+  ChevronUp,
+  Move,
+  Flame,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
 } from 'lucide-react'
 import {
   fetchPrinters3D,
@@ -18,12 +36,22 @@ import {
   fetchPrinter3DStatus,
   uploadGcode,
   detectPrinters3D,
+  controlPrint3D,
+  preheat3D,
+  homeAxes3D,
+  jog3D,
+  sendGcode3D,
+  fetchPrinterFiles,
+  printFile3D,
+  deletePrinterFile,
+  cameraSnapshotUrl,
 } from '../api'
 import type {
   Printer3DConfig,
   Printer3DStatus,
   AddPrinter3DRequest,
   DetectPrintersResult,
+  PrinterFileInfo,
 } from '../types'
 
 function formatTime(seconds: number | null | undefined): string {
@@ -31,6 +59,13 @@ function formatTime(seconds: number | null | undefined): string {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
   return h > 0 ? `${h}h ${m}m` : `${m}m`
+}
+
+function formatFileSize(bytes: number | null | undefined): string {
+  if (!bytes) return '--'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 export default function Printers3DPage() {
@@ -42,6 +77,15 @@ export default function Printers3DPage() {
   const [detected, setDetected] = useState<DetectPrintersResult[]>([])
   const [uploading, setUploading] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<string | null>(null)
+  const [expandedPrinter, setExpandedPrinter] = useState<string | null>(null)
+  const [printerFiles, setPrinterFiles] = useState<Record<string, PrinterFileInfo[]>>({})
+  const [loadingFiles, setLoadingFiles] = useState<string | null>(null)
+  const [jogDistance, setJogDistance] = useState(10)
+  const [gcodeInput, setGcodeInput] = useState<Record<string, string>>({})
+  const [preheatHotend, setPreheatHotend] = useState(200)
+  const [preheatBed, setPreheatBed] = useState(60)
+  const [cameraKey, setCameraKey] = useState(0)
+  const [actionFeedback, setActionFeedback] = useState<Record<string, string>>({})
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   // Form state
@@ -50,6 +94,7 @@ export default function Printers3DPage() {
   const [formPort, setFormPort] = useState(5000)
   const [formType, setFormType] = useState<'OctoPrint' | 'Moonraker'>('OctoPrint')
   const [formApiKey, setFormApiKey] = useState('')
+  const [formCameraUrl, setFormCameraUrl] = useState('')
 
   const loadPrinters = useCallback(async () => {
     try {
@@ -66,7 +111,7 @@ export default function Printers3DPage() {
     loadPrinters()
   }, [loadPrinters])
 
-  // Polling statuses
+  // Polling de estados cada 5 segundos
   useEffect(() => {
     if (printers.length === 0) return
 
@@ -84,9 +129,21 @@ export default function Printers3DPage() {
     }
 
     fetchAllStatuses()
-    const interval = setInterval(fetchAllStatuses, 8000)
+    const interval = setInterval(fetchAllStatuses, 5000)
     return () => clearInterval(interval)
   }, [printers])
+
+  // Feedback temporal
+  function showFeedback(printerId: string, message: string) {
+    setActionFeedback(prev => ({ ...prev, [printerId]: message }))
+    setTimeout(() => {
+      setActionFeedback(prev => {
+        const copy = { ...prev }
+        delete copy[printerId]
+        return copy
+      })
+    }, 3000)
+  }
 
   async function handleAdd() {
     if (!formName.trim() || !formIp.trim()) return
@@ -96,6 +153,7 @@ export default function Printers3DPage() {
       port: formPort,
       printer_type: formType,
       api_key: formApiKey || null,
+      camera_url: formCameraUrl || null,
     }
     try {
       await addPrinter3D(req)
@@ -142,8 +200,14 @@ export default function Printers3DPage() {
     setUploading(printerId)
     try {
       await uploadGcode(printerId, file)
+      showFeedback(printerId, `'${file.name}' subido`)
+      // Refrescar archivos si esta expandido
+      if (expandedPrinter === printerId) {
+        loadFiles(printerId)
+      }
     } catch (err) {
       console.error('Error subiendo gcode:', err)
+      showFeedback(printerId, 'Error al subir archivo')
     } finally {
       setUploading(null)
     }
@@ -156,12 +220,120 @@ export default function Printers3DPage() {
     if (file) handleUpload(printerId, file)
   }
 
+  async function handleControl(printerId: string, command: 'start' | 'pause' | 'resume' | 'cancel') {
+    try {
+      await controlPrint3D(printerId, command)
+      const labels = { start: 'Iniciada', pause: 'Pausada', resume: 'Reanudada', cancel: 'Cancelada' }
+      showFeedback(printerId, `Impresion ${labels[command]}`)
+    } catch (err) {
+      console.error('Error control:', err)
+      showFeedback(printerId, 'Error al controlar impresion')
+    }
+  }
+
+  async function handlePreheat(printerId: string) {
+    try {
+      await preheat3D(printerId, preheatHotend, preheatBed)
+      showFeedback(printerId, `Precalentando: ${preheatHotend}°C / ${preheatBed}°C`)
+    } catch (err) {
+      console.error('Error preheat:', err)
+      showFeedback(printerId, 'Error al precalentar')
+    }
+  }
+
+  async function handleHome(printerId: string) {
+    try {
+      await homeAxes3D(printerId)
+      showFeedback(printerId, 'Home enviado')
+    } catch (err) {
+      console.error('Error home:', err)
+      showFeedback(printerId, 'Error al hacer home')
+    }
+  }
+
+  async function handleJog(printerId: string, x: number, y: number, z: number) {
+    try {
+      await jog3D(printerId, x, y, z)
+    } catch (err) {
+      console.error('Error jog:', err)
+      showFeedback(printerId, 'Error al mover')
+    }
+  }
+
+  async function handleSendGcode(printerId: string) {
+    const cmd = gcodeInput[printerId]?.trim()
+    if (!cmd) return
+    try {
+      await sendGcode3D(printerId, cmd)
+      showFeedback(printerId, `Enviado: ${cmd}`)
+      setGcodeInput(prev => ({ ...prev, [printerId]: '' }))
+    } catch (err) {
+      console.error('Error gcode:', err)
+      showFeedback(printerId, 'Error al enviar G-code')
+    }
+  }
+
+  async function loadFiles(printerId: string) {
+    setLoadingFiles(printerId)
+    try {
+      const files = await fetchPrinterFiles(printerId)
+      setPrinterFiles(prev => ({ ...prev, [printerId]: files }))
+    } catch (err) {
+      console.error('Error files:', err)
+    } finally {
+      setLoadingFiles(null)
+    }
+  }
+
+  async function handlePrintFile(printerId: string, filename: string) {
+    try {
+      await printFile3D(printerId, filename)
+      showFeedback(printerId, `Imprimiendo '${filename}'`)
+    } catch (err) {
+      console.error('Error print file:', err)
+      showFeedback(printerId, 'Error al imprimir archivo')
+    }
+  }
+
+  async function handleDeleteFile(printerId: string, filename: string) {
+    if (!confirm(`Eliminar '${filename}'?`)) return
+    try {
+      await deletePrinterFile(printerId, filename)
+      loadFiles(printerId)
+    } catch (err) {
+      console.error('Error delete file:', err)
+    }
+  }
+
+  function toggleExpand(printerId: string) {
+    if (expandedPrinter === printerId) {
+      setExpandedPrinter(null)
+    } else {
+      setExpandedPrinter(printerId)
+      loadFiles(printerId)
+    }
+  }
+
   function resetForm() {
     setFormName('')
     setFormIp('')
     setFormPort(5000)
     setFormType('OctoPrint')
     setFormApiKey('')
+    setFormCameraUrl('')
+  }
+
+  // Barra de progreso de temperatura
+  function TempBar({ actual, target, color }: { actual: number; target: number; color: string }) {
+    const pct = target > 0 ? Math.min((actual / target) * 100, 100) : 0
+    return (
+      <div className="w-full h-1.5 rounded-full mt-1" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+        <div
+          className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${pct}%`, backgroundColor: color }}
+        />
+      </div>
+    )
   }
 
   return (
@@ -233,7 +405,7 @@ export default function Printers3DPage() {
         </div>
       )}
 
-      {/* Printers Grid */}
+      {/* Printers */}
       {loading ? (
         <div className="flex items-center justify-center py-16">
           <Loader2 size={32} className="animate-spin" style={{ color: 'var(--accent)' }} />
@@ -246,7 +418,7 @@ export default function Printers3DPage() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+        <div className="space-y-4">
           {printers.map((printer) => {
             const status = statuses[printer.id]
             const isOnline = status?.online ?? false
@@ -254,11 +426,16 @@ export default function Printers3DPage() {
             const job = status?.current_job
             const isUploading = uploading === printer.id
             const isDraggedOver = dragOver === printer.id
+            const isExpanded = expandedPrinter === printer.id
+            const files = printerFiles[printer.id] || []
+            const feedback = actionFeedback[printer.id]
+            const isPrinting = job && (job.state.toLowerCase().includes('printing') || job.state.toLowerCase() === 'printing')
+            const isPaused = job && job.state.toLowerCase().includes('paus')
 
             return (
               <div
                 key={printer.id}
-                className="rounded-xl p-6 transition-all duration-200 hover:shadow-lg"
+                className="rounded-xl transition-all duration-200"
                 style={{
                   backgroundColor: 'var(--card-bg)',
                   border: isDraggedOver
@@ -270,95 +447,165 @@ export default function Printers3DPage() {
                 onDrop={(e) => handleDrop(e, printer.id)}
               >
                 {/* Header */}
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
-                      {printer.name}
-                    </h3>
-                    <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                      {printer.ip}:{printer.port}
-                    </p>
+                <div className="p-6 pb-0">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <Printer size={20} style={{ color: isOnline ? 'var(--accent)' : 'var(--text-secondary)' }} />
+                      <div>
+                        <h3 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
+                          {printer.name}
+                        </h3>
+                        <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                          {printer.ip}:{printer.port}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {feedback && (
+                        <span className="text-xs px-2 py-1 rounded-lg animate-pulse" style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}>
+                          {feedback}
+                        </span>
+                      )}
+                      <span
+                        className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium"
+                        style={{
+                          backgroundColor: isOnline ? 'var(--success-alpha)' : 'var(--danger-alpha)',
+                          color: isOnline ? 'var(--success)' : 'var(--danger)',
+                        }}
+                      >
+                        {isOnline ? <Wifi size={12} /> : <WifiOff size={12} />}
+                        {isOnline ? 'Online' : 'Offline'}
+                      </span>
+                      <span className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>
+                        {printer.printer_type}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium"
-                      style={{
-                        backgroundColor: isOnline ? 'var(--success-alpha)' : 'var(--danger-alpha)',
-                        color: isOnline ? 'var(--success)' : 'var(--danger)',
-                      }}
-                    >
-                      {isOnline ? <Wifi size={12} /> : <WifiOff size={12} />}
-                      {isOnline ? 'Online' : 'Offline'}
-                    </span>
-                    <span className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>
-                      {printer.printer_type}
-                    </span>
-                  </div>
+
+                  {/* Temperatures */}
+                  {isOnline && temps && (
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                      <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-1.5">
+                            <Thermometer size={14} style={{ color: 'var(--danger)' }} />
+                            <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Hotend</span>
+                          </div>
+                          <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
+                            {temps.hotend_actual.toFixed(0)}°C
+                            <span className="text-xs font-normal ml-1" style={{ color: 'var(--text-secondary)' }}>
+                              / {temps.hotend_target.toFixed(0)}°C
+                            </span>
+                          </span>
+                        </div>
+                        <TempBar actual={temps.hotend_actual} target={temps.hotend_target} color="var(--danger)" />
+                      </div>
+                      <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-1.5">
+                            <Thermometer size={14} style={{ color: 'var(--warning)' }} />
+                            <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Cama</span>
+                          </div>
+                          <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
+                            {temps.bed_actual.toFixed(0)}°C
+                            <span className="text-xs font-normal ml-1" style={{ color: 'var(--text-secondary)' }}>
+                              / {temps.bed_target.toFixed(0)}°C
+                            </span>
+                          </span>
+                        </div>
+                        <TempBar actual={temps.bed_actual} target={temps.bed_target} color="var(--warning)" />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Current Job */}
+                  {isOnline && job && job.file_name && (
+                    <div className="mb-4 rounded-lg p-3" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                      <div className="flex items-center justify-between text-xs mb-2">
+                        <span className="font-medium truncate flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
+                          <FileText size={12} />
+                          {job.file_name}
+                        </span>
+                        <span className="font-bold" style={{ color: 'var(--accent)' }}>{job.progress.toFixed(1)}%</span>
+                      </div>
+                      <div className="w-full h-2.5 rounded-full" style={{ backgroundColor: 'var(--card-bg)' }}>
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{
+                            width: `${Math.min(job.progress, 100)}%`,
+                            backgroundColor: isPaused ? 'var(--warning)' : 'var(--accent)',
+                          }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>
+                        <span className="px-1.5 py-0.5 rounded text-xs font-medium" style={{
+                          backgroundColor: isPrinting ? 'var(--success-alpha)' : isPaused ? 'var(--warning-alpha)' : 'var(--bg-tertiary)',
+                          color: isPrinting ? 'var(--success)' : isPaused ? 'var(--warning)' : 'var(--text-secondary)',
+                        }}>
+                          {job.state}
+                        </span>
+                        <span>
+                          {formatTime(job.time_elapsed)} / {formatTime(job.time_remaining ? (job.time_elapsed || 0) + job.time_remaining : null)}
+                        </span>
+                      </div>
+
+                      {/* Botones de control de impresión */}
+                      <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+                        {!isPrinting && !isPaused && (
+                          <button
+                            onClick={() => handleControl(printer.id, 'start')}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium hover:opacity-90"
+                            style={{ backgroundColor: 'var(--success)', color: '#ffffff' }}
+                            title="Iniciar"
+                          >
+                            <Play size={12} /> Iniciar
+                          </button>
+                        )}
+                        {isPrinting && (
+                          <button
+                            onClick={() => handleControl(printer.id, 'pause')}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium hover:opacity-90"
+                            style={{ backgroundColor: 'var(--warning)', color: '#ffffff' }}
+                            title="Pausar"
+                          >
+                            <Pause size={12} /> Pausar
+                          </button>
+                        )}
+                        {isPaused && (
+                          <button
+                            onClick={() => handleControl(printer.id, 'resume')}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium hover:opacity-90"
+                            style={{ backgroundColor: 'var(--success)', color: '#ffffff' }}
+                            title="Reanudar"
+                          >
+                            <Play size={12} /> Reanudar
+                          </button>
+                        )}
+                        {(isPrinting || isPaused) && (
+                          <button
+                            onClick={() => {
+                              if (confirm('Cancelar la impresion actual?')) {
+                                handleControl(printer.id, 'cancel')
+                              }
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium hover:opacity-90"
+                            style={{ backgroundColor: 'var(--danger)', color: '#ffffff' }}
+                            title="Cancelar"
+                          >
+                            <Square size={12} /> Cancelar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* Temperatures */}
-                {temps && (
-                  <div className="grid grid-cols-2 gap-3 mb-4">
-                    <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <Thermometer size={14} style={{ color: 'var(--danger)' }} />
-                        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Hotend</span>
-                      </div>
-                      <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
-                        {temps.hotend_actual.toFixed(0)}°C
-                      </span>
-                      <span className="text-xs ml-1" style={{ color: 'var(--text-secondary)' }}>
-                        / {temps.hotend_target.toFixed(0)}°C
-                      </span>
-                    </div>
-                    <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <Thermometer size={14} style={{ color: 'var(--warning)' }} />
-                        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Cama</span>
-                      </div>
-                      <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
-                        {temps.bed_actual.toFixed(0)}°C
-                      </span>
-                      <span className="text-xs ml-1" style={{ color: 'var(--text-secondary)' }}>
-                        / {temps.bed_target.toFixed(0)}°C
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Current Job */}
-                {job && (
-                  <div className="mb-4">
-                    <div className="flex items-center justify-between text-xs mb-1">
-                      <span className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>
-                        {job.file_name}
-                      </span>
-                      <span style={{ color: 'var(--accent)' }}>{job.progress.toFixed(1)}%</span>
-                    </div>
-                    <div className="w-full h-2 rounded-full" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
-                      <div
-                        className="h-full rounded-full transition-all duration-500"
-                        style={{
-                          width: `${Math.min(job.progress, 100)}%`,
-                          backgroundColor: 'var(--accent)',
-                        }}
-                      />
-                    </div>
-                    <div className="flex justify-between text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-                      <span>{job.state}</span>
-                      <span>
-                        {formatTime(job.time_elapsed)} / {formatTime(job.time_remaining ? (job.time_elapsed || 0) + job.time_remaining : null)}
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Actions */}
-                <div className="flex items-center gap-2 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+                {/* Actions bar */}
+                <div className="px-6 py-3 flex items-center gap-2 flex-wrap" style={{ borderTop: '1px solid var(--border)' }}>
                   <button
                     onClick={() => fileInputRefs.current[printer.id]?.click()}
-                    disabled={isUploading}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 hover:opacity-90"
+                    disabled={isUploading || !isOnline}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 hover:opacity-90 disabled:opacity-50"
                     style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
                   >
                     {isUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
@@ -375,6 +622,32 @@ export default function Printers3DPage() {
                       e.target.value = ''
                     }}
                   />
+
+                  {isOnline && (
+                    <button
+                      onClick={() => toggleExpand(printer.id)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 hover:opacity-90"
+                      style={{
+                        backgroundColor: isExpanded ? 'var(--accent-alpha)' : 'var(--bg-tertiary)',
+                        color: isExpanded ? 'var(--accent)' : 'var(--text-primary)',
+                        border: isExpanded ? '1px solid var(--accent)' : '1px solid var(--border)',
+                      }}
+                    >
+                      {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                      Controles
+                    </button>
+                  )}
+
+                  {isOnline && printer.camera_url && (
+                    <button
+                      onClick={() => setCameraKey(k => k + 1)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 hover:opacity-90"
+                      style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+                    >
+                      <Camera size={14} /> Camara
+                    </button>
+                  )}
+
                   <div className="flex-1" />
                   <button
                     onClick={() => handleDelete(printer.id)}
@@ -388,10 +661,279 @@ export default function Printers3DPage() {
 
                 {/* Drag zone hint */}
                 {isDraggedOver && (
-                  <div className="mt-3 text-center py-3 rounded-lg" style={{ backgroundColor: 'var(--accent-alpha)' }}>
+                  <div className="mx-6 mb-3 text-center py-3 rounded-lg" style={{ backgroundColor: 'var(--accent-alpha)' }}>
                     <span className="text-xs font-medium" style={{ color: 'var(--accent)' }}>
                       Soltar archivo .gcode aqui
                     </span>
+                  </div>
+                )}
+
+                {/* Camera snapshot */}
+                {isOnline && printer.camera_url && (
+                  <div className="px-6 pb-4">
+                    <div className="rounded-lg overflow-hidden" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                      <div className="flex items-center justify-between px-3 py-2">
+                        <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+                          <Camera size={12} className="inline mr-1" />Camara
+                        </span>
+                        <button
+                          onClick={() => setCameraKey(k => k + 1)}
+                          className="text-xs flex items-center gap-1 hover:opacity-80"
+                          style={{ color: 'var(--accent)' }}
+                        >
+                          <RefreshCw size={12} /> Refrescar
+                        </button>
+                      </div>
+                      <img
+                        key={cameraKey}
+                        src={`${cameraSnapshotUrl(printer.id)}?t=${cameraKey}`}
+                        alt="Camera"
+                        className="w-full"
+                        style={{ maxHeight: 300, objectFit: 'contain' }}
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none'
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Expanded controls */}
+                {isExpanded && isOnline && (
+                  <div className="px-6 pb-6 space-y-4" style={{ borderTop: '1px solid var(--border)' }}>
+                    {/* Precalentar */}
+                    <div className="pt-4">
+                      <h4 className="text-xs font-semibold mb-2 flex items-center gap-1.5" style={{ color: 'var(--text-secondary)' }}>
+                        <Flame size={14} /> Precalentar
+                      </h4>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Hotend:</span>
+                          <input
+                            type="number"
+                            value={preheatHotend}
+                            onChange={(e) => setPreheatHotend(parseInt(e.target.value) || 0)}
+                            className="w-16 px-2 py-1 rounded text-xs text-center outline-none"
+                            style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                          />
+                          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>°C</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Cama:</span>
+                          <input
+                            type="number"
+                            value={preheatBed}
+                            onChange={(e) => setPreheatBed(parseInt(e.target.value) || 0)}
+                            className="w-16 px-2 py-1 rounded text-xs text-center outline-none"
+                            style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                          />
+                          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>°C</span>
+                        </div>
+                        <button
+                          onClick={() => handlePreheat(printer.id)}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium hover:opacity-90"
+                          style={{ backgroundColor: 'var(--danger)', color: '#ffffff' }}
+                        >
+                          <Flame size={12} /> Calentar
+                        </button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await preheat3D(printer.id, 0, 0)
+                              showFeedback(printer.id, 'Enfriando...')
+                            } catch {}
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium hover:opacity-90"
+                          style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+                        >
+                          Enfriar
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Jog Controls */}
+                    <div>
+                      <h4 className="text-xs font-semibold mb-2 flex items-center gap-1.5" style={{ color: 'var(--text-secondary)' }}>
+                        <Move size={14} /> Control de ejes
+                      </h4>
+                      <div className="flex items-start gap-4 flex-wrap">
+                        {/* XY pad */}
+                        <div className="grid grid-cols-3 gap-1" style={{ width: 120 }}>
+                          <div />
+                          <button
+                            onClick={() => handleJog(printer.id, 0, jogDistance, 0)}
+                            className="p-2 rounded-lg hover:opacity-80 flex items-center justify-center"
+                            style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+                            title={`Y+${jogDistance}`}
+                          >
+                            <ArrowUp size={16} style={{ color: 'var(--text-primary)' }} />
+                          </button>
+                          <div />
+                          <button
+                            onClick={() => handleJog(printer.id, -jogDistance, 0, 0)}
+                            className="p-2 rounded-lg hover:opacity-80 flex items-center justify-center"
+                            style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+                            title={`X-${jogDistance}`}
+                          >
+                            <ArrowLeft size={16} style={{ color: 'var(--text-primary)' }} />
+                          </button>
+                          <button
+                            onClick={() => handleHome(printer.id)}
+                            className="p-2 rounded-lg hover:opacity-80 flex items-center justify-center"
+                            style={{ backgroundColor: 'var(--accent-alpha)', border: '1px solid var(--accent)' }}
+                            title="Home"
+                          >
+                            <Home size={16} style={{ color: 'var(--accent)' }} />
+                          </button>
+                          <button
+                            onClick={() => handleJog(printer.id, jogDistance, 0, 0)}
+                            className="p-2 rounded-lg hover:opacity-80 flex items-center justify-center"
+                            style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+                            title={`X+${jogDistance}`}
+                          >
+                            <ArrowRight size={16} style={{ color: 'var(--text-primary)' }} />
+                          </button>
+                          <div />
+                          <button
+                            onClick={() => handleJog(printer.id, 0, -jogDistance, 0)}
+                            className="p-2 rounded-lg hover:opacity-80 flex items-center justify-center"
+                            style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+                            title={`Y-${jogDistance}`}
+                          >
+                            <ArrowDown size={16} style={{ color: 'var(--text-primary)' }} />
+                          </button>
+                          <div />
+                        </div>
+
+                        {/* Z controls */}
+                        <div className="flex flex-col gap-1 items-center">
+                          <span className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Z</span>
+                          <button
+                            onClick={() => handleJog(printer.id, 0, 0, jogDistance)}
+                            className="p-2 rounded-lg hover:opacity-80 flex items-center justify-center"
+                            style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border)', width: 38 }}
+                            title={`Z+${jogDistance}`}
+                          >
+                            <ArrowUp size={16} style={{ color: 'var(--text-primary)' }} />
+                          </button>
+                          <button
+                            onClick={() => handleJog(printer.id, 0, 0, -jogDistance)}
+                            className="p-2 rounded-lg hover:opacity-80 flex items-center justify-center"
+                            style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border)', width: 38 }}
+                            title={`Z-${jogDistance}`}
+                          >
+                            <ArrowDown size={16} style={{ color: 'var(--text-primary)' }} />
+                          </button>
+                        </div>
+
+                        {/* Distance selector */}
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Distancia</span>
+                          {[0.1, 1, 10, 100].map(d => (
+                            <button
+                              key={d}
+                              onClick={() => setJogDistance(d)}
+                              className="px-3 py-1 rounded text-xs font-mono font-medium hover:opacity-90"
+                              style={{
+                                backgroundColor: jogDistance === d ? 'var(--accent)' : 'var(--bg-tertiary)',
+                                color: jogDistance === d ? '#ffffff' : 'var(--text-primary)',
+                                border: `1px solid ${jogDistance === d ? 'var(--accent)' : 'var(--border)'}`,
+                              }}
+                            >
+                              {d}mm
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* G-code manual */}
+                    <div>
+                      <h4 className="text-xs font-semibold mb-2 flex items-center gap-1.5" style={{ color: 'var(--text-secondary)' }}>
+                        <Send size={14} /> G-code manual
+                      </h4>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={gcodeInput[printer.id] || ''}
+                          onChange={(e) => setGcodeInput(prev => ({ ...prev, [printer.id]: e.target.value }))}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSendGcode(printer.id)
+                          }}
+                          placeholder="G28, M104 S200, etc."
+                          className="flex-1 px-3 py-1.5 rounded-lg text-xs outline-none font-mono"
+                          style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                        />
+                        <button
+                          onClick={() => handleSendGcode(printer.id)}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium hover:opacity-90"
+                          style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
+                        >
+                          <Send size={12} /> Enviar
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Archivos en la impresora */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-xs font-semibold flex items-center gap-1.5" style={{ color: 'var(--text-secondary)' }}>
+                          <FileText size={14} /> Archivos en la impresora
+                        </h4>
+                        <button
+                          onClick={() => loadFiles(printer.id)}
+                          disabled={loadingFiles === printer.id}
+                          className="text-xs flex items-center gap-1 hover:opacity-80"
+                          style={{ color: 'var(--accent)' }}
+                        >
+                          {loadingFiles === printer.id ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                          Refrescar
+                        </button>
+                      </div>
+
+                      {files.length === 0 ? (
+                        <p className="text-xs py-2" style={{ color: 'var(--text-secondary)' }}>
+                          {loadingFiles === printer.id ? 'Cargando...' : 'No hay archivos'}
+                        </p>
+                      ) : (
+                        <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                          {files.map((file, i) => (
+                            <div
+                              key={file.name}
+                              className="flex items-center justify-between px-3 py-2 text-xs"
+                              style={{
+                                borderTop: i > 0 ? '1px solid var(--border)' : undefined,
+                                backgroundColor: i % 2 === 0 ? 'var(--bg-tertiary)' : 'transparent',
+                              }}
+                            >
+                              <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <FileText size={12} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+                                <span className="truncate font-mono" style={{ color: 'var(--text-primary)' }}>{file.name}</span>
+                                <span style={{ color: 'var(--text-secondary)', flexShrink: 0 }}>{formatFileSize(file.size)}</span>
+                              </div>
+                              <div className="flex items-center gap-1 ml-2">
+                                <button
+                                  onClick={() => handlePrintFile(printer.id, file.name)}
+                                  className="p-1 rounded hover:opacity-80"
+                                  style={{ color: 'var(--success)' }}
+                                  title="Imprimir"
+                                >
+                                  <Play size={14} />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteFile(printer.id, file.name)}
+                                  className="p-1 rounded hover:opacity-80"
+                                  style={{ color: 'var(--danger)' }}
+                                  title="Eliminar"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -404,7 +946,7 @@ export default function Printers3DPage() {
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div
-            className="rounded-xl p-6 w-full max-w-md mx-4"
+            className="rounded-xl p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto"
             style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
           >
             <div className="flex items-center justify-between mb-6">
@@ -474,6 +1016,17 @@ export default function Printers3DPage() {
                   value={formApiKey}
                   onChange={(e) => setFormApiKey(e.target.value)}
                   placeholder="Solo para OctoPrint"
+                  className="w-full px-3 py-2 rounded-lg text-sm outline-none font-mono"
+                  style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>URL de camara (opcional)</label>
+                <input
+                  type="text"
+                  value={formCameraUrl}
+                  onChange={(e) => setFormCameraUrl(e.target.value)}
+                  placeholder="http://192.168.1.100/webcam/?action=snapshot"
                   className="w-full px-3 py-2 rounded-lg text-sm outline-none font-mono"
                   style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
                 />

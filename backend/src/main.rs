@@ -85,6 +85,15 @@ async fn main() {
         .route("/api/printers3d/{id}", delete(handlers::printers3d::delete_printer))
         .route("/api/printers3d/{id}/status", get(handlers::printers3d::printer_status))
         .route("/api/printers3d/{id}/upload", post(handlers::printers3d::upload_gcode))
+        .route("/api/printers3d/{id}/control", post(handlers::printers3d::control_print))
+        .route("/api/printers3d/{id}/preheat", post(handlers::printers3d::preheat))
+        .route("/api/printers3d/{id}/home", post(handlers::printers3d::home_axes))
+        .route("/api/printers3d/{id}/jog", post(handlers::printers3d::jog))
+        .route("/api/printers3d/{id}/gcode", post(handlers::printers3d::send_gcode))
+        .route("/api/printers3d/{id}/files", get(handlers::printers3d::list_printer_files))
+        .route("/api/printers3d/{id}/files/{filename}/print", post(handlers::printers3d::print_file))
+        .route("/api/printers3d/{id}/files/{filename}", delete(handlers::printers3d::delete_printer_file))
+        .route("/api/printers3d/{id}/camera", get(handlers::printers3d::camera_snapshot))
         // CUPS Printing
         .route("/api/printing/printers", get(handlers::printing::list_printers))
         .route("/api/printing/printers/{name}/options", get(handlers::printing::printer_options))
@@ -151,6 +160,7 @@ async fn main() {
     tokio::spawn(handlers::notifications::task_reminder_loop(state.clone()));
     tokio::spawn(handlers::email::email_check_loop(state.clone()));
     tokio::spawn(handlers::notifications::daily_notification_loop(state.clone()));
+    tokio::spawn(handlers::printers3d::printer_monitor_loop(state.clone()));
     tokio::spawn(handlers::system::update_check_loop(state));
 
     // Static files

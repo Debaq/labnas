@@ -464,6 +464,10 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
         s if s.starts_with("/cpu") => build_cpu_message().await,
         s if s.starts_with("/uptime") => build_uptime_message(state),
         s if s.starts_with("/red") => build_network_message(state).await,
+        s if s.starts_with("/temp") => handle_printer_temps(state).await,
+        s if s.starts_with("/imprimir ") => handle_printer_control(state, &chat_name, s, "start").await,
+        s if s.starts_with("/pausar") => handle_printer_control(state, &chat_name, s, "pause").await,
+        s if s.starts_with("/cancelar3d") => handle_printer_control(state, &chat_name, s, "cancel").await,
         s if s.starts_with("/impresoras") => build_printers_message(state).await,
         s if s.starts_with("/mirol") => {
             let emoji = match role {
@@ -1358,6 +1362,169 @@ pub async fn task_reminder_loop(state: AppState) {
     }
 }
 
+// =====================
+// Comandos de impresoras 3D
+// =====================
+
+async fn handle_printer_temps(state: &AppState) -> String {
+    let config = state.config.lock().await;
+    let printers = config.printers3d.clone();
+    drop(config);
+
+    if printers.is_empty() {
+        return "*Temperaturas*\n\nNo hay impresoras configuradas.".to_string();
+    }
+
+    let mut msg = String::from("*Temperaturas*\n");
+
+    for printer in &printers {
+        let status = super::printers3d::printer_status(
+            axum::extract::State(state.clone()),
+            axum::extract::Path(printer.id.clone()),
+        )
+        .await;
+
+        match status {
+            Ok(axum::Json(s)) if s.online => {
+                msg.push_str(&format!("\n*{}*", printer.name));
+                if let Some(temps) = &s.temperatures {
+                    let hotend_bar = progress_bar_temp(temps.hotend_actual, temps.hotend_target);
+                    let bed_bar = progress_bar_temp(temps.bed_actual, temps.bed_target);
+                    msg.push_str(&format!(
+                        "\n  Hotend: {} {:.0}/{:.0}°C\n  Cama:   {} {:.0}/{:.0}°C",
+                        hotend_bar, temps.hotend_actual, temps.hotend_target,
+                        bed_bar, temps.bed_actual, temps.bed_target,
+                    ));
+                } else {
+                    msg.push_str("\n  Sin datos de temperatura");
+                }
+                if let Some(job) = &s.current_job {
+                    let bar = progress_bar(job.progress);
+                    msg.push_str(&format!(
+                        "\n  {} {} {:.1}%",
+                        job.file_name, bar, job.progress
+                    ));
+                }
+            }
+            Ok(_) => {
+                msg.push_str(&format!("\n*{}* - Offline", printer.name));
+            }
+            Err(_) => {
+                msg.push_str(&format!("\n*{}* - Error", printer.name));
+            }
+        }
+    }
+
+    msg
+}
+
+/// Barra de progreso para temperaturas (basada en target)
+fn progress_bar_temp(actual: f64, target: f64) -> String {
+    if target <= 0.0 {
+        return "[░░░░░░░░░░]".to_string();
+    }
+    let pct = (actual / target * 100.0).min(100.0);
+    let filled = (pct / 10.0).round() as usize;
+    let empty = 10_usize.saturating_sub(filled);
+    format!("[{}{}]", "█".repeat(filled), "░".repeat(empty))
+}
+
+async fn handle_printer_control(state: &AppState, user: &str, text: &str, command: &str) -> String {
+    let config = state.config.lock().await;
+    let printers = config.printers3d.clone();
+    drop(config);
+
+    if printers.is_empty() {
+        return "No hay impresoras configuradas.".to_string();
+    }
+
+    // Si solo hay una impresora, usarla directamente
+    // Si hay varias, intentar parsear el nombre del argumento
+    let printer = if printers.len() == 1 {
+        printers[0].clone()
+    } else {
+        // Intentar extraer nombre de impresora del comando
+        let arg = match command {
+            "start" => text.strip_prefix("/imprimir ").unwrap_or("").trim(),
+            "pause" => text.strip_prefix("/pausar").unwrap_or("").trim(),
+            "cancel" => text.strip_prefix("/cancelar3d").unwrap_or("").trim(),
+            _ => "",
+        };
+
+        if arg.is_empty() {
+            // Si no se especifica, listar las disponibles
+            let names: Vec<String> = printers.iter().map(|p| p.name.clone()).collect();
+            return format!(
+                "Especifica la impresora:\n{}\n\nEj: `/{} {}`",
+                names.iter().map(|n| format!("  - {}", n)).collect::<Vec<_>>().join("\n"),
+                match command { "start" => "imprimir", "pause" => "pausar", "cancel" => "cancelar3d", _ => "?" },
+                names[0]
+            );
+        }
+
+        // Buscar por nombre (match parcial case-insensitive)
+        match printers.iter().find(|p| p.name.to_lowercase().contains(&arg.to_lowercase())) {
+            Some(p) => p.clone(),
+            None => return format!("Impresora '{}' no encontrada.", arg),
+        }
+    };
+
+    let client = &state.http_client;
+    let base = format!("http://{}:{}", printer.ip, printer.port);
+
+    let result = match printer.printer_type {
+        crate::models::printers3d::Printer3DType::OctoPrint => {
+            let octo_body = match command {
+                "start" => serde_json::json!({"command": "start"}),
+                "pause" => serde_json::json!({"command": "pause", "action": "pause"}),
+                "cancel" => serde_json::json!({"command": "cancel"}),
+                _ => return "Comando no soportado.".to_string(),
+            };
+
+            let mut req = client
+                .post(format!("{}/api/job", base))
+                .json(&octo_body)
+                .timeout(Duration::from_secs(10));
+            if let Some(key) = &printer.api_key {
+                req = req.header("X-Api-Key", key);
+            }
+            req.send().await
+        }
+        crate::models::printers3d::Printer3DType::Moonraker => {
+            let endpoint = match command {
+                "start" => "/printer/print/start",
+                "pause" => "/printer/print/pause",
+                "cancel" => "/printer/print/cancel",
+                _ => return "Comando no soportado.".to_string(),
+            };
+            client
+                .post(format!("{}{}", base, endpoint))
+                .timeout(Duration::from_secs(10))
+                .send()
+                .await
+        }
+    };
+
+    match result {
+        Ok(resp) if resp.status().is_success() => {
+            let action = match command {
+                "start" => "iniciada",
+                "pause" => "pausada",
+                "cancel" => "cancelada",
+                _ => "ejecutada",
+            };
+            state.log_activity("Impresoras 3D", &format!("Impresion {} en {} (por {})", action, printer.name, user), user).await;
+            format!("Impresion {} en *{}*", action, printer.name)
+        }
+        Ok(resp) => {
+            let st = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            format!("Error {}: {}", st, body)
+        }
+        Err(e) => format!("Error de conexion: {}", e),
+    }
+}
+
 fn build_help_message(role: &UserRole) -> String {
     let mut msg = String::from("*LabNAS - Comandos*\n\n");
     msg.push_str("*Sistema*\n");
@@ -1366,6 +1533,11 @@ fn build_help_message(role: &UserRole) -> String {
     msg.push_str("/actividad /horario /mirol\n");
     msg.push_str("/vincular CODIGO - Vincular con web\n");
     msg.push_str("/cmd COMANDO - Ejecutar en terminal\n\n");
+    msg.push_str("*Impresoras 3D*\n");
+    msg.push_str("/temp - Temperaturas de impresoras\n");
+    msg.push_str("/imprimir NOMBRE - Iniciar impresion\n");
+    msg.push_str("/pausar NOMBRE - Pausar impresion\n");
+    msg.push_str("/cancelar3d NOMBRE - Cancelar impresion\n\n");
     msg.push_str("*Correo*\n");
     msg.push_str("/correos - Resumen de bandeja\n");
     msg.push_str("/leer UID - Detalle de un correo\n");

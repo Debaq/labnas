@@ -199,6 +199,81 @@ export async function detectPrinters3D(): Promise<DetectPrintersResult[]> {
   return res.json()
 }
 
+export async function controlPrint3D(id: string, command: 'start' | 'pause' | 'resume' | 'cancel'): Promise<string> {
+  const res = await api(`/api/printers3d/${id}/control`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command }),
+  })
+  if (!res.ok) throw new Error('Error al controlar impresion')
+  return res.text()
+}
+
+export async function preheat3D(id: string, hotend: number, bed: number): Promise<string> {
+  const res = await api(`/api/printers3d/${id}/preheat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hotend, bed }),
+  })
+  if (!res.ok) throw new Error('Error al precalentar')
+  return res.text()
+}
+
+export async function homeAxes3D(id: string, axes?: string[]): Promise<string> {
+  const res = await api(`/api/printers3d/${id}/home`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ axes: axes || [] }),
+  })
+  if (!res.ok) throw new Error('Error al hacer home')
+  return res.text()
+}
+
+export async function jog3D(id: string, x: number, y: number, z: number): Promise<string> {
+  const res = await api(`/api/printers3d/${id}/jog`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ x, y, z }),
+  })
+  if (!res.ok) throw new Error('Error al mover ejes')
+  return res.text()
+}
+
+export async function sendGcode3D(id: string, command: string): Promise<string> {
+  const res = await api(`/api/printers3d/${id}/gcode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command }),
+  })
+  if (!res.ok) throw new Error('Error al enviar G-code')
+  return res.text()
+}
+
+export async function fetchPrinterFiles(id: string): Promise<import('../types').PrinterFileInfo[]> {
+  const res = await api(`/api/printers3d/${id}/files`)
+  if (!res.ok) throw new Error('Error al obtener archivos')
+  return res.json()
+}
+
+export async function printFile3D(id: string, filename: string): Promise<string> {
+  const res = await api(`/api/printers3d/${id}/files/${encodeURIComponent(filename)}/print`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error('Error al imprimir archivo')
+  return res.text()
+}
+
+export async function deletePrinterFile(id: string, filename: string): Promise<void> {
+  const res = await api(`/api/printers3d/${id}/files/${encodeURIComponent(filename)}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) throw new Error('Error al eliminar archivo')
+}
+
+export function cameraSnapshotUrl(id: string): string {
+  return `/api/printers3d/${id}/camera`
+}
+
 // --- Notifications (Telegram) ---
 
 export async function fetchNotificationConfig(): Promise<import('../types').NotificationConfig> {

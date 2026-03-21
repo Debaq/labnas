@@ -102,6 +102,7 @@ export interface Printer3DConfig {
   port: number
   printer_type: 'OctoPrint' | 'Moonraker'
   api_key: string | null
+  camera_url: string | null
 }
 
 export interface Printer3DStatus {
@@ -132,6 +133,13 @@ export interface AddPrinter3DRequest {
   port: number
   printer_type: 'OctoPrint' | 'Moonraker'
   api_key: string | null
+  camera_url: string | null
+}
+
+export interface PrinterFileInfo {
+  name: string
+  size: number | null
+  date: number | null
 }
 
 export interface DetectPrintersResult {
