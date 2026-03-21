@@ -282,9 +282,26 @@ pub async fn telegram_bot_loop(state: AppState) {
             let local_ip = local_ip_address::local_ip()
                 .map(|ip| ip.to_string())
                 .unwrap_or_else(|_| "?".to_string());
+
+            // Detectar Tailscale
+            let tailscale_ip = tokio::process::Command::new("tailscale")
+                .args(["ip", "-4"])
+                .output()
+                .await
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .filter(|s| !s.is_empty());
+
+            let remote = if let Some(ref ts) = tailscale_ip {
+                format!("\nRemoto: http://{}:3001 (Tailscale)", ts)
+            } else {
+                String::new()
+            };
+
             let msg = format!(
-                "*LabNAS encendido*\n\nIP: `{}`\nWeb: http://{}:3001\n\nUsa /ayuda para ver comandos.",
-                local_ip, local_ip
+                "*LabNAS encendido*\n\nIP: `{}`\nWeb: http://{}:3001{}\n\nUsa /ayuda para ver comandos.",
+                local_ip, local_ip, remote
             );
             let mut all_ok = true;
             for chat in &chats {
@@ -415,6 +432,21 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
         s if s.starts_with("/confirmar ") => handle_confirm(state, &chat_name, s, true).await,
         s if s.starts_with("/rechazar ") => handle_confirm(state, &chat_name, s, false).await,
         s if s.starts_with("/hecho ") => handle_done(state, &chat_name, s).await,
+        "/ip" => {
+            let local_ip = local_ip_address::local_ip()
+                .map(|ip| ip.to_string())
+                .unwrap_or_else(|_| "?".to_string());
+            let ts = tokio::process::Command::new("tailscale")
+                .args(["ip", "-4"]).output().await.ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .filter(|s| !s.is_empty());
+            let mut msg = format!("*IPs de LabNAS*\n\nLocal: `{}`\nWeb: http://{}:3001", local_ip, local_ip);
+            if let Some(ts_ip) = ts {
+                msg.push_str(&format!("\n\nTailscale: `{}`\nRemoto: http://{}:3001", ts_ip, ts_ip));
+            }
+            msg
+        }
         s if s.starts_with("/horario") => handle_schedule_command(state, chat_id, s).await,
         s if s.starts_with("/actividad") => build_activity_message(state).await,
         s if s.starts_with("/estado") => build_status_message(state).await,

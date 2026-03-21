@@ -192,9 +192,15 @@ async fn main() {
     // Check firewall
     check_firewall().await;
 
+    // Check Tailscale
+    let tailscale_ip = check_tailscale().await;
+
     println!("LabNAS corriendo en:");
     println!("  Local:  http://localhost:3001");
     println!("  Red:    http://{}:3001", local_ip);
+    if let Some(ref ts_ip) = tailscale_ip {
+        println!("  \x1b[32mRemoto: http://{}:3001 (Tailscale)\x1b[0m", ts_ip);
+    }
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app)
@@ -204,6 +210,28 @@ async fn main() {
         })
         .await
         .unwrap();
+}
+
+async fn check_tailscale() -> Option<String> {
+    let output = tokio::process::Command::new("tailscale")
+        .args(["ip", "-4"])
+        .output()
+        .await
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if ip.is_empty() {
+        println!("\n  \x1b[33mTailscale instalado pero no conectado.\x1b[0m");
+        println!("  \x1b[36mEjecuta: sudo tailscale up\x1b[0m\n");
+        return None;
+    }
+
+    println!("\n  \x1b[32m✓ Tailscale activo: {}\x1b[0m", ip);
+    Some(ip)
 }
 
 async fn check_firewall() {
