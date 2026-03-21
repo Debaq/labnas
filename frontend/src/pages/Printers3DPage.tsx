@@ -13,7 +13,6 @@ import {
   Play,
   Pause,
   Square,
-  RotateCcw,
   Home,
   Send,
   Camera,
