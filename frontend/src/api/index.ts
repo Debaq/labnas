@@ -341,6 +341,35 @@ export async function doUpdate(): Promise<string> {
   return res.text()
 }
 
+// --- Branding ---
+
+export interface LabBranding {
+  lab_name: string
+  institution: string
+  logo_url: string
+  mission: string
+  vision: string
+  website: string
+  contact_email: string
+  location: string
+}
+
+export async function getBranding(): Promise<LabBranding> {
+  const res = await api('/api/system/branding')
+  if (!res.ok) throw new Error('Error al obtener branding')
+  return res.json()
+}
+
+export async function setBranding(data: LabBranding): Promise<LabBranding> {
+  const res = await api('/api/system/branding', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Error al guardar branding')
+  return res.json()
+}
+
 // --- mDNS ---
 
 export async function getMdnsStatus(): Promise<{ enabled: boolean; hostname: string; url: string }> {

@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, ShieldCheck, ShieldAlert, UserCheck, Link2, Globe } from 'lucide-react'
+import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, ShieldCheck, ShieldAlert, UserCheck, Link2, Globe, Building2 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, type ThemeName } from '../themes/themes'
-import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, checkUpdate, doUpdate, getMdnsStatus, setMdns } from '../api'
+import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, checkUpdate, doUpdate, getMdnsStatus, setMdns, getBranding, setBranding, type LabBranding } from '../api'
 import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig } from '../types'
 
 function formatBytes(bytes: number): string {
@@ -75,6 +75,7 @@ export default function SettingsPage() {
   const [updating, setUpdating] = useState(false)
   const [mdns, setMdnsState] = useState<{ enabled: boolean; hostname: string; url: string } | null>(null)
   const [mdnsHostname, setMdnsHostname] = useState('')
+  const [branding, setBrandingState] = useState<LabBranding | null>(null)
   const [currentPw, setCurrentPw] = useState('')
   const [newPw, setNewPw] = useState('')
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null)
@@ -98,6 +99,7 @@ export default function SettingsPage() {
     fetchWebUsers().then(users => setWebUsers(users.map(u => u.username))).catch(() => {})
     checkUpdate().then(setUpdateInfo).catch(() => {})
     getMdnsStatus().then(s => { setMdnsState(s); setMdnsHostname(s.hostname) }).catch(() => {})
+    getBranding().then(setBrandingState).catch(() => {})
     fetchNotificationConfig().then((c) => {
       setNotifConfig(c)
       setDailyEnabled(c.daily_enabled)
@@ -114,6 +116,84 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-8 max-w-4xl">
+      {/* Lab Branding (admin) */}
+      {authUser?.role === 'admin' && branding && (
+        <section>
+          <div className="flex items-center gap-3 mb-4">
+            <Building2 size={22} style={{ color: 'var(--accent)' }} />
+            <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+              Identidad del Laboratorio
+            </h2>
+          </div>
+          <div
+            className="rounded-xl p-6 space-y-4"
+            style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
+          >
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Nombre del laboratorio</label>
+                <input value={branding.lab_name} onChange={e => setBrandingState({ ...branding, lab_name: e.target.value })}
+                  placeholder="FabLab Valdivia" className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                  style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Institucion</label>
+                <input value={branding.institution} onChange={e => setBrandingState({ ...branding, institution: e.target.value })}
+                  placeholder="Universidad Austral de Chile" className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                  style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>URL del logo</label>
+                <input value={branding.logo_url} onChange={e => setBrandingState({ ...branding, logo_url: e.target.value })}
+                  placeholder="https://ejemplo.com/logo.png" className="w-full px-3 py-2 rounded-lg text-sm outline-none font-mono"
+                  style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Sitio web</label>
+                <input value={branding.website} onChange={e => setBrandingState({ ...branding, website: e.target.value })}
+                  placeholder="https://fablab.uach.cl" className="w-full px-3 py-2 rounded-lg text-sm outline-none font-mono"
+                  style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Email de contacto</label>
+                <input value={branding.contact_email} onChange={e => setBrandingState({ ...branding, contact_email: e.target.value })}
+                  placeholder="fablab@uach.cl" className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                  style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Ubicacion</label>
+                <input value={branding.location} onChange={e => setBrandingState({ ...branding, location: e.target.value })}
+                  placeholder="Valdivia, Chile" className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                  style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Mision</label>
+              <textarea value={branding.mission} onChange={e => setBrandingState({ ...branding, mission: e.target.value })}
+                rows={2} placeholder="Promover la fabricacion digital y la innovacion..."
+                className="w-full px-3 py-2 rounded-lg text-sm outline-none resize-none"
+                style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Vision</label>
+              <textarea value={branding.vision} onChange={e => setBrandingState({ ...branding, vision: e.target.value })}
+                rows={2} placeholder="Ser un referente en fabricacion digital en la region..."
+                className="w-full px-3 py-2 rounded-lg text-sm outline-none resize-none"
+                style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+            </div>
+            <button
+              onClick={async () => {
+                try { await setBranding(branding); } catch {}
+              }}
+              className="px-4 py-2 rounded-lg text-sm font-medium"
+              style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
+            >
+              Guardar
+            </button>
+          </div>
+        </section>
+      )}
+
       {/* Appearance */}
       <section>
         <div className="flex items-center gap-3 mb-4">

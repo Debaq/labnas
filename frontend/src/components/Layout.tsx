@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText } from 'lucide-react'
 import { useTheme } from '../themes/ThemeContext'
 import { useAuth } from '../auth/AuthContext'
-import { shutdownServer } from '../api'
+import { shutdownServer, getBranding } from '../api'
 import type { ThemeName } from '../themes/themes'
 
 const pageTitles: Record<string, string> = {
@@ -24,6 +24,15 @@ export default function Layout() {
   const location = useLocation()
   const pageTitle = pageTitles[location.pathname] || 'LabNAS'
   const [shuttingDown, setShuttingDown] = useState(false)
+  const [labName, setLabName] = useState('LabNAS')
+  const [logoUrl, setLogoUrl] = useState('')
+
+  useEffect(() => {
+    getBranding().then(b => {
+      if (b.lab_name) { setLabName(b.lab_name); document.title = b.lab_name }
+      if (b.logo_url) setLogoUrl(b.logo_url)
+    }).catch(() => {})
+  }, [])
 
   async function handleShutdown() {
     if (!confirm('Apagar LabNAS? El servidor se detendrá.')) return
@@ -57,9 +66,13 @@ export default function Layout() {
       >
         {/* Logo */}
         <div className="flex items-center gap-3 px-6 py-5" style={{ borderBottom: '1px solid var(--border)' }}>
-          <Server size={28} style={{ color: 'var(--accent)' }} />
-          <span className="text-xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
-            LabNAS
+          {logoUrl ? (
+            <img src={logoUrl} alt={labName} className="w-7 h-7 rounded object-contain" />
+          ) : (
+            <Server size={28} style={{ color: 'var(--accent)' }} />
+          )}
+          <span className="text-xl font-bold tracking-tight truncate" style={{ color: 'var(--text-primary)' }}>
+            {labName}
           </span>
         </div>
 

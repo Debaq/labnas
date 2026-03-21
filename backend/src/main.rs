@@ -86,6 +86,8 @@ async fn main() {
         .route("/api/system/autostart", get(handlers::system::autostart_status))
         .route("/api/system/update/check", get(handlers::system::check_update))
         .route("/api/system/update/do", post(handlers::system::do_update))
+        .route("/api/system/branding", get(handlers::system::get_branding))
+        .route("/api/system/branding", post(handlers::system::set_branding))
         .route("/api/system/mdns", get(handlers::system::get_mdns_status))
         .route("/api/system/mdns", post(handlers::system::set_mdns))
         // Network

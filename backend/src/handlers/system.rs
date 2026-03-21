@@ -320,6 +320,25 @@ pub async fn update_check_loop(state: AppState) {
     }
 }
 
+// --- Branding ---
+
+pub async fn get_branding(State(state): State<AppState>) -> Json<crate::config::LabBranding> {
+    let config = state.config.lock().await;
+    Json(config.branding.clone())
+}
+
+pub async fn set_branding(
+    State(state): State<AppState>,
+    Json(req): Json<crate::config::LabBranding>,
+) -> Result<Json<crate::config::LabBranding>, (StatusCode, String)> {
+    let mut config = state.config.lock().await;
+    config.branding = req;
+    crate::config::save_config(&config).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let branding = config.branding.clone();
+    Ok(Json(branding))
+}
+
 // --- mDNS ---
 
 #[derive(serde::Serialize)]

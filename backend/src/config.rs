@@ -25,6 +25,8 @@ pub struct LabNasConfig {
     #[serde(default)]
     pub email: EmailConfig,
     #[serde(default)]
+    pub branding: LabBranding,
+    #[serde(default)]
     pub mdns_enabled: bool,
     #[serde(default = "default_mdns_hostname")]
     pub mdns_hostname: String,
@@ -34,7 +36,46 @@ fn default_mdns_hostname() -> String {
     "labnas".to_string()
 }
 
-pub fn config_path() -> PathBuf {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LabBranding {
+    #[serde(default = "default_lab_name")]
+    pub lab_name: String,
+    #[serde(default)]
+    pub institution: String,
+    #[serde(default)]
+    pub logo_url: String,
+    #[serde(default)]
+    pub mission: String,
+    #[serde(default)]
+    pub vision: String,
+    #[serde(default)]
+    pub website: String,
+    #[serde(default)]
+    pub contact_email: String,
+    #[serde(default)]
+    pub location: String,
+}
+
+fn default_lab_name() -> String {
+    "LabNAS".to_string()
+}
+
+impl Default for LabBranding {
+    fn default() -> Self {
+        Self {
+            lab_name: "LabNAS".to_string(),
+            institution: String::new(),
+            logo_url: String::new(),
+            mission: String::new(),
+            vision: String::new(),
+            website: String::new(),
+            contact_email: String::new(),
+            location: String::new(),
+        }
+    }
+}
+
+fn config_path() -> PathBuf {
     // 1. Explicit env var
     if let Ok(p) = std::env::var("LABNAS_CONFIG") {
         return PathBuf::from(p);
