@@ -341,6 +341,24 @@ export async function doUpdate(): Promise<string> {
   return res.text()
 }
 
+// --- mDNS ---
+
+export async function getMdnsStatus(): Promise<{ enabled: boolean; hostname: string; url: string }> {
+  const res = await api('/api/system/mdns')
+  if (!res.ok) throw new Error('Error al obtener estado mDNS')
+  return res.json()
+}
+
+export async function setMdns(enabled: boolean, hostname?: string): Promise<{ enabled: boolean; hostname: string; url: string }> {
+  const res = await api('/api/system/mdns', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled, hostname }),
+  })
+  if (!res.ok) throw new Error('Error al configurar mDNS')
+  return res.json()
+}
+
 // --- Password ---
 
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {

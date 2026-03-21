@@ -21,6 +21,8 @@ use state::AppState;
 #[tokio::main]
 async fn main() {
     let config = load_config().await;
+    let mdns_enabled = config.mdns_enabled;
+    let mdns_hostname = if config.mdns_hostname.is_empty() { "labnas".to_string() } else { config.mdns_hostname.clone() };
     let shutdown = Arc::new(Notify::new());
 
     let state = AppState {
@@ -35,7 +37,20 @@ async fn main() {
         share_links: Arc::new(Mutex::new(std::collections::HashMap::new())),
         tg_terminals: Arc::new(Mutex::new(std::collections::HashMap::new())),
         email_inbox: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        mdns_service: Arc::new(Mutex::new(None)),
     };
+
+    // Start mDNS if enabled
+    if mdns_enabled {
+        let hostname = mdns_hostname.clone();
+        match handlers::system::start_mdns_service(&hostname) {
+            Ok(svc) => {
+                println!("[mDNS] Activo: http://{}.local:3001", hostname);
+                *state.mdns_service.lock().await = Some(svc);
+            }
+            Err(e) => eprintln!("[mDNS] Error: {}", e),
+        }
+    }
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -71,6 +86,8 @@ async fn main() {
         .route("/api/system/autostart", get(handlers::system::autostart_status))
         .route("/api/system/update/check", get(handlers::system::check_update))
         .route("/api/system/update/do", post(handlers::system::do_update))
+        .route("/api/system/mdns", get(handlers::system::get_mdns_status))
+        .route("/api/system/mdns", post(handlers::system::set_mdns))
         // Network
         .route("/api/network/scan", post(handlers::network::scan_network))
         .route("/api/network/hosts", get(handlers::network::get_hosts))
@@ -211,6 +228,9 @@ async fn main() {
     println!("LabNAS corriendo en:");
     println!("  Local:  http://localhost:3001");
     println!("  Red:    http://{}:3001", local_ip);
+    if mdns_enabled {
+        println!("  Local:  http://{}.local:3001", mdns_hostname);
+    }
     if let Some(ref ts_ip) = tailscale_ip {
         println!("  \x1b[32mRemoto: http://{}:3001 (Tailscale)\x1b[0m", ts_ip);
     }

@@ -319,3 +319,108 @@ pub async fn update_check_loop(state: AppState) {
         }
     }
 }
+
+// --- mDNS ---
+
+#[derive(serde::Serialize)]
+pub struct MdnsStatus {
+    pub enabled: bool,
+    pub hostname: String,
+    pub url: String,
+}
+
+pub async fn get_mdns_status(State(state): State<AppState>) -> Json<MdnsStatus> {
+    let config = state.config.lock().await;
+    let hostname = if config.mdns_hostname.is_empty() {
+        "labnas".to_string()
+    } else {
+        config.mdns_hostname.clone()
+    };
+    Json(MdnsStatus {
+        enabled: config.mdns_enabled,
+        hostname: hostname.clone(),
+        url: format!("http://{}.local:3001", hostname),
+    })
+}
+
+#[derive(serde::Deserialize)]
+pub struct SetMdnsRequest {
+    pub enabled: bool,
+    #[serde(default)]
+    pub hostname: Option<String>,
+}
+
+pub async fn set_mdns(
+    State(state): State<AppState>,
+    Json(req): Json<SetMdnsRequest>,
+) -> Result<Json<MdnsStatus>, (StatusCode, String)> {
+    let mut config = state.config.lock().await;
+    config.mdns_enabled = req.enabled;
+    if let Some(hostname) = req.hostname {
+        let clean = hostname.trim().to_lowercase()
+            .chars().filter(|c| c.is_alphanumeric() || *c == '-')
+            .collect::<String>();
+        if !clean.is_empty() {
+            config.mdns_hostname = clean;
+        }
+    }
+    let hostname = config.mdns_hostname.clone();
+    let enabled = config.mdns_enabled;
+
+    crate::config::save_config(&config).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    drop(config);
+
+    // Restart mDNS service
+    let mut mdns = state.mdns_service.lock().await;
+    // Stop existing
+    if let Some(svc) = mdns.take() {
+        let _ = svc.shutdown();
+    }
+    // Start new if enabled
+    if enabled {
+        match start_mdns_service(&hostname) {
+            Ok(svc) => {
+                println!("[mDNS] Activo: http://{}.local:3001", hostname);
+                *mdns = Some(svc);
+            }
+            Err(e) => {
+                eprintln!("[mDNS] Error: {}", e);
+            }
+        }
+    } else {
+        println!("[mDNS] Desactivado");
+    }
+
+    Ok(Json(MdnsStatus {
+        enabled,
+        hostname: hostname.clone(),
+        url: format!("http://{}.local:3001", hostname),
+    }))
+}
+
+pub fn start_mdns_service(hostname: &str) -> Result<mdns_sd::ServiceDaemon, String> {
+    let mdns = mdns_sd::ServiceDaemon::new()
+        .map_err(|e| format!("Error creando mDNS daemon: {}", e))?;
+
+    let service_type = "_http._tcp.local.";
+    let instance_name = hostname;
+
+    let local_ip = local_ip_address::local_ip()
+        .map_err(|e| format!("Error obteniendo IP: {}", e))?;
+
+    let service_info = mdns_sd::ServiceInfo::new(
+        service_type,
+        instance_name,
+        &format!("{}.local.", hostname),
+        local_ip,
+        3001,
+        None,
+    )
+    .map_err(|e| format!("Error creando servicio: {}", e))?;
+
+    mdns.register(service_info)
+        .map_err(|e| format!("Error registrando: {}", e))?;
+
+    Ok(mdns)
+}

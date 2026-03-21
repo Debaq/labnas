@@ -40,6 +40,7 @@ pub struct AppState {
     pub share_links: Arc<Mutex<HashMap<String, ShareLink>>>,
     pub tg_terminals: Arc<Mutex<HashMap<i64, TgTerminal>>>,
     pub email_inbox: Arc<Mutex<HashMap<String, Vec<EmailMessage>>>>,
+    pub mdns_service: Arc<Mutex<Option<mdns_sd::ServiceDaemon>>>,
 }
 
 pub struct TgTerminal {

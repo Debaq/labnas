@@ -24,6 +24,14 @@ pub struct LabNasConfig {
     pub notes: Vec<Note>,
     #[serde(default)]
     pub email: EmailConfig,
+    #[serde(default)]
+    pub mdns_enabled: bool,
+    #[serde(default = "default_mdns_hostname")]
+    pub mdns_hostname: String,
+}
+
+fn default_mdns_hostname() -> String {
+    "labnas".to_string()
 }
 
 pub fn config_path() -> PathBuf {
