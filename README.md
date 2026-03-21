@@ -5,14 +5,15 @@
 <h1 align="center">LabNAS</h1>
 
 <p align="center">
-  <strong>NAS de laboratorio con gestion de impresoras 3D, impresion CUPS y herramientas de red</strong>
+  <strong>NAS inteligente para laboratorio con bot Telegram, correo con IA, gestion de proyectos y acceso remoto</strong>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-Axum-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/React-19-blue?style=flat-square" alt="React" />
   <img src="https://img.shields.io/badge/TypeScript-5.9-blue?style=flat-square" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/TailwindCSS-4-cyan?style=flat-square" alt="Tailwind" />
+  <img src="https://img.shields.io/badge/Telegram-Bot-26A5E4?style=flat-square" alt="Telegram" />
+  <img src="https://img.shields.io/badge/Groq-IA-orange?style=flat-square" alt="Groq" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" />
 </p>
 
@@ -20,49 +21,127 @@
 
 ## Que es LabNAS?
 
-Una aplicacion web self-hosted para gestionar un servidor NAS de laboratorio. Combina explorador de archivos, terminal remota, escaner de red, gestion de impresoras 3D y impresion de documentos en una sola interfaz con 4 temas visuales.
+Una plataforma self-hosted para gestionar un servidor NAS de laboratorio. Combina explorador de archivos, terminal remota, bot Telegram bidireccional, correo inteligente con IA, gestion de proyectos, impresoras 3D, impresion CUPS, sistema de seguridad de red y acceso remoto en una sola interfaz.
+
+## Instalacion rapida
+
+```bash
+# Descargar ultimo release
+wget https://github.com/Debaq/labnas/releases/latest/download/labnas-v1.5.0-linux-x86_64.tar.gz
+tar xzf labnas-v1.5.0-linux-x86_64.tar.gz
+cd labnas
+sudo ./labnas-backend
+```
+
+La primera cuenta que crees en la web sera administrador.
 
 ## Funcionalidades
 
-### Explorador de Archivos
-- Navegacion completa del sistema de archivos con breadcrumbs
-- Subir, descargar y eliminar archivos
-- Crear carpetas
-- Accesos rapidos (Inicio, Documentos, Descargas, etc.)
-- Boton de impresion directa para archivos compatibles
+### Bot Telegram (35+ comandos)
+Bot bidireccional que funciona como asistente personal del laboratorio:
+
+| Comando | Descripcion |
+|---|---|
+| `/estado` `/discos` `/ram` `/cpu` `/uptime` | Info del sistema |
+| `/red` | Dispositivos en la red |
+| `/impresoras` | Estado impresoras 3D |
+| `/cmd <comando>` | Terminal remota interactiva (soporta sudo) |
+| `/tarea Titulo @persona !insistente` | Crear tarea con recordatorios |
+| `/tareas` `/hecho ID` `/confirmar ID` | Gestionar tareas |
+| `/proyecto Nombre` `/proyectos` `/avance` | Proyectos con progreso |
+| `/evento 2026-03-25 10:00 Reunion @all` | Crear evento + invitar |
+| `/eventos` `/aceptar ID` `/declinar ID` | Calendario |
+| `/correos` | Resumen de bandeja con IA |
+| `/leer UID` | Resumen IA de un correo |
+| `/correo2tarea UID` | Convertir correo en tarea |
+| `/horario 08:00` | Reporte diario personal |
+| `/actividad` | Log de actividad reciente |
+| `/ip` | IPs local y Tailscale |
+| `/vincular CODIGO` | Vincular con cuenta web |
+| `/mirol` `/ayuda` | Info de usuario |
+
+### Correo inteligente (IMAP + Groq IA)
+- Conecta Outlook, Gmail o cualquier IMAP
+- Cada usuario configura su propia cuenta
+- Groq clasifica automaticamente: urgente, tarea, informativo, spam
+- Filtros personalizables por remitente (prioritario, normal, silencioso, ignorar)
+- Notifica urgentes por Telegram al instante
+- Convierte correos en tareas insistentes con un comando
+- Revision automatica cada 5 minutos
+
+### Tareas, proyectos y calendario
+- Crear tareas con asignados (`@persona`, `@all`)
+- Modo confirmacion: requiere `/confirmar` o `/rechazar`
+- Modo insistente: recuerda cada 8 min (configurable con `!cada5`)
+- Proyectos con barras de progreso
+- Calendario con eventos, invitaciones y recordatorios
+- Todo gestionable desde web y Telegram
+
+### Explorador de archivos
+- Navegacion completa del sistema de archivos
+- Subir, descargar, eliminar, crear carpetas
+- Links temporales para compartir archivos (expiran en 24h)
+- Descargar archivos desde URL directo al NAS
+- Imprimir directamente archivos compatibles
+- Accesos rapidos configurables
+
+### Notas Markdown
+- Editor split con preview en vivo
+- Soporte: headers, bold, italic, code, listas, links
+- Colaborativo: cualquier usuario puede editar
+
+### Impresion CUPS
+- Opciones dinamicas de cada impresora (papel, calidad, color, duplex)
+- Reanudar/pausar impresoras desde la web
+- Cola de impresion con cancelacion
+- Drag & drop para imprimir
 
 ### Impresoras 3D
-- Soporte para **OctoPrint** (puertos 80/5000) y **Moonraker** (puerto 7125)
-- Agregar impresoras manualmente o auto-detectar en la red
-- Monitoreo en tiempo real: temperaturas (hotend/cama), progreso de impresion
-- Subida de archivos `.gcode` con drag & drop
-- Persistencia de configuracion entre reinicios
+- Soporte OctoPrint y Moonraker
+- Monitoreo en tiempo real: temperaturas, progreso
+- Auto-deteccion en la red
+- Subida de .gcode
 
-### Impresion de Documentos (CUPS)
-- Deteccion automatica de impresoras CUPS del sistema
-- Zona de drag & drop para imprimir archivos
-- Opciones: copias, orientacion, doble cara, rango de paginas
-- Cola de impresion con cancelacion de trabajos
-- Imprimir directamente desde el explorador de archivos
+### Red y seguridad ("sistema inmune")
+- Escaneo de red con deteccion de MAC y fabricante
+- Dispositivos conocidos vs desconocidos
+- Alerta por Telegram cuando aparece dispositivo nuevo
+- Etiquetar dispositivos con nombre personalizado
 
-### Red Local
-- Escaneo de red con ping ICMP (resolucion DNS)
-- Tiempos de respuesta por host
-- Configurar hosts como impresoras 3D desde la tabla
+### Terminal web
+- Shell completa via WebSocket + PTY
+- Terminal interactiva via Telegram (`/cmd`)
+- Soporta sudo y comandos interactivos
 
-### Terminal Web
-- Terminal completa via WebSocket + PTY
-- Shell del usuario con colores y resize
-- Soporte xterm-256color
+### Autenticacion y roles
+- Login/registro web con bcrypt
+- Primera cuenta = administrador
+- 4 roles: pendiente, observador, operador, admin
+- Permisos granulares: terminal, impresion, archivos
+- Middleware que bloquea acciones no autorizadas a nivel de API
+- Sesiones con expiracion de 24h
+- Rate limiting en login
+- Vinculacion de cuentas web <-> Telegram
 
-### Dashboard
-- Informacion del sistema (hostname, SO, kernel, RAM, CPUs)
-- Discos montados con espacio disponible
-- Dispositivos activos en la red
-- Resumen de impresoras 3D
+### Acceso remoto (Tailscale)
+- Accede desde cualquier parte sin abrir puertos
+- Funciona en Linux, Windows, macOS, iPhone, Android
+- Instalacion con un click desde Configuracion
+- LabNAS detecta Tailscale automaticamente
 
-### Temas
-4 temas incluidos: **Dracula**, **Light**, **Nord**, **Solarized**
+### Auto-update
+- Chequea GitHub releases cada 6 horas
+- Notifica al admin por Telegram
+- Boton "Actualizar" en Configuracion
+- Descarga, extrae y reinicia automaticamente
+
+### Extras
+- Saludo por Telegram al encender (con IP local y Tailscale)
+- Deteccion automatica de firewall (ufw) al iniciar
+- Log de actividad: uploads, eliminaciones, impresiones, escaneos
+- Horario personal de reportes diarios por usuario
+- 4 temas: Dracula, Light, Nord, Solarized
+- Cambio de contrasena desde configuracion
 
 ## Stack Tecnico
 
@@ -72,145 +151,95 @@ Una aplicacion web self-hosted para gestionar un servidor NAS de laboratorio. Co
 | Frontend | React 19 + TypeScript 5.9 |
 | Estilos | Tailwind CSS 4 |
 | Bundler | Vite 8 |
+| Bot | Telegram Bot API (long polling) |
+| IA | Groq API (Llama 3.3 70B) |
+| Correo | IMAP + native-tls + mailparse |
+| Auth | bcrypt + UUID sessions |
 | Terminal | xterm.js 6 + portable-pty |
 | Ping | surge-ping (ICMP nativo) |
-| 3D Printers | reqwest (OctoPrint/Moonraker API) |
+| 3D Printers | reqwest (OctoPrint/Moonraker) |
 | CUPS | CLI nativo (lp, lpstat, cancel) |
-| Iconos | Lucide React |
+| VPN | Tailscale (opcional) |
 
 ## Estructura del Proyecto
 
 ```
 labnas/
-├── backend/
-│   └── src/
-│       ├── main.rs              # Router + servidor
-│       ├── state.rs             # Estado compartido
-│       ├── config.rs            # Persistencia JSON
-│       ├── handlers/
-│       │   ├── files.rs         # Explorador de archivos
-│       │   ├── network.rs       # Escaner de red
-│       │   ├── system.rs        # Info del sistema
-│       │   ├── terminal.rs      # Terminal WebSocket
-│       │   ├── printers3d.rs    # Impresoras 3D
-│       │   └── printing.rs      # Impresion CUPS
-│       └── models/
-│           ├── files.rs
-│           ├── network.rs
-│           ├── system.rs
-│           ├── printers3d.rs
-│           └── printing.rs
-├── frontend/
-│   └── src/
-│       ├── pages/
-│       │   ├── DashboardPage.tsx
-│       │   ├── FilesPage.tsx
-│       │   ├── Printers3DPage.tsx
-│       │   ├── PrintingPage.tsx
-│       │   ├── NetworkPage.tsx
-│       │   ├── TerminalPage.tsx
-│       │   └── SettingsPage.tsx
-│       ├── api/index.ts
-│       ├── types/index.ts
-│       └── themes/
-└── labnas.sh                    # Script de gestion
+├── backend/src/
+│   ├── main.rs              # Router + servidor + startup checks
+│   ├── state.rs             # Estado compartido (sessions, terminals, emails)
+│   ├── config.rs            # Persistencia JSON (~/.labnas/config.json)
+│   ├── middleware.rs         # Verificacion de permisos por ruta
+│   ├── handlers/
+│   │   ├── auth.rs          # Login, registro, roles, vinculacion
+│   │   ├── files.rs         # Explorador de archivos
+│   │   ├── network.rs       # Escaner de red + MAC + vendor
+│   │   ├── system.rs        # Info sistema + autostart + auto-update
+│   │   ├── terminal.rs      # Terminal WebSocket
+│   │   ├── notifications.rs # Bot Telegram (35+ comandos)
+│   │   ├── tasks.rs         # Tareas, proyectos, calendario
+│   │   ├── email.rs         # IMAP + Groq IA + filtros
+│   │   ├── extras.rs        # Links temporales, download URL, notas
+│   │   ├── printers3d.rs    # Impresoras 3D
+│   │   └── printing.rs      # Impresion CUPS
+│   └── models/              # Structs de datos
+├── frontend/src/
+│   ├── auth/AuthContext.tsx  # Autenticacion + polling de permisos
+│   ├── pages/
+│   │   ├── LoginPage.tsx
+│   │   ├── DashboardPage.tsx
+│   │   ├── FilesPage.tsx     # + compartir + descargar URL
+│   │   ├── PrintingPage.tsx  # + opciones dinamicas
+│   │   ├── Printers3DPage.tsx
+│   │   ├── NetworkPage.tsx   # + MAC + vendor + conocidos
+│   │   ├── TasksPage.tsx     # + calendario
+│   │   ├── NotesPage.tsx     # Editor Markdown
+│   │   ├── TerminalPage.tsx
+│   │   └── SettingsPage.tsx  # Roles, Telegram, Tailscale, update
+│   ├── api/index.ts          # Wrapper con auth automatico
+│   └── themes/
+├── labnas.sh                 # Script de gestion
+├── setup-tailscale.sh        # Instalador de Tailscale
+└── diagnostico.sh            # Diagnostico de problemas
 ```
 
 ## Requisitos
 
-- **Rust** (cargo)
-- **Node.js** 18+ (npm)
-- **Linux** (para ping ICMP se necesita `cap_net_raw` o ejecutar con sudo)
-- **CUPS** (opcional, para impresion de documentos)
-
-## Instalacion y Uso
-
-```bash
-# Clonar
-git clone https://github.com/Debaq/labnas.git
-cd labnas
-
-# Modo desarrollo (hot reload)
-./labnas.sh dev
-
-# Compilar para produccion
-./labnas.sh build
-
-# Ejecutar build de produccion
-./labnas.sh run
-```
-
-### Modo Desarrollo
-
-```
-Backend:  http://localhost:3001
-Frontend: http://localhost:5173 (con proxy a backend)
-```
-
-### Modo Produccion
-
-```
-Todo en: http://localhost:3001
-```
-
-## API Endpoints
-
-### Sistema
-| Metodo | Ruta | Descripcion |
-|---|---|---|
-| GET | `/api/health` | Estado del servidor |
-| GET | `/api/system/info` | Informacion del sistema |
-| GET | `/api/system/disks` | Discos montados |
-
-### Archivos
-| Metodo | Ruta | Descripcion |
-|---|---|---|
-| GET | `/api/files?path=` | Listar directorio |
-| POST | `/api/files/upload` | Subir archivo (multipart) |
-| GET | `/api/files/download?path=` | Descargar archivo |
-| DELETE | `/api/files?path=` | Eliminar archivo/carpeta |
-| POST | `/api/files/directory` | Crear carpeta |
-
-### Red
-| Metodo | Ruta | Descripcion |
-|---|---|---|
-| POST | `/api/network/scan` | Escanear red local |
-| GET | `/api/network/hosts` | Hosts escaneados |
-
-### Impresoras 3D
-| Metodo | Ruta | Descripcion |
-|---|---|---|
-| GET | `/api/printers3d` | Listar impresoras |
-| POST | `/api/printers3d` | Agregar impresora |
-| DELETE | `/api/printers3d/{id}` | Eliminar impresora |
-| GET | `/api/printers3d/{id}/status` | Estado y temperaturas |
-| POST | `/api/printers3d/{id}/upload` | Subir .gcode |
-| POST | `/api/printers3d/detect` | Auto-detectar en red |
-
-### Impresion CUPS
-| Metodo | Ruta | Descripcion |
-|---|---|---|
-| GET | `/api/printing/printers` | Listar impresoras CUPS |
-| POST | `/api/printing/print` | Imprimir archivo (multipart) |
-| POST | `/api/printing/print-file` | Imprimir por ruta |
-| GET | `/api/printing/jobs` | Cola de impresion |
-| DELETE | `/api/printing/jobs/{id}` | Cancelar trabajo |
-
-### Terminal
-| Metodo | Ruta | Descripcion |
-|---|---|---|
-| GET | `/api/terminal` | WebSocket terminal |
+- **Linux** (Arch, Ubuntu, Debian, Fedora, Manjaro)
+- Para desarrollo: Rust (cargo) + Node.js 18+ (npm)
+- Para produccion: solo el binario del release
+- **CUPS** (opcional, para impresion)
+- **Tailscale** (opcional, para acceso remoto)
 
 ## Configuracion
 
-La configuracion de impresoras 3D se guarda en `~/.labnas/config.json` y persiste entre reinicios.
+### Telegram Bot
+1. Crear bot con BotFather en Telegram (`/newbot`)
+2. Pegar token en Configuracion > Telegram
+3. Enviar `/start` al bot — el primero es admin
+
+### Correo con IA
+1. Obtener API key gratis en https://console.groq.com
+2. Admin pone la key en Configuracion
+3. Cada usuario configura su IMAP (Outlook: `outlook.office365.com:993`)
+4. Configurar filtros por remitente
+
+### Acceso remoto
+```bash
+sudo bash setup-tailscale.sh
+```
+Luego instalar Tailscale en tus dispositivos con la misma cuenta.
 
 ## Seguridad
 
-- Rutas del sistema protegidas contra eliminacion (`/`, `/bin`, `/usr`, etc.)
-- Validacion de inputs en comandos CUPS (prevencion de inyeccion)
-- API keys de impresoras 3D almacenadas localmente, nunca expuestas al frontend en las respuestas de status
-- Sin autenticacion por defecto — diseñado para redes locales de confianza
+- Autenticacion obligatoria con bcrypt + sesiones de 24h
+- Middleware de permisos por ruta (admin, operador, observador)
+- Bot token de Telegram nunca expuesto en la API
+- IDOR protegido: verificacion de ownership en CRUD
+- Rate limiting en login (2s delay por intento fallido)
+- Validacion de inputs en comandos CUPS
+- Rutas del sistema protegidas contra eliminacion
+- Codigos de vinculacion de 8 caracteres con expiracion de 5 min
 
 ## Licencia
 
