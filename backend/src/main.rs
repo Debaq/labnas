@@ -69,6 +69,8 @@ async fn main() {
         .route("/api/system/info", get(handlers::system::system_info_handler))
         .route("/api/system/shutdown", post(handlers::system::shutdown_handler))
         .route("/api/system/autostart", get(handlers::system::autostart_status))
+        .route("/api/system/update/check", get(handlers::system::check_update))
+        .route("/api/system/update/do", post(handlers::system::do_update))
         // Network
         .route("/api/network/scan", post(handlers::network::scan_network))
         .route("/api/network/hosts", get(handlers::network::get_hosts))
@@ -148,7 +150,8 @@ async fn main() {
     tokio::spawn(handlers::notifications::telegram_bot_loop(state.clone()));
     tokio::spawn(handlers::notifications::task_reminder_loop(state.clone()));
     tokio::spawn(handlers::email::email_check_loop(state.clone()));
-    tokio::spawn(handlers::notifications::daily_notification_loop(state));
+    tokio::spawn(handlers::notifications::daily_notification_loop(state.clone()));
+    tokio::spawn(handlers::system::update_check_loop(state));
 
     // Static files
     let exe_dir = std::env::current_exe()

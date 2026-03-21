@@ -253,6 +253,19 @@ export async function setNotificationSchedule(schedule: { daily_enabled: boolean
   if (!res.ok) throw new Error('Error al configurar horario')
 }
 
+// --- Updates ---
+
+export async function checkUpdate(): Promise<{ current_version: string; latest_version: string | null; update_available: boolean }> {
+  const res = await api('/api/system/update/check')
+  if (!res.ok) throw new Error('Error verificando actualizacion')
+  return res.json()
+}
+
+export async function doUpdate(): Promise<string> {
+  const res = await api('/api/system/update/do', { method: 'POST' })
+  return res.text()
+}
+
 // --- Password ---
 
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {

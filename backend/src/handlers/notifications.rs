@@ -230,6 +230,15 @@ async fn call_telegram<T: serde::de::DeserializeOwned>(
     }
 }
 
+pub async fn send_tg_public(
+    client: &reqwest::Client,
+    token: &str,
+    chat_id: i64,
+    text: &str,
+) -> Result<(), String> {
+    send_telegram_message(client, token, chat_id, text).await
+}
+
 async fn send_telegram_message(
     client: &reqwest::Client,
     token: &str,

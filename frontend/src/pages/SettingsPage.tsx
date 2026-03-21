@@ -4,7 +4,7 @@ import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, 
 import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, type ThemeName } from '../themes/themes'
-import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword } from '../api'
+import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, checkUpdate, doUpdate } from '../api'
 import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig } from '../types'
 
 function formatBytes(bytes: number): string {
@@ -71,6 +71,8 @@ export default function SettingsPage() {
   const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null)
   const [webUsers, setWebUsers] = useState<string[]>([])
   const [linkCode, setLinkCode] = useState<string | null>(null)
+  const [updateInfo, setUpdateInfo] = useState<{ current_version: string; latest_version: string | null; update_available: boolean } | null>(null)
+  const [updating, setUpdating] = useState(false)
   const [currentPw, setCurrentPw] = useState('')
   const [newPw, setNewPw] = useState('')
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null)
@@ -92,6 +94,7 @@ export default function SettingsPage() {
     fetchSystemInfo().then(setSysInfo).catch(() => {})
     fetchAutostartStatus().then(setAutostart).catch(() => {})
     fetchWebUsers().then(users => setWebUsers(users.map(u => u.username))).catch(() => {})
+    checkUpdate().then(setUpdateInfo).catch(() => {})
     fetchNotificationConfig().then((c) => {
       setNotifConfig(c)
       setDailyEnabled(c.daily_enabled)
@@ -810,13 +813,33 @@ export default function SettingsPage() {
           style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
         >
           <div className="flex items-center justify-between">
-            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              Version
-            </span>
-            <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-              LabNAS v0.4.0
-            </span>
+            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Version</span>
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                v{updateInfo?.current_version || '?'}
+              </span>
+              {updateInfo?.update_available && (
+                <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: 'var(--warning)' + '25', color: 'var(--warning)' }}>
+                  {updateInfo.latest_version} disponible
+                </span>
+              )}
+            </div>
           </div>
+          {authUser?.role === 'admin' && updateInfo?.update_available && (
+            <button
+              onClick={async () => {
+                if (!confirm('Actualizar LabNAS? El servidor se reiniciara.')) return
+                setUpdating(true)
+                try { await doUpdate() } catch {} finally { setUpdating(false) }
+              }}
+              disabled={updating}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium w-full justify-center"
+              style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
+            >
+              {updating ? <Loader2 size={16} className="animate-spin" /> : null}
+              {updating ? 'Actualizando...' : `Actualizar a ${updateInfo.latest_version}`}
+            </button>
+          )}
           {sysInfo && (
             <>
               <div className="flex items-center justify-between">

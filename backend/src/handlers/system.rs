@@ -1,9 +1,13 @@
 use axum::{extract::State, http::StatusCode, Json};
+use std::time::Duration;
 use sysinfo::{Disks, System};
 use tokio::process::Command;
 
 use crate::models::system::{AutostartStatus, DiskInfo, HealthResponse, SystemInfoResponse};
 use crate::state::AppState;
+
+const GITHUB_REPO: &str = "Debaq/labnas";
+const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub async fn shutdown_handler(State(state): State<AppState>) -> &'static str {
     let shutdown = state.shutdown.clone();
@@ -150,4 +154,168 @@ pub async fn autostart_status() -> Json<AutostartStatus> {
         install_cmd,
         uninstall_cmd,
     })
+}
+
+// --- Auto-update ---
+
+#[derive(serde::Serialize)]
+pub struct UpdateStatus {
+    pub current_version: String,
+    pub latest_version: Option<String>,
+    pub update_available: bool,
+    pub download_url: Option<String>,
+}
+
+pub async fn check_update(
+    State(state): State<AppState>,
+) -> Json<UpdateStatus> {
+    let (latest, url) = fetch_latest_release(&state.http_client).await;
+    let update_available = latest.as_ref().map(|v| v.as_str() != format!("v{}", CURRENT_VERSION) && v.as_str() > format!("v{}", CURRENT_VERSION).as_str()).unwrap_or(false);
+
+    Json(UpdateStatus {
+        current_version: CURRENT_VERSION.to_string(),
+        latest_version: latest,
+        update_available,
+        download_url: url,
+    })
+}
+
+pub async fn do_update(
+    State(state): State<AppState>,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    let (latest, url) = fetch_latest_release(&state.http_client).await;
+
+    let url = url.ok_or((StatusCode::NOT_FOUND, "No se encontro release".to_string()))?;
+    let latest = latest.unwrap_or_default();
+
+    // Get current binary path
+    let exe_path = std::env::current_exe()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let install_dir = exe_path.parent()
+        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No se pudo determinar directorio".to_string()))?;
+
+    let tmp_dir = format!("/tmp/labnas-update-{}", uuid::Uuid::new_v4());
+
+    // Download
+    let resp = state.http_client.get(&url)
+        .timeout(Duration::from_secs(120))
+        .send().await
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Error descargando: {}", e)))?;
+
+    if !resp.status().is_success() {
+        return Err((StatusCode::BAD_REQUEST, format!("GitHub respondio {}", resp.status())));
+    }
+
+    let bytes = resp.bytes().await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error leyendo: {}", e)))?;
+
+    // Save tarball
+    tokio::fs::create_dir_all(&tmp_dir).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let tarball = format!("{}/labnas.tar.gz", tmp_dir);
+    tokio::fs::write(&tarball, &bytes).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Extract
+    let output = Command::new("tar")
+        .args(["xzf", &tarball, "-C", &tmp_dir])
+        .output().await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if !output.status.success() {
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Error extrayendo tarball".to_string()));
+    }
+
+    // Copy new files over current installation
+    let extracted = format!("{}/labnas", tmp_dir);
+    let copy_result = Command::new("cp")
+        .args(["-rf", &format!("{}/.", extracted), &install_dir.to_string_lossy()])
+        .output().await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if !copy_result.status.success() {
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Error copiando archivos".to_string()));
+    }
+
+    // Cleanup
+    let _ = tokio::fs::remove_dir_all(&tmp_dir).await;
+
+    state.log_activity("Actualizacion", &format!("Actualizado a {}", latest), "sistema").await;
+
+    // Try to restart via systemd
+    let _ = Command::new("systemctl")
+        .args(["restart", "labnas"])
+        .output().await;
+
+    Ok((StatusCode::OK, format!("Actualizado a {}. Reiniciando...", latest)))
+}
+
+async fn fetch_latest_release(client: &reqwest::Client) -> (Option<String>, Option<String>) {
+    let url = format!("https://api.github.com/repos/{}/releases/latest", GITHUB_REPO);
+
+    let resp = client.get(&url)
+        .header("User-Agent", "LabNAS")
+        .timeout(Duration::from_secs(10))
+        .send().await;
+
+    let resp = match resp {
+        Ok(r) if r.status().is_success() => r,
+        _ => return (None, None),
+    };
+
+    let json: serde_json::Value = match resp.json().await {
+        Ok(j) => j,
+        _ => return (None, None),
+    };
+
+    let tag = json["tag_name"].as_str().map(|s| s.to_string());
+
+    // Find the linux x86_64 asset
+    let download_url = json["assets"].as_array()
+        .and_then(|assets| {
+            assets.iter().find(|a| {
+                a["name"].as_str()
+                    .map(|n| n.contains("linux") && n.contains("x86_64") && n.ends_with(".tar.gz"))
+                    .unwrap_or(false)
+            })
+        })
+        .and_then(|a| a["browser_download_url"].as_str().map(|s| s.to_string()));
+
+    (tag, download_url)
+}
+
+pub async fn update_check_loop(state: AppState) {
+    // Check every 6 hours
+    loop {
+        tokio::time::sleep(Duration::from_secs(6 * 3600)).await;
+
+        let (latest, _url) = fetch_latest_release(&state.http_client).await;
+
+        let Some(latest) = latest else { continue };
+        let current = format!("v{}", CURRENT_VERSION);
+
+        if latest != current && latest > current {
+            println!("[LabNAS] Nueva version disponible: {} (actual: {})", latest, current);
+
+            // Notify admins via Telegram
+            let config = state.config.lock().await;
+            let token = config.notifications.bot_token.clone();
+            let chats = config.notifications.telegram_chats.clone();
+            drop(config);
+
+            if let Some(token) = token {
+                let msg = format!(
+                    "*Actualizacion disponible*\n\nActual: `{}`\nNueva: `{}`\n\nActualiza desde Configuracion en la web.",
+                    current, latest
+                );
+                for chat in &chats {
+                    if chat.role == crate::models::notifications::UserRole::Admin {
+                        let _ = crate::handlers::notifications::send_tg_public(
+                            &state.http_client, &token, chat.chat_id, &msg
+                        ).await;
+                    }
+                }
+            }
+        }
+    }
 }
