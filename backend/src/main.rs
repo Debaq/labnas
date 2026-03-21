@@ -228,8 +228,33 @@ async fn main() {
     println!("LabNAS corriendo en:");
     println!("  Local:  http://localhost:3001");
     println!("  Red:    http://{}:3001", local_ip);
+
+    // Try to also listen on port 80 (requires root/sudo)
+    let has_port_80 = match tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], 80))).await {
+        Ok(listener_80) => {
+            let app_80 = app.clone();
+            let shutdown_80 = shutdown.clone();
+            tokio::spawn(async move {
+                axum::serve(listener_80, app_80)
+                    .with_graceful_shutdown(async move { shutdown_80.notified().await; })
+                    .await
+                    .ok();
+            });
+            println!("  \x1b[32mWeb:    http://{}\x1b[0m (puerto 80)", local_ip);
+            true
+        }
+        Err(_) => {
+            println!("  \x1b[33m(Puerto 80 no disponible - ejecuta con sudo para habilitarlo)\x1b[0m");
+            false
+        }
+    };
+
     if mdns_enabled {
-        println!("  Local:  http://{}.local:3001", mdns_hostname);
+        if has_port_80 {
+            println!("  \x1b[32mLocal:  http://{}.local\x1b[0m", mdns_hostname);
+        } else {
+            println!("  Local:  http://{}.local:3001", mdns_hostname);
+        }
     }
     if let Some(ref ts_ip) = tailscale_ip {
         println!("  \x1b[32mRemoto: http://{}:3001 (Tailscale)\x1b[0m", ts_ip);
@@ -282,31 +307,42 @@ async fn check_firewall() {
         return; // ufw inactive
     }
 
-    if text.contains("3001") {
-        return; // port already allowed
+    let needs_3001 = !text.contains("3001");
+    let needs_80 = !text.contains("80/tcp") && !text.contains(" 80 ");
+
+    if !needs_3001 && !needs_80 {
+        return;
     }
 
-    println!("\n  \x1b[33m⚠ FIREWALL: ufw esta activo pero el puerto 3001 NO esta permitido.\x1b[0m");
-    println!("  \x1b[33m  Los dispositivos de la red no podran acceder a LabNAS.\x1b[0m");
-    println!("  \x1b[36m  Ejecuta: sudo ufw allow 3001\x1b[0m\n");
+    println!("\n  \x1b[33m⚠ FIREWALL: ufw esta activo, abriendo puertos necesarios...\x1b[0m");
 
-    // Try to open it automatically if running as root
+    // Try to open automatically if running as root
     if std::env::var("USER").unwrap_or_default() == "root"
         || std::env::var("SUDO_USER").is_ok()
     {
-        println!("  Intentando abrir puerto automaticamente...");
-        let result = tokio::process::Command::new("ufw")
-            .args(["allow", "3001"])
-            .output()
-            .await;
-
-        match result {
-            Ok(out) if out.status.success() => {
-                println!("  \x1b[32m✓ Puerto 3001 abierto en el firewall\x1b[0m\n");
-            }
-            _ => {
-                println!("  \x1b[31m✗ No se pudo abrir automaticamente. Hazlo manual.\x1b[0m\n");
+        if needs_3001 {
+            let result = tokio::process::Command::new("ufw")
+                .args(["allow", "3001"])
+                .output()
+                .await;
+            match result {
+                Ok(out) if out.status.success() => println!("  \x1b[32m✓ Puerto 3001 abierto\x1b[0m"),
+                _ => println!("  \x1b[31m✗ No se pudo abrir 3001\x1b[0m"),
             }
         }
+        if needs_80 {
+            let result = tokio::process::Command::new("ufw")
+                .args(["allow", "80"])
+                .output()
+                .await;
+            match result {
+                Ok(out) if out.status.success() => println!("  \x1b[32m✓ Puerto 80 abierto\x1b[0m"),
+                _ => println!("  \x1b[31m✗ No se pudo abrir 80\x1b[0m"),
+            }
+        }
+        println!();
+        return;
     }
+
+    println!("  \x1b[36m  Ejecuta: sudo ufw allow 3001 && sudo ufw allow 80\x1b[0m\n");
 }
