@@ -137,6 +137,9 @@ async fn main() {
         .route("/api/email/classify/{uid}", post(handlers::email::classify_email))
         .route("/api/email/to-task/{uid}", post(handlers::email::email_to_task))
         .route("/api/email/groq-key", post(handlers::email::set_groq_key))
+        .route("/api/email/filters", get(handlers::email::list_filters))
+        .route("/api/email/filters", post(handlers::email::add_filter))
+        .route("/api/email/filters/{pattern}", delete(handlers::email::delete_filter))
         .layer(axum_mw::from_fn_with_state(state.clone(), middleware::permission_check))
         .layer(cors)
         .with_state(state.clone());

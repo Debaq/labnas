@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::config::save_config;
-use crate::models::email::{EmailAccount, EmailMessage};
+use crate::models::email::{EmailAccount, EmailFilter, EmailMessage, FilterAction};
 use crate::models::notifications::UserRole;
 use crate::state::AppState;
 
@@ -72,6 +72,7 @@ pub async fn configure_account(
         imap_port: req.imap_port,
         email: req.email.trim().to_string(),
         password: req.password,
+        filters: Vec::new(),
     };
 
     // Verificar conexion antes de guardar
@@ -411,6 +412,99 @@ pub async fn set_groq_key(
 }
 
 // =====================
+// Email filters
+// =====================
+
+pub async fn list_filters(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<EmailFilter>>, (StatusCode, String)> {
+    let sessions = state.sessions.lock().await;
+    let (username, _) = extract_username(&sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
+    let config = state.config.lock().await;
+    let account = config.email.accounts.iter().find(|a| a.username == username);
+    Ok(Json(account.map(|a| a.filters.clone()).unwrap_or_default()))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddFilterRequest {
+    pub pattern: String,
+    pub action: FilterAction,
+    pub label: String,
+    #[serde(default)]
+    pub auto_tag: Option<String>,
+}
+
+pub async fn add_filter(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<AddFilterRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let sessions = state.sessions.lock().await;
+    let (username, _) = extract_username(&sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
+    let mut config = state.config.lock().await;
+    let account = config.email.accounts.iter_mut().find(|a| a.username == username)
+        .ok_or((StatusCode::NOT_FOUND, "Cuenta de correo no configurada".to_string()))?;
+
+    // No duplicar
+    if account.filters.iter().any(|f| f.pattern == req.pattern) {
+        return Err((StatusCode::CONFLICT, "Filtro ya existe".to_string()));
+    }
+
+    account.filters.push(EmailFilter {
+        pattern: req.pattern,
+        action: req.action,
+        label: req.label,
+        auto_tag: req.auto_tag,
+    });
+
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(StatusCode::CREATED)
+}
+
+pub async fn delete_filter(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(pattern): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let sessions = state.sessions.lock().await;
+    let (username, _) = extract_username(&sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
+    let mut config = state.config.lock().await;
+    let account = config.email.accounts.iter_mut().find(|a| a.username == username)
+        .ok_or((StatusCode::NOT_FOUND, "Cuenta no configurada".to_string()))?;
+
+    let decoded = urlencoding::decode(&pattern).unwrap_or_default().to_string();
+    let before = account.filters.len();
+    account.filters.retain(|f| f.pattern != decoded);
+    if account.filters.len() == before {
+        return Err((StatusCode::NOT_FOUND, "Filtro no encontrado".to_string()));
+    }
+
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Aplica filtros del usuario a un email. Devuelve (label, action) o None si no matchea.
+fn apply_filters(filters: &[EmailFilter], from: &str) -> Option<(String, FilterAction, Option<String>)> {
+    let from_lower = from.to_lowercase();
+    for f in filters {
+        if from_lower.contains(&f.pattern.to_lowercase()) {
+            return Some((f.label.clone(), f.action.clone(), f.auto_tag.clone()));
+        }
+    }
+    None
+}
+
+// =====================
 // IMAP - Fetch emails (BLOCKING)
 // =====================
 
@@ -544,6 +638,8 @@ pub fn fetch_emails(account: &EmailAccount) -> Result<Vec<EmailMessage>, String>
             ai_classification: None,
             ai_summary: None,
             ai_action: None,
+            filter_label: None,
+            filter_action: None,
             processed: false,
             task_created: false,
             fetched_at: Utc::now(),
@@ -741,7 +837,32 @@ pub async fn email_check_loop(state: AppState) {
                 }
             };
 
-            // Clasificar con Groq si hay key
+            // Aplicar filtros del usuario
+            let filters = &account.filters;
+            emails.retain_mut(|email| {
+                if let Some((label, action, auto_tag)) = apply_filters(filters, &email.from) {
+                    email.filter_label = Some(label);
+                    email.filter_action = Some(action.clone());
+                    match action {
+                        FilterAction::Ignorar => return false, // descartar
+                        FilterAction::Prioritario => {
+                            email.ai_classification = Some("urgente".to_string());
+                            email.ai_summary = Some(format!("Correo prioritario ({})", email.filter_label.as_deref().unwrap_or("filtro")));
+                            email.ai_action = auto_tag.or(Some("Responder".to_string()));
+                            email.processed = true;
+                        }
+                        FilterAction::Silencioso => {
+                            // Se clasificará con IA pero no notificará
+                        }
+                        FilterAction::Normal => {
+                            // Clasificar normalmente con IA
+                        }
+                    }
+                }
+                true
+            });
+
+            // Clasificar con Groq los que no fueron procesados por filtros
             if let Some(ref key) = groq_key {
                 for email in &mut emails {
                     if email.ai_classification.is_none() {
@@ -776,8 +897,14 @@ pub async fn email_check_loop(state: AppState) {
             let new_count = new_emails.len();
             let new_urgent: Vec<String> = new_emails
                 .iter()
-                .filter(|e| e.ai_classification.as_deref() == Some("urgente"))
-                .map(|e| format!("- {}: {}", e.from, e.subject))
+                .filter(|e| {
+                    e.ai_classification.as_deref() == Some("urgente")
+                        && e.filter_action != Some(FilterAction::Silencioso)
+                })
+                .map(|e| {
+                    let label = e.filter_label.as_deref().map(|l| format!(" [{}]", l)).unwrap_or_default();
+                    format!("- {}{}: {}", e.from, label, e.subject)
+                })
                 .collect();
 
             inbox.insert(username.clone(), emails);
