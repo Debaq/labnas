@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, ShieldCheck, ShieldAlert, UserCheck, Link2 } from 'lucide-react'
+import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, ShieldCheck, ShieldAlert, UserCheck, Link2, Globe } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, type ThemeName } from '../themes/themes'
@@ -246,6 +246,44 @@ export default function SettingsPage() {
           </div>
         </div>
       </section>
+
+      {/* Tailscale - Remote Access (admin only) */}
+      {authUser?.role === 'admin' && (
+        <section>
+          <div className="flex items-center gap-3 mb-4">
+            <Globe size={22} style={{ color: 'var(--accent)' }} />
+            <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+              Acceso Remoto (Tailscale)
+            </h2>
+          </div>
+          <div
+            className="rounded-xl p-6"
+            style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
+          >
+            <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>
+              Tailscale permite acceder a LabNAS desde cualquier parte del mundo de forma segura, sin exponer puertos a internet.
+              Funciona en Linux, Windows, macOS, iPhone y Android.
+            </p>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => navigate('/terminal', { state: { commands: 'curl -fsSL https://tailscale.com/install.sh | sh && sudo systemctl enable --now tailscaled && sudo tailscale up' } })}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90"
+                style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
+              >
+                <TerminalSquare size={16} />
+                Instalar Tailscale
+              </button>
+              <button
+                onClick={() => navigate('/terminal', { state: { commands: 'tailscale status' } })}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90"
+                style={{ color: 'var(--accent)', border: '1px solid var(--accent)' }}
+              >
+                Ver estado
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Telegram Notifications */}
       <section>
