@@ -54,6 +54,8 @@ pub struct LabBranding {
     pub contact_email: String,
     #[serde(default)]
     pub location: String,
+    #[serde(default)]
+    pub accent_color: String,
 }
 
 fn default_lab_name() -> String {
@@ -71,6 +73,7 @@ impl Default for LabBranding {
             website: String::new(),
             contact_email: String::new(),
             location: String::new(),
+            accent_color: String::new(),
         }
     }
 }

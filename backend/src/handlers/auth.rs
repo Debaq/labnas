@@ -17,6 +17,16 @@ fn extract_token(headers: &HeaderMap) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+// --- Has Users (publico, sin auth) ---
+
+pub async fn has_users(
+    State(state): State<AppState>,
+) -> Json<serde_json::Value> {
+    let config = state.config.lock().await;
+    let has = !config.web_users.is_empty();
+    Json(serde_json::json!({ "has_users": has }))
+}
+
 // --- Register ---
 
 pub async fn register(

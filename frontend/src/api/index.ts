@@ -352,6 +352,7 @@ export interface LabBranding {
   website: string
   contact_email: string
   location: string
+  accent_color: string
 }
 
 export async function getBranding(): Promise<LabBranding> {

@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, useMemo, type ReactNode } from 'react'
 import { HardDrive, Wifi, Activity, Database, Box } from 'lucide-react'
 import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus } from '../api'
+import { useAuth } from '../auth/AuthContext'
 import type { DiskInfo, SystemInfo, NetworkHost, Printer3DConfig, Printer3DStatus } from '../types'
 
 function formatBytes(bytes: number): string {
@@ -46,7 +47,25 @@ function StatCard({ icon, label, value }: StatCardProps) {
   )
 }
 
+function getGreeting(): string {
+  const hour = new Date().getHours()
+  if (hour < 12) return 'Buenos dias'
+  if (hour < 20) return 'Buenas tardes'
+  return 'Buenas noches'
+}
+
+function getFormattedDate(): string {
+  const now = new Date()
+  const days = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado']
+  const months = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+  return `${days[now.getDay()]}, ${now.getDate()} de ${months[now.getMonth()]} de ${now.getFullYear()}`
+}
+
 export default function DashboardPage() {
+  const { user } = useAuth()
+  const greeting = useMemo(() => getGreeting(), [])
+  const formattedDate = useMemo(() => getFormattedDate(), [])
+
   const [disks, setDisks] = useState<DiskInfo[]>([])
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
   const [hosts, setHosts] = useState<NetworkHost[]>([])
@@ -95,6 +114,16 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
+      {/* Saludo */}
+      <div>
+        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+          {greeting}, {user?.username}
+        </h1>
+        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
+          {formattedDate}
+        </p>
+      </div>
+
       {/* Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <StatCard

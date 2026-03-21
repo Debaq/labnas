@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, ShieldCheck, ShieldAlert, UserCheck, Link2, Globe, Building2 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../themes/ThemeContext'
-import { themes, type ThemeName } from '../themes/themes'
+import { themes, getThemeNames, type ThemeName } from '../themes/themes'
 import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, checkUpdate, doUpdate, getMdnsStatus, setMdns, getBranding, setBranding, type LabBranding } from '../api'
 import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig } from '../types'
 
@@ -181,9 +181,57 @@ export default function SettingsPage() {
                 className="w-full px-3 py-2 rounded-lg text-sm outline-none resize-none"
                 style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
             </div>
+            {/* Color principal */}
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Color principal (accent)</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  value={branding.accent_color || '#bd93f9'}
+                  onChange={e => setBrandingState({ ...branding, accent_color: e.target.value })}
+                  className="w-10 h-10 rounded-lg cursor-pointer border-0 p-0"
+                  style={{ backgroundColor: 'var(--input-bg)' }}
+                />
+                <span className="text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>
+                  {branding.accent_color || 'Sin personalizar (usa el del tema)'}
+                </span>
+                {branding.accent_color && (
+                  <button
+                    onClick={() => {
+                      setBrandingState({ ...branding, accent_color: '' })
+                      localStorage.removeItem('labnas-accent-color')
+                      // Reaplicar tema sin accent personalizado
+                      const currentTheme = localStorage.getItem('labnas-theme') || 'dracula'
+                      const validThemes = getThemeNames()
+                      const resolved = validThemes.includes(currentTheme as ThemeName) ? currentTheme as ThemeName : 'dracula'
+                      const themeColors = themes[resolved]
+                      document.documentElement.style.setProperty('--accent', themeColors.accent)
+                      document.documentElement.style.setProperty('--accent-alpha', themeColors['accent-alpha'])
+                      document.documentElement.style.setProperty('--sidebar-active', themeColors['sidebar-active'])
+                    }}
+                    className="text-xs px-2 py-1 rounded-lg transition-opacity hover:opacity-80"
+                    style={{ color: 'var(--danger)', border: '1px solid var(--danger)' }}
+                  >
+                    Quitar
+                  </button>
+                )}
+              </div>
+            </div>
+
             <button
               onClick={async () => {
-                try { await setBranding(branding); } catch {}
+                try {
+                  await setBranding(branding)
+                  // Aplicar accent color inmediatamente
+                  if (branding.accent_color) {
+                    localStorage.setItem('labnas-accent-color', branding.accent_color)
+                    document.documentElement.style.setProperty('--accent', branding.accent_color)
+                    document.documentElement.style.setProperty('--accent-alpha', branding.accent_color + '1f')
+                    document.documentElement.style.setProperty('--sidebar-active', branding.accent_color)
+                  } else {
+                    localStorage.removeItem('labnas-accent-color')
+                  }
+                } catch {}
               }}
               className="px-4 py-2 rounded-lg text-sm font-medium"
               style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
@@ -203,10 +251,37 @@ export default function SettingsPage() {
           </h2>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {themeNames.map((t) => (
+          {/* Auto theme card */}
+          <button
+            onClick={() => setTheme('auto' as any)}
+            className="rounded-xl p-4 transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 text-left"
+            style={{
+              background: 'linear-gradient(135deg, #282a36 50%, #f8fafc 50%)',
+              border: theme === 'auto' ? '2px solid var(--accent)' : '2px solid var(--border)',
+            }}
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-sm font-semibold" style={{ color: '#f8f8f2' }}>
+                Automatico
+              </span>
+              {theme === 'auto' && (
+                <span
+                  className="text-xs px-2 py-0.5 rounded-full font-medium"
+                  style={{ backgroundColor: 'var(--accent)' + '30', color: 'var(--accent)' }}
+                >
+                  Activo
+                </span>
+              )}
+            </div>
+            <p className="text-[10px]" style={{ color: '#6272a4' }}>
+              Sigue el tema del sistema
+            </p>
+          </button>
+          {/* Theme cards - solo los temas reales, no "auto" */}
+          {themeNames.filter(t => t !== 'auto').map((t) => (
             <ThemeCard
               key={t}
-              name={t}
+              name={t as ThemeName}
               isSelected={t === theme}
               onClick={() => setTheme(t)}
             />

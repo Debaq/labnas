@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Loader2, LogIn, UserPlus } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
+import { getBranding } from '../api'
 
 export default function LoginPage() {
   const { login, register } = useAuth()
@@ -9,6 +10,38 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+
+  // Branding
+  const [labName, setLabName] = useState('LabNAS')
+  const [institution, setInstitution] = useState('')
+  const [logoUrl, setLogoUrl] = useState('')
+  const [hasUsers, setHasUsers] = useState(true)
+
+  useEffect(() => {
+    getBranding().then(b => {
+      if (b.lab_name) setLabName(b.lab_name)
+      if (b.institution) setInstitution(b.institution)
+      if (b.logo_url) {
+        setLogoUrl(b.logo_url)
+        // Guardar en localStorage para el loading spinner
+        localStorage.setItem('labnas_logo_url', b.logo_url)
+      }
+    }).catch(() => {})
+
+    // Intentar login con credenciales inexistentes para ver si hay usuarios
+    // Si la respuesta es un error especifico, podemos deducir si hay usuarios
+    // Forma mas simple: intentar registrar y ver el error, pero mejor no.
+    // Usamos un endpoint publico para verificar si hay usuarios
+    fetch('/api/auth/has-users').then(res => {
+      if (res.ok) return res.json()
+      // Si el endpoint no existe, asumimos que hay usuarios (no mostramos el hint)
+      return { has_users: true }
+    }).then(data => {
+      setHasUsers(data.has_users !== false)
+    }).catch(() => {
+      setHasUsers(true)
+    })
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -34,7 +67,19 @@ export default function LoginPage() {
         className="rounded-2xl p-8 w-full max-w-sm shadow-xl"
         style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
       >
-        <h1 className="text-2xl font-bold text-center mb-1" style={{ color: 'var(--accent)' }}>LabNAS</h1>
+        {/* Logo */}
+        {logoUrl && (
+          <div className="flex justify-center mb-4">
+            <img src={logoUrl} alt={labName} className="w-16 h-16 rounded-xl object-contain" />
+          </div>
+        )}
+
+        <h1 className="text-2xl font-bold text-center mb-1" style={{ color: 'var(--accent)' }}>{labName}</h1>
+        {institution && (
+          <p className="text-xs text-center mb-1" style={{ color: 'var(--text-secondary)' }}>
+            {institution}
+          </p>
+        )}
         <p className="text-xs text-center mb-6" style={{ color: 'var(--text-secondary)' }}>
           {mode === 'login' ? 'Inicia sesion para acceder' : 'Crea una cuenta'}
         </p>
@@ -91,9 +136,11 @@ export default function LoginPage() {
           </button>
         </div>
 
-        <p className="text-[10px] text-center mt-4" style={{ color: 'var(--text-secondary)' }}>
-          La primera cuenta creada sera administrador
-        </p>
+        {!hasUsers && (
+          <p className="text-[10px] text-center mt-4" style={{ color: 'var(--text-secondary)' }}>
+            La primera cuenta creada sera administrador
+          </p>
+        )}
       </div>
     </div>
   )

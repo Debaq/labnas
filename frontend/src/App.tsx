@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { ThemeProvider } from './themes/ThemeContext'
 import { AuthProvider, useAuth } from './auth/AuthContext'
+import { ToastProvider } from './components/ToastContext'
 import Layout from './components/Layout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
@@ -14,15 +15,29 @@ import TasksPage from './pages/TasksPage'
 import NotesPage from './pages/NotesPage'
 import { Loader2 } from 'lucide-react'
 
+function LoadingScreen() {
+  const logoUrl = localStorage.getItem('labnas_logo_url')
+
+  return (
+    <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
+      {logoUrl ? (
+        <img
+          src={logoUrl}
+          alt="Cargando..."
+          className="w-16 h-16 rounded-xl object-contain animate-pulse"
+        />
+      ) : (
+        <Loader2 size={32} className="animate-spin" style={{ color: 'var(--accent)' }} />
+      )}
+    </div>
+  )
+}
+
 function AppRoutes() {
   const { user, loading } = useAuth()
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
-        <Loader2 size={32} className="animate-spin" style={{ color: 'var(--accent)' }} />
-      </div>
-    )
+    return <LoadingScreen />
   }
 
   if (!user) {
@@ -51,9 +66,11 @@ export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
+        <ToastProvider>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </ToastProvider>
       </AuthProvider>
     </ThemeProvider>
   )

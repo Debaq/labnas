@@ -19,7 +19,7 @@ pub async fn permission_check(
     // Public routes - no auth needed
     if matches!(
         path.as_str(),
-        "/api/health" | "/api/auth/login" | "/api/auth/register"
+        "/api/health" | "/api/auth/login" | "/api/auth/register" | "/api/auth/has-users" | "/api/system/branding"
     ) || path.starts_with("/api/share/")
     || !path.starts_with("/api/")
     {

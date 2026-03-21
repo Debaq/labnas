@@ -59,6 +59,7 @@ async fn main() {
 
     let api = Router::new()
         // Auth
+        .route("/api/auth/has-users", get(handlers::auth::has_users))
         .route("/api/auth/register", post(handlers::auth::register))
         .route("/api/auth/login", post(handlers::auth::login))
         .route("/api/auth/me", get(handlers::auth::me))
