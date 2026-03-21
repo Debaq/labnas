@@ -464,6 +464,10 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
         s if s.starts_with("/cpu") => build_cpu_message().await,
         s if s.starts_with("/uptime") => build_uptime_message(state),
         s if s.starts_with("/red") => build_network_message(state).await,
+        s if s.starts_with("/camara") | s.starts_with("/foto") => {
+            handle_camera(state, &token, chat_id, s).await;
+            return; // ya envió la foto directamente
+        }
         s if s.starts_with("/temp") => handle_printer_temps(state).await,
         s if s.starts_with("/imprimir ") => handle_printer_control(state, &chat_name, s, "start").await,
         s if s.starts_with("/pausar") => handle_printer_control(state, &chat_name, s, "pause").await,
@@ -1525,6 +1529,116 @@ async fn handle_printer_control(state: &AppState, user: &str, text: &str, comman
     }
 }
 
+async fn handle_camera(state: &AppState, token: &str, chat_id: i64, text: &str) {
+    let arg = text.strip_prefix("/camara").or_else(|| text.strip_prefix("/foto")).unwrap_or("").trim();
+
+    let config = state.config.lock().await;
+    let printers = config.printers3d.clone();
+    drop(config);
+
+    if printers.is_empty() {
+        let _ = send_telegram_message(&state.http_client, token, chat_id, "No hay impresoras configuradas.").await;
+        return;
+    }
+
+    // Find printer
+    let printer = if printers.len() == 1 {
+        &printers[0]
+    } else if arg.is_empty() {
+        // Send all cameras
+        for p in &printers {
+            send_printer_photo(state, token, chat_id, p).await;
+        }
+        return;
+    } else {
+        match printers.iter().find(|p| p.name.to_lowercase().contains(&arg.to_lowercase())) {
+            Some(p) => p,
+            None => {
+                let _ = send_telegram_message(&state.http_client, token, chat_id, &format!("Impresora '{}' no encontrada.", arg)).await;
+                return;
+            }
+        }
+    };
+
+    send_printer_photo(state, token, chat_id, printer).await;
+}
+
+async fn send_printer_photo(state: &AppState, token: &str, chat_id: i64, printer: &crate::models::printers3d::Printer3DConfig) {
+    // Get camera URL
+    let cam_url = if let Some(ref url) = printer.camera_url {
+        url.clone()
+    } else {
+        // Default: try common webcam endpoints
+        let base = format!("http://{}:{}", printer.ip, printer.port);
+        match printer.printer_type {
+            crate::models::printers3d::Printer3DType::OctoPrint => format!("{}/webcam/?action=snapshot", base),
+            crate::models::printers3d::Printer3DType::Moonraker => format!("http://{}:8080/?action=snapshot", printer.ip),
+        }
+    };
+
+    // Download image
+    let resp = state.http_client
+        .get(&cam_url)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await;
+
+    let bytes = match resp {
+        Ok(r) if r.status().is_success() => {
+            match r.bytes().await {
+                Ok(b) => b,
+                Err(_) => {
+                    let _ = send_telegram_message(&state.http_client, token, chat_id, &format!("Error leyendo imagen de {}", printer.name)).await;
+                    return;
+                }
+            }
+        }
+        _ => {
+            let _ = send_telegram_message(&state.http_client, token, chat_id, &format!("No se pudo obtener imagen de {}.\nURL: `{}`", printer.name, cam_url)).await;
+            return;
+        }
+    };
+
+    // Get status for caption
+    let status = super::printers3d::printer_status(
+        axum::extract::State(state.clone()),
+        axum::extract::Path(printer.id.clone()),
+    ).await;
+
+    let caption = match status {
+        Ok(axum::Json(s)) if s.online => {
+            let mut cap = format!("📷 {}", printer.name);
+            if let Some(temps) = &s.temperatures {
+                cap.push_str(&format!("\n🔥 {:.0}°C / 🛏 {:.0}°C", temps.hotend_actual, temps.bed_actual));
+            }
+            if let Some(job) = &s.current_job {
+                cap.push_str(&format!("\n📄 {} ({:.1}%)", job.file_name, job.progress));
+            }
+            cap
+        }
+        _ => format!("📷 {}", printer.name),
+    };
+
+    // Send photo via Telegram
+    let url = format!("https://api.telegram.org/bot{}/sendPhoto", token);
+    let part = reqwest::multipart::Part::bytes(bytes.to_vec())
+        .file_name("camera.jpg")
+        .mime_str("image/jpeg")
+        .unwrap_or_else(|_| reqwest::multipart::Part::bytes(bytes.to_vec()));
+
+    let form = reqwest::multipart::Form::new()
+        .text("chat_id", chat_id.to_string())
+        .text("caption", caption)
+        .part("photo", part);
+
+    let _ = state.http_client
+        .post(&url)
+        .multipart(form)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await;
+}
+
 fn build_help_message(role: &UserRole) -> String {
     let mut msg = String::from("*LabNAS - Comandos*\n\n");
     msg.push_str("*Sistema*\n");
@@ -1534,10 +1648,11 @@ fn build_help_message(role: &UserRole) -> String {
     msg.push_str("/vincular CODIGO - Vincular con web\n");
     msg.push_str("/cmd COMANDO - Ejecutar en terminal\n\n");
     msg.push_str("*Impresoras 3D*\n");
-    msg.push_str("/temp - Temperaturas de impresoras\n");
+    msg.push_str("/temp - Temperaturas\n");
+    msg.push_str("/camara - Foto de la impresora\n");
     msg.push_str("/imprimir NOMBRE - Iniciar impresion\n");
-    msg.push_str("/pausar NOMBRE - Pausar impresion\n");
-    msg.push_str("/cancelar3d NOMBRE - Cancelar impresion\n\n");
+    msg.push_str("/pausar NOMBRE - Pausar\n");
+    msg.push_str("/cancelar3d NOMBRE - Cancelar\n\n");
     msg.push_str("*Correo*\n");
     msg.push_str("/correos - Resumen de bandeja\n");
     msg.push_str("/leer UID - Detalle de un correo\n");
