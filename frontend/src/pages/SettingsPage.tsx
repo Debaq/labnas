@@ -763,7 +763,7 @@ export default function SettingsPage() {
                     </button>
                   </div>
 
-                  {/* Role controls */}
+                  {/* Role controls (no admin) */}
                   {c.role !== 'admin' && (
                     <div className="flex items-center gap-2 flex-wrap">
                       {c.role === 'pendiente' && (
@@ -835,31 +835,31 @@ export default function SettingsPage() {
                           </label>
                         </div>
                       )}
-                      {/* Link to web user */}
-                      <div className="flex items-center gap-2">
-                        <Link2 size={12} style={{ color: 'var(--text-secondary)' }} />
-                        <select
-                          value={c.linked_web_user || ''}
-                          onChange={async (e) => {
-                            try {
-                              if (e.target.value) {
-                                await adminLinkChat(c.chat_id, e.target.value)
-                              }
-                              const cfg = await fetchNotificationConfig()
-                              setNotifConfig(cfg)
-                            } catch {}
-                          }}
-                          className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer"
-                          style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
-                        >
-                          <option value="">Sin vincular</option>
-                          {webUsers.map(u => (
-                            <option key={u} value={u}>{u}</option>
-                          ))}
-                        </select>
-                      </div>
                     </div>
                   )}
+                  {/* Link to web user (todos) */}
+                  <div className="flex items-center gap-2">
+                    <Link2 size={12} style={{ color: 'var(--text-secondary)' }} />
+                    <select
+                      value={c.linked_web_user || ''}
+                      onChange={async (e) => {
+                        try {
+                          if (e.target.value) {
+                            await adminLinkChat(c.chat_id, e.target.value)
+                          }
+                          const cfg = await fetchNotificationConfig()
+                          setNotifConfig(cfg)
+                        } catch {}
+                      }}
+                      className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer"
+                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                    >
+                      <option value="">Sin vincular</option>
+                      {webUsers.map(u => (
+                        <option key={u} value={u}>{u}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               )
             })}
