@@ -862,6 +862,8 @@ export interface MusicState {
   stream_url: string | null
   paused: boolean
   volume: number
+  repeat: 'off' | 'all' | 'one'
+  shuffle: boolean
 }
 
 export async function searchMusic(q: string): Promise<MusicTrack[]> {
@@ -927,6 +929,34 @@ export async function setMusicMode(mode: 'nas' | 'browser'): Promise<MusicState>
     body: JSON.stringify({ mode }),
   })
   if (!res.ok) throw new Error('Error cambiando modo')
+  return res.json()
+}
+
+export async function playFromQueue(index: number): Promise<MusicState> {
+  const res = await api(`/api/music/queue/play/${index}`, { method: 'POST' })
+  if (!res.ok) throw new Error('Error reproduciendo de cola')
+  return res.json()
+}
+
+export async function moveInQueue(from: number, to: number): Promise<MusicState> {
+  const res = await api('/api/music/queue/move', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from, to }),
+  })
+  if (!res.ok) throw new Error('Error moviendo en cola')
+  return res.json()
+}
+
+export async function toggleShuffle(): Promise<MusicState> {
+  const res = await api('/api/music/shuffle', { method: 'POST' })
+  if (!res.ok) throw new Error('Error')
+  return res.json()
+}
+
+export async function toggleRepeat(): Promise<MusicState> {
+  const res = await api('/api/music/repeat', { method: 'POST' })
+  if (!res.ok) throw new Error('Error')
   return res.json()
 }
 

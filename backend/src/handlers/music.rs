@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
@@ -55,6 +55,19 @@ pub struct MusicState {
     pub paused: bool,
     #[serde(default = "default_volume")]
     pub volume: u8,
+    #[serde(default)]
+    pub repeat: RepeatMode,
+    #[serde(default)]
+    pub shuffle: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RepeatMode {
+    #[default]
+    Off,
+    All,
+    One,
 }
 
 fn default_volume() -> u8 { 80 }
@@ -84,6 +97,12 @@ pub struct SetModeRequest {
 #[derive(Debug, Deserialize)]
 pub struct SetVolumeRequest {
     pub volume: u8,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct QueueMoveRequest {
+    pub from: usize,
+    pub to: usize,
 }
 
 // yt-dlp JSON output
@@ -352,19 +371,46 @@ pub async fn play(
     Ok(Json(ms.clone()))
 }
 
-/// POST /api/music/next - Siguiente canción
+/// POST /api/music/next - Siguiente canción (respeta repeat mode)
 pub async fn next(
     State(state): State<AppState>,
 ) -> Result<Json<MusicState>, (StatusCode, String)> {
     kill_player(&state).await;
+    advance_queue(&state).await;
+    Ok(Json(state.music.lock().await.clone()))
+}
 
+/// Lógica compartida de avanzar la cola (usada por next, auto-next, etc.)
+async fn advance_queue(state: &AppState) {
     let mut ms = state.music.lock().await;
+
+    // Repeat One: volver a reproducir la misma
+    if ms.repeat == RepeatMode::One {
+        if let Some(ref track) = ms.current {
+            let track_id = track.id.clone();
+            let mode = ms.mode.clone();
+            ms.paused = false;
+            drop(ms);
+            let stream = start_playback(state, &track_id, &mode).await;
+            let mut ms = state.music.lock().await;
+            ms.stream_url = stream;
+            return;
+        }
+    }
+
+    // Repeat All: mover la actual al final de la cola antes de avanzar
+    if ms.repeat == RepeatMode::All {
+        if let Some(current) = ms.current.clone() {
+            ms.queue.push(current);
+        }
+    }
 
     if ms.queue.is_empty() {
         ms.current = None;
         ms.started_by = None;
         ms.stream_url = None;
-        return Ok(Json(ms.clone()));
+        ms.paused = false;
+        return;
     }
 
     let next_track = ms.queue.remove(0);
@@ -378,11 +424,9 @@ pub async fn next(
     ms.paused = false;
     drop(ms);
 
-    let stream = start_playback(&state, &next_id, &mode).await;
-
+    let stream = start_playback(state, &next_id, &mode).await;
     let mut ms = state.music.lock().await;
     ms.stream_url = stream;
-    Ok(Json(ms.clone()))
 }
 
 /// DELETE /api/music/queue - Quitar de la cola
@@ -422,25 +466,7 @@ pub async fn current(
 
     // Auto-next si terminó la canción actual
     if player_finished {
-        let mut ms = state.music.lock().await;
-        if !ms.queue.is_empty() {
-            let next_track = ms.queue.remove(0);
-            let next_id = next_track.id.clone();
-            let next_by = next_track.added_by.clone().unwrap_or_default();
-            add_to_history(&mut ms, &next_track, &next_by);
-            ms.current = Some(next_track);
-            ms.started_by = Some(next_by);
-            ms.paused = false;
-            drop(ms);
-            let stream = start_playback(&state, &next_id, &mode).await;
-            let mut ms = state.music.lock().await;
-            ms.stream_url = stream;
-        } else {
-            ms.current = None;
-            ms.started_by = None;
-            ms.stream_url = None;
-            ms.paused = false;
-        }
+        advance_queue(&state).await;
     }
 
     Json(state.music.lock().await.clone())
@@ -591,6 +617,99 @@ pub async fn set_volume(
     }
 
     Json(state.music.lock().await.clone())
+}
+
+/// POST /api/music/queue/play/{index} - Reproducir un item de la cola directamente
+pub async fn queue_play(
+    State(state): State<AppState>,
+    Path(index): Path<usize>,
+) -> Result<Json<MusicState>, (StatusCode, String)> {
+    kill_player(&state).await;
+
+    let mut ms = state.music.lock().await;
+    if index >= ms.queue.len() {
+        return Err((StatusCode::BAD_REQUEST, "Indice fuera de rango".to_string()));
+    }
+
+    let track = ms.queue.remove(index);
+    let track_id = track.id.clone();
+    let played_by = track.added_by.clone().unwrap_or_default();
+    let mode = ms.mode.clone();
+
+    // Devolver la canción actual a la cola al frente (si existe)
+    if let Some(current) = ms.current.take() {
+        ms.queue.insert(0, current);
+    }
+
+    add_to_history(&mut ms, &track, &played_by);
+    ms.current = Some(track);
+    ms.started_by = Some(played_by);
+    ms.paused = false;
+    drop(ms);
+
+    let stream = start_playback(&state, &track_id, &mode).await;
+    let mut ms = state.music.lock().await;
+    ms.stream_url = stream;
+    Ok(Json(ms.clone()))
+}
+
+/// POST /api/music/queue/move - Mover un item de la cola
+pub async fn queue_move(
+    State(state): State<AppState>,
+    Json(req): Json<QueueMoveRequest>,
+) -> Result<Json<MusicState>, (StatusCode, String)> {
+    let mut ms = state.music.lock().await;
+    if req.from >= ms.queue.len() || req.to >= ms.queue.len() {
+        return Err((StatusCode::BAD_REQUEST, "Indice fuera de rango".to_string()));
+    }
+    let item = ms.queue.remove(req.from);
+    ms.queue.insert(req.to, item);
+    Ok(Json(ms.clone()))
+}
+
+/// POST /api/music/shuffle - Activar/desactivar aleatorio
+pub async fn toggle_shuffle(
+    State(state): State<AppState>,
+) -> Json<MusicState> {
+    let mut ms = state.music.lock().await;
+    ms.shuffle = !ms.shuffle;
+
+    if ms.shuffle && ms.queue.len() > 1 {
+        // Mezclar la cola
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut indices: Vec<usize> = (0..ms.queue.len()).collect();
+        // Fisher-Yates con seed del timestamp
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let mut hasher = DefaultHasher::new();
+        now.hash(&mut hasher);
+        let mut seed = hasher.finish();
+        for i in (1..indices.len()).rev() {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let j = (seed as usize) % (i + 1);
+            indices.swap(i, j);
+        }
+        let shuffled: Vec<MusicTrack> = indices.into_iter().map(|i| ms.queue[i].clone()).collect();
+        ms.queue = shuffled;
+    }
+
+    Json(ms.clone())
+}
+
+/// POST /api/music/repeat - Ciclar modo de repetición (off -> all -> one -> off)
+pub async fn toggle_repeat(
+    State(state): State<AppState>,
+) -> Json<MusicState> {
+    let mut ms = state.music.lock().await;
+    ms.repeat = match ms.repeat {
+        RepeatMode::Off => RepeatMode::All,
+        RepeatMode::All => RepeatMode::One,
+        RepeatMode::One => RepeatMode::Off,
+    };
+    Json(ms.clone())
 }
 
 /// POST /api/music/recommend - Mix basado en canción actual/historial

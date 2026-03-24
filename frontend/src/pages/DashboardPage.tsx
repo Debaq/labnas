@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
-import { HardDrive, Wifi, Activity, Database, Box, Music, Search, Play, Pause, Square, Loader2, X, SkipForward, SkipBack, Trash2, ListMusic, Plus, Sparkles, Speaker, Monitor, ExternalLink, MoreVertical, Volume2 } from 'lucide-react'
-import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus, searchMusic, playMusic, getCurrentMusic, stopMusic, pauseMusic, previousMusic, nextMusic, removeFromQueue, recommendMusic, setMusicMode, setMusicVolume, getServices, type MusicTrack, type MusicState, type LabService } from '../api'
+import { HardDrive, Wifi, Activity, Database, Box, Music, Search, Play, Pause, Square, Loader2, X, SkipForward, SkipBack, Trash2, ListMusic, Plus, Sparkles, Speaker, Monitor, ExternalLink, MoreVertical, Volume2, Shuffle, Repeat, Repeat1, ChevronUp, ChevronDown } from 'lucide-react'
+import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus, searchMusic, playMusic, getCurrentMusic, stopMusic, pauseMusic, previousMusic, nextMusic, removeFromQueue, playFromQueue, moveInQueue, toggleShuffle, toggleRepeat, recommendMusic, setMusicMode, setMusicVolume, getServices, type MusicTrack, type MusicState, type LabService } from '../api'
 import { useAuth } from '../auth/AuthContext'
 import type { DiskInfo, SystemInfo, NetworkHost, Printer3DConfig, Printer3DStatus } from '../types'
 
@@ -77,7 +77,7 @@ export default function DashboardPage() {
   const [services, setServices] = useState<LabService[]>([])
 
   // Music
-  const [musicState, setMusicState] = useState<MusicState>({ current: null, queue: [], started_by: null, history: [], mode: 'nas', stream_url: null, paused: false, volume: 80 })
+  const [musicState, setMusicState] = useState<MusicState>({ current: null, queue: [], started_by: null, history: [], mode: 'nas', stream_url: null, paused: false, volume: 80, repeat: 'off', shuffle: false })
   const [showPlayerMenu, setShowPlayerMenu] = useState(false)
   const audioRef = useRef<HTMLAudioElement>(null)
   const [showSearch, setShowSearch] = useState(false)
@@ -127,7 +127,7 @@ export default function DashboardPage() {
   }, [])
 
   function safeMusicState(ms: MusicState): MusicState {
-    return { current: ms.current ?? null, queue: ms.queue ?? [], started_by: ms.started_by ?? null, history: ms.history ?? [], mode: ms.mode ?? 'nas', stream_url: ms.stream_url ?? null, paused: ms.paused ?? false, volume: ms.volume ?? 80 }
+    return { current: ms.current ?? null, queue: ms.queue ?? [], started_by: ms.started_by ?? null, history: ms.history ?? [], mode: ms.mode ?? 'nas', stream_url: ms.stream_url ?? null, paused: ms.paused ?? false, volume: ms.volume ?? 80, repeat: ms.repeat ?? 'off', shuffle: ms.shuffle ?? false }
   }
 
   // Poll music state every 5s
@@ -224,6 +224,22 @@ export default function DashboardPage() {
 
   async function handleNext() {
     setMusicState(safeMusicState(await nextMusic()))
+  }
+
+  async function handlePlayFromQueue(index: number) {
+    setMusicState(safeMusicState(await playFromQueue(index)))
+  }
+
+  async function handleMoveInQueue(from: number, to: number) {
+    setMusicState(safeMusicState(await moveInQueue(from, to)))
+  }
+
+  async function handleShuffle() {
+    setMusicState(safeMusicState(await toggleShuffle()))
+  }
+
+  async function handleRepeat() {
+    setMusicState(safeMusicState(await toggleRepeat()))
   }
 
   async function handleRemoveFromQueue(index: number) {
@@ -593,6 +609,18 @@ export default function DashboardPage() {
                 title="Detener">
                 <Square size={16} />
               </button>
+              <button onClick={handleShuffle}
+                className="p-2 rounded-lg transition-all hover:opacity-80"
+                style={{ backgroundColor: musicState.shuffle ? 'var(--accent)' + '30' : 'transparent', color: musicState.shuffle ? 'var(--accent)' : 'var(--text-secondary)' }}
+                title={musicState.shuffle ? 'Aleatorio activado' : 'Aleatorio'}>
+                <Shuffle size={14} />
+              </button>
+              <button onClick={handleRepeat}
+                className="p-2 rounded-lg transition-all hover:opacity-80"
+                style={{ backgroundColor: musicState.repeat !== 'off' ? 'var(--accent)' + '30' : 'transparent', color: musicState.repeat !== 'off' ? 'var(--accent)' : 'var(--text-secondary)' }}
+                title={musicState.repeat === 'off' ? 'Repetir' : musicState.repeat === 'all' ? 'Repetir todo' : 'Repetir una'}>
+                {musicState.repeat === 'one' ? <Repeat1 size={14} /> : <Repeat size={14} />}
+              </button>
             </div>
           </div>
         ) : (
@@ -612,15 +640,30 @@ export default function DashboardPage() {
             </div>
             <div className="space-y-1">
               {musicState.queue.map((track, i) => (
-                <div key={`${track.id}-${i}`} className="flex items-center gap-3 px-3 py-2 rounded-lg"
+                <div key={`${track.id}-${i}`} className="flex items-center gap-2 px-3 py-2 rounded-lg group"
                   style={{ backgroundColor: 'var(--bg-tertiary)' }}>
                   <span className="text-xs font-mono w-5 text-center" style={{ color: 'var(--text-secondary)' }}>{i + 1}</span>
-                  <img src={track.thumbnail} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
-                  <div className="flex-1 min-w-0">
+                  <img src={track.thumbnail} alt="" className="w-8 h-8 rounded object-cover shrink-0 cursor-pointer hover:opacity-80"
+                    onClick={() => handlePlayFromQueue(i)} title="Reproducir" />
+                  <div className="flex-1 min-w-0 cursor-pointer" onClick={() => handlePlayFromQueue(i)} title="Reproducir">
                     <p className="text-xs truncate" style={{ color: 'var(--text-primary)' }}>{track.title}</p>
                     <p className="text-[10px] truncate" style={{ color: 'var(--text-secondary)' }}>
                       {track.artist} · {formatDuration(track.duration)}{track.added_by ? ` · ${track.added_by}` : ''}
                     </p>
+                  </div>
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {i > 0 && (
+                      <button onClick={() => handleMoveInQueue(i, i - 1)}
+                        className="p-0.5 rounded transition-all hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+                        <ChevronUp size={12} />
+                      </button>
+                    )}
+                    {i < musicState.queue.length - 1 && (
+                      <button onClick={() => handleMoveInQueue(i, i + 1)}
+                        className="p-0.5 rounded transition-all hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+                        <ChevronDown size={12} />
+                      </button>
+                    )}
                   </div>
                   <button onClick={() => handleRemoveFromQueue(i)}
                     className="p-1 rounded transition-all hover:opacity-80" style={{ color: 'var(--danger)' }}>
