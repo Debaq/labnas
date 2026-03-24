@@ -4,8 +4,8 @@ import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, 
 import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, getThemeNames, type ThemeName } from '../themes/themes'
-import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, checkUpdate, doUpdate, getMdnsStatus, setMdns, getBranding, setBranding, type LabBranding } from '../api'
-import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig } from '../types'
+import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, checkUpdate, doUpdate, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, type LabBranding } from '../api'
+import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig, UserRole, UserPermissions } from '../types'
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -69,7 +69,7 @@ export default function SettingsPage() {
   const { user: authUser } = useAuth()
   const [disks, setDisks] = useState<DiskInfo[]>([])
   const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null)
-  const [webUsers, setWebUsers] = useState<string[]>([])
+  const [webUsers, setWebUsers] = useState<{ username: string; role: UserRole; permissions: UserPermissions }[]>([])
   const [linkCode, setLinkCode] = useState<string | null>(null)
   const [updateInfo, setUpdateInfo] = useState<{ current_version: string; latest_version: string | null; update_available: boolean } | null>(null)
   const [updating, setUpdating] = useState(false)
@@ -99,7 +99,7 @@ export default function SettingsPage() {
     fetchDisks().then(setDisks).catch(() => {})
     fetchSystemInfo().then(setSysInfo).catch(() => {})
     fetchAutostartStatus().then(setAutostart).catch(() => {})
-    fetchWebUsers().then(users => setWebUsers(users.map(u => u.username))).catch(() => {})
+    fetchWebUsers().then(setWebUsers).catch(() => {})
     checkUpdate().then(setUpdateInfo).catch(() => {})
     getMdnsStatus().then(s => { setMdnsState(s); setMdnsHostname(s.hostname) }).catch(() => {})
     getBranding().then(setBrandingState).catch(() => {})
@@ -351,6 +351,105 @@ export default function SettingsPage() {
           )}
         </div>
       </section>
+
+      {/* User Management (admin only) */}
+      {isAdmin && <section>
+        <div className="flex items-center gap-3 mb-4">
+          <Users size={22} style={{ color: 'var(--accent)' }} />
+          <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+            Gestion de Usuarios
+          </h2>
+        </div>
+        <div className="rounded-xl overflow-hidden" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
+          {webUsers.length === 0 ? (
+            <div className="text-center py-8">
+              <Users size={32} className="mx-auto mb-2" style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
+              <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>No hay usuarios registrados</p>
+            </div>
+          ) : (
+            <div>
+              {webUsers.map((u) => {
+                const roleColor = u.role === 'admin' ? 'var(--accent)' : u.role === 'operador' ? 'var(--success)' : u.role === 'observador' ? 'var(--text-secondary)' : 'var(--warning)'
+                return (
+                  <div key={u.username} className="px-5 py-4 flex items-center justify-between flex-wrap gap-3" style={{ borderBottom: '1px solid var(--border)' }}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold" style={{ backgroundColor: roleColor + '20', color: roleColor }}>
+                        {u.username[0].toUpperCase()}
+                      </div>
+                      <div>
+                        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{u.username}</span>
+                        <span className="text-xs ml-2 px-1.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: roleColor + '20', color: roleColor }}>
+                          {u.role === 'admin' ? 'Admin' : u.role === 'operador' ? 'Operador' : u.role === 'observador' ? 'Observador' : 'Pendiente'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 flex-wrap">
+                      {/* Role */}
+                      {u.role !== 'admin' && (
+                        <select
+                          value={u.role}
+                          onChange={async (e) => {
+                            try {
+                              await setWebUserRole(u.username, e.target.value, u.permissions)
+                              const users = await fetchWebUsers()
+                              setWebUsers(users)
+                            } catch {}
+                          }}
+                          className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer"
+                          style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                        >
+                          <option value="pendiente">Pendiente</option>
+                          <option value="observador">Observador</option>
+                          <option value="operador">Operador</option>
+                        </select>
+                      )}
+
+                      {/* Permissions (operador) */}
+                      {u.role === 'operador' && (
+                        <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                          {(['terminal', 'impresion', 'archivos_escritura'] as const).map((perm) => (
+                            <label key={perm} className="flex items-center gap-1 cursor-pointer">
+                              <input type="checkbox" checked={u.permissions[perm]}
+                                onChange={async (e) => {
+                                  try {
+                                    await setWebUserRole(u.username, u.role, { ...u.permissions, [perm]: e.target.checked })
+                                    const users = await fetchWebUsers()
+                                    setWebUsers(users)
+                                  } catch {}
+                                }} />
+                              {perm === 'terminal' ? 'Terminal' : perm === 'impresion' ? 'Impresion' : 'Archivos'}
+                            </label>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Delete (no admin, no self) */}
+                      {u.role !== 'admin' && u.username !== authUser?.username && (
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`Eliminar usuario ${u.username}?`)) return
+                            try {
+                              await deleteWebUser(u.username)
+                              const users = await fetchWebUsers()
+                              setWebUsers(users)
+                            } catch {}
+                          }}
+                          className="p-1.5 rounded-lg transition-all hover:opacity-80"
+                          style={{ color: 'var(--danger)' }}
+                          title="Eliminar usuario"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </section>}
 
       {/* Autostart (admin only) */}
       {isAdmin && <section>
@@ -856,7 +955,7 @@ export default function SettingsPage() {
                     >
                       <option value="">Sin vincular</option>
                       {webUsers.map(u => (
-                        <option key={u} value={u}>{u}</option>
+                        <option key={u.username} value={u.username}>{u.username}</option>
                       ))}
                     </select>
                   </div>
