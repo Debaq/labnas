@@ -76,7 +76,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
 
   // Music
-  const [musicState, setMusicState] = useState<MusicState>({ current: null, queue: [], started_by: null })
+  const [musicState, setMusicState] = useState<MusicState>({ current: null, queue: [], started_by: null, history: [] })
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<MusicTrack[]>([])
@@ -119,11 +119,15 @@ export default function DashboardPage() {
     loadData()
   }, [])
 
+  function safeMusicState(ms: MusicState): MusicState {
+    return { current: ms.current ?? null, queue: ms.queue ?? [], started_by: ms.started_by ?? null, history: ms.history ?? [] }
+  }
+
   // Poll music state every 5s
   useEffect(() => {
-    getCurrentMusic().then(setMusicState).catch(() => {})
+    getCurrentMusic().then(ms => setMusicState(safeMusicState(ms))).catch(() => {})
     const interval = setInterval(() => {
-      getCurrentMusic().then(setMusicState).catch(() => {})
+      getCurrentMusic().then(ms => setMusicState(safeMusicState(ms))).catch(() => {})
     }, 5000)
     return () => clearInterval(interval)
   }, [])
@@ -148,7 +152,7 @@ export default function DashboardPage() {
     const audio = audioRef.current
     if (!audio) return
     const onEnded = () => {
-      nextMusic().then(setMusicState).catch(() => {})
+      nextMusic().then(ms => setMusicState(safeMusicState(ms))).catch(() => {})
     }
     audio.addEventListener('ended', onEnded)
     return () => audio.removeEventListener('ended', onEnded)
@@ -167,7 +171,7 @@ export default function DashboardPage() {
   async function handlePlay(id: string) {
     setLoadingTrack(true)
     try {
-      setMusicState(await playMusic(id))
+      setMusicState(safeMusicState(await playMusic(id)))
     } catch {} finally {
       setLoadingTrack(false)
     }
@@ -175,22 +179,22 @@ export default function DashboardPage() {
 
   async function handleStop() {
     const ms = await stopMusic()
-    setMusicState(ms)
+    setMusicState(safeMusicState(ms))
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = '' }
   }
 
   async function handleNext() {
-    setMusicState(await nextMusic())
+    setMusicState(safeMusicState(await nextMusic()))
   }
 
   async function handleRemoveFromQueue(index: number) {
-    setMusicState(await removeFromQueue(index))
+    setMusicState(safeMusicState(await removeFromQueue(index)))
   }
 
   async function handleRecommend() {
     setLoadingMix(true)
     try {
-      setMusicState(await recommendMusic())
+      setMusicState(safeMusicState(await recommendMusic()))
     } catch {} finally {
       setLoadingMix(false)
     }

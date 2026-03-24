@@ -827,6 +827,7 @@ export interface MusicState {
   current: MusicTrack | null
   queue: MusicTrack[]
   started_by: string | null
+  history: { id: string; title: string; artist: string; thumbnail: string; played_by: string }[]
 }
 
 export async function searchMusic(q: string): Promise<MusicTrack[]> {
