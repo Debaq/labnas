@@ -1,7 +1,7 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
-import { HardDrive, Wifi, Activity, Database, Box, Music, Search, Play, Square, Loader2, X, SkipForward, Trash2, ListMusic, Plus, Sparkles } from 'lucide-react'
-import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus, searchMusic, playMusic, getCurrentMusic, stopMusic, nextMusic, removeFromQueue, recommendMusic, type MusicTrack, type MusicState } from '../api'
+import { HardDrive, Wifi, Activity, Database, Box, Music, Search, Play, Square, Loader2, X, SkipForward, Trash2, ListMusic, Plus, Sparkles, Speaker, Monitor } from 'lucide-react'
+import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus, searchMusic, playMusic, getCurrentMusic, stopMusic, nextMusic, removeFromQueue, recommendMusic, setMusicMode, type MusicTrack, type MusicState } from '../api'
 import { useAuth } from '../auth/AuthContext'
 import type { DiskInfo, SystemInfo, NetworkHost, Printer3DConfig, Printer3DStatus } from '../types'
 
@@ -76,7 +76,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
 
   // Music
-  const [musicState, setMusicState] = useState<MusicState>({ current: null, queue: [], started_by: null, history: [] })
+  const [musicState, setMusicState] = useState<MusicState>({ current: null, queue: [], started_by: null, history: [], mode: 'nas', stream_url: null })
+  const audioRef = useRef<HTMLAudioElement>(null)
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<MusicTrack[]>([])
@@ -119,7 +120,7 @@ export default function DashboardPage() {
   }, [])
 
   function safeMusicState(ms: MusicState): MusicState {
-    return { current: ms.current ?? null, queue: ms.queue ?? [], started_by: ms.started_by ?? null, history: ms.history ?? [] }
+    return { current: ms.current ?? null, queue: ms.queue ?? [], started_by: ms.started_by ?? null, history: ms.history ?? [], mode: ms.mode ?? 'nas', stream_url: ms.stream_url ?? null }
   }
 
   // Poll music state every 5s
@@ -130,6 +131,38 @@ export default function DashboardPage() {
     }, 5000)
     return () => clearInterval(interval)
   }, [])
+
+  // Browser mode: sync audio + auto-next on ended
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    if (musicState.mode === 'browser' && musicState.stream_url) {
+      if (audio.src !== musicState.stream_url) {
+        audio.src = musicState.stream_url
+        audio.play().catch(() => {})
+      }
+    } else if (musicState.mode === 'nas' || !musicState.stream_url) {
+      audio.pause()
+      audio.src = ''
+    }
+  }, [musicState.stream_url, musicState.mode])
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    const onEnded = () => {
+      if (musicState.mode === 'browser') {
+        nextMusic().then(ms => setMusicState(safeMusicState(ms))).catch(() => {})
+      }
+    }
+    audio.addEventListener('ended', onEnded)
+    return () => audio.removeEventListener('ended', onEnded)
+  }, [musicState.mode])
+
+  async function handleToggleMode() {
+    const newMode = musicState.mode === 'nas' ? 'browser' : 'nas'
+    setMusicState(safeMusicState(await setMusicMode(newMode)))
+  }
 
   async function handleSearch() {
     if (!searchQuery.trim()) return
@@ -363,8 +396,21 @@ export default function DashboardPage() {
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={handleToggleMode}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-90"
+              style={{
+                backgroundColor: 'var(--bg-tertiary)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border)',
+              }}
+              title={musicState.mode === 'nas' ? 'Sonando en NAS' : 'Sonando en navegador'}
+            >
+              {musicState.mode === 'nas' ? <Speaker size={14} /> : <Monitor size={14} />}
+              {musicState.mode === 'nas' ? 'NAS' : 'PC'}
+            </button>
+            <button
               onClick={handleRecommend}
-              disabled={loadingMix || (!musicState.current && musicState.history.length === 0)}
+              disabled={loadingMix || (!musicState.current && (musicState.history?.length ?? 0) === 0)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-90"
               style={{
                 backgroundColor: loadingMix ? 'var(--bg-tertiary)' : 'var(--success)' + '20',
@@ -429,6 +475,8 @@ export default function DashboardPage() {
             No hay musica reproduciendose
           </p>
         )}
+
+        <audio ref={audioRef} style={{ display: 'none' }} />
 
         {/* Queue */}
         {musicState.queue.length > 0 && (

@@ -828,6 +828,8 @@ export interface MusicState {
   queue: MusicTrack[]
   started_by: string | null
   history: { id: string; title: string; artist: string; thumbnail: string; played_by: string }[]
+  mode: 'nas' | 'browser'
+  stream_url: string | null
 }
 
 export async function searchMusic(q: string): Promise<MusicTrack[]> {
@@ -861,6 +863,16 @@ export async function getCurrentMusic(): Promise<MusicState> {
 export async function stopMusic(): Promise<MusicState> {
   const res = await api('/api/music/stop', { method: 'POST' })
   if (!res.ok) throw new Error('Error deteniendo')
+  return res.json()
+}
+
+export async function setMusicMode(mode: 'nas' | 'browser'): Promise<MusicState> {
+  const res = await api('/api/music/mode', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  })
+  if (!res.ok) throw new Error('Error cambiando modo')
   return res.json()
 }
 
