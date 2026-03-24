@@ -16,19 +16,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Leer versión
+      - name: Extraer version del tag
         id: version
         run: |
-          VERSION=$(cat VERSION | tr -d '[:space:]')
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Setup Rust (musl estático)
+      - name: Setup Rust (musl estatico)
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl
@@ -51,7 +52,7 @@ jobs:
           npm ci
           npx vite build --emptyOutDir
 
-      - name: Build backend (release, estático)
+      - name: Build backend (release, estatico)
         working-directory: backend
         env:
           OPENSSL_STATIC: "1"
@@ -63,7 +64,7 @@ jobs:
           RELEASE_DIR="labnas"
           mkdir -p "$RELEASE_DIR"
 
-          # Binario estático
+          # Binario estatico
           cp backend/target/x86_64-unknown-linux-musl/release/labnas-backend "$RELEASE_DIR/"
 
           # Frontend
@@ -79,11 +80,16 @@ jobs:
           tar czf "$TARBALL" "$RELEASE_DIR"
           echo "tarball=$TARBALL" >> "$GITHUB_ENV"
 
-      - name: Crear Release en GitHub
-        uses: softprops/action-gh-release@v2
-        with:
-          name: LabNAS v${{ steps.version.outputs.version }}
-          tag_name: ${{ steps.version.outputs.tag }}
-          draft: false
-          generate_release_notes: true
-          files: ${{ env.tarball }}
+      - name: Subir asset al release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          # Si el release ya existe, solo subir el asset. Si no, crearlo.
+          if gh release view "$TAG" &>/dev/null; then
+            gh release upload "$TAG" "${{ env.tarball }}" --clobber
+          else
+            gh release create "$TAG" "${{ env.tarball }}" \
+              --title "LabNAS ${{ steps.version.outputs.version }}" \
+              --generate-notes
+          fi
