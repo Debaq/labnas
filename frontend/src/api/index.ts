@@ -864,6 +864,8 @@ export interface MusicState {
   volume: number
   repeat: 'off' | 'all' | 'one'
   shuffle: boolean
+  video: boolean
+  video_screen: number | null
 }
 
 export async function searchMusic(q: string): Promise<MusicTrack[]> {
@@ -956,6 +958,28 @@ export async function toggleShuffle(): Promise<MusicState> {
 
 export async function toggleRepeat(): Promise<MusicState> {
   const res = await api('/api/music/repeat', { method: 'POST' })
+  if (!res.ok) throw new Error('Error')
+  return res.json()
+}
+
+export interface ScreenInfo {
+  index: number
+  name: string
+  connected: boolean
+}
+
+export async function getScreens(): Promise<ScreenInfo[]> {
+  const res = await api('/api/music/screens')
+  if (!res.ok) return []
+  return res.json()
+}
+
+export async function setMusicVideo(video: boolean, screen?: number): Promise<MusicState> {
+  const res = await api('/api/music/video', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ video, screen }),
+  })
   if (!res.ok) throw new Error('Error')
   return res.json()
 }

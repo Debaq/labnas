@@ -59,6 +59,10 @@ pub struct MusicState {
     pub repeat: RepeatMode,
     #[serde(default)]
     pub shuffle: bool,
+    #[serde(default)]
+    pub video: bool,
+    #[serde(default)]
+    pub video_screen: Option<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -103,6 +107,20 @@ pub struct SetVolumeRequest {
 pub struct QueueMoveRequest {
     pub from: usize,
     pub to: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetVideoRequest {
+    pub video: bool,
+    #[serde(default)]
+    pub screen: Option<u8>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ScreenInfo {
+    pub index: u8,
+    pub name: String,
+    pub connected: bool,
 }
 
 // yt-dlp JSON output
@@ -188,13 +206,36 @@ async fn resume_player(state: &AppState) {
     }
 }
 
-/// Lanza mpv en el NAS para reproducir audio (solo modo NAS)
+/// Lanza mpv en el NAS para reproducir audio/video
 async fn spawn_player(state: &AppState, video_id: &str) {
     kill_player(state).await;
 
+    let ms = state.music.lock().await;
+    let video = ms.video;
+    let screen = ms.video_screen;
+    drop(ms);
+
     let url = format!("https://www.youtube.com/watch?v={}", video_id);
-    let child = Command::new("mpv")
-        .args(["--no-video", "--really-quiet", &url])
+    let mut args: Vec<String> = vec!["--really-quiet".to_string()];
+
+    if video {
+        // Video con pantalla específica + fullscreen
+        if let Some(scr) = screen {
+            args.push(format!("--screen={}", scr));
+            args.push(format!("--fs-screen={}", scr));
+        }
+        args.push("--fs".to_string());
+    } else {
+        args.push("--no-video".to_string());
+    }
+
+    args.push(url);
+
+    let mut cmd = Command::new("mpv");
+    cmd.env("DISPLAY", ":0");
+    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let child = cmd
+        .args(&arg_refs)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -710,6 +751,68 @@ pub async fn toggle_repeat(
         RepeatMode::One => RepeatMode::Off,
     };
     Json(ms.clone())
+}
+
+/// POST /api/music/video - Activar/desactivar video + pantalla
+pub async fn set_video(
+    State(state): State<AppState>,
+    Json(req): Json<SetVideoRequest>,
+) -> Json<MusicState> {
+    let mut ms = state.music.lock().await;
+    ms.video = req.video;
+    if let Some(scr) = req.screen {
+        ms.video_screen = Some(scr);
+    }
+
+    // Si hay algo reproduciéndose, reiniciar mpv con la nueva config
+    if let Some(ref track) = ms.current {
+        if ms.mode == PlaybackMode::Nas && !ms.paused {
+            let track_id = track.id.clone();
+            drop(ms);
+            kill_player(&state).await;
+            spawn_player(&state, &track_id).await;
+            return Json(state.music.lock().await.clone());
+        }
+    }
+
+    Json(ms.clone())
+}
+
+/// GET /api/music/screens - Listar pantallas conectadas
+pub async fn list_screens() -> Json<Vec<ScreenInfo>> {
+    let mut screens = Vec::new();
+    let mut index: u8 = 0;
+
+    // Leer conectores DRM del sistema
+    let Ok(entries) = std::fs::read_dir("/sys/class/drm") else {
+        return Json(screens);
+    };
+
+    let mut connectors: Vec<(String, bool)> = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        // Filtrar solo conectores (contienen "-" y no son solo "cardN")
+        if !name.contains('-') { continue; }
+        // Leer status
+        let status_path = entry.path().join("status");
+        let connected = std::fs::read_to_string(&status_path)
+            .map(|s| s.trim() == "connected")
+            .unwrap_or(false);
+        // Extraer nombre del conector (ej: "card1-DP-3" -> "DP-3")
+        let connector_name = name.splitn(2, '-').nth(1).unwrap_or(&name).to_string();
+        connectors.push((connector_name, connected));
+    }
+
+    connectors.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for (name, connected) in connectors {
+        if connected {
+            screens.push(ScreenInfo { index, name, connected });
+            index += 1;
+        }
+    }
+
+    Json(screens)
 }
 
 /// POST /api/music/recommend - Mix basado en canción actual/historial

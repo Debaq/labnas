@@ -2,13 +2,13 @@ import { useEffect, useState, useRef } from 'react'
 import {
   Music, Search, Play, Pause, Square, Loader2, X, SkipForward, SkipBack,
   Trash2, ListMusic, Plus, Sparkles, Speaker, Monitor, MoreVertical, Volume2,
-  Shuffle, Repeat, Repeat1, ChevronUp, ChevronDown, ChevronRight,
+  Shuffle, Repeat, Repeat1, ChevronUp, ChevronDown, ChevronRight, Tv, TvMinimalPlay,
 } from 'lucide-react'
 import {
   searchMusic, playMusic, getCurrentMusic, stopMusic, pauseMusic, previousMusic,
   nextMusic, removeFromQueue, playFromQueue, moveInQueue, toggleShuffle, toggleRepeat,
-  recommendMusic, setMusicMode, setMusicVolume,
-  type MusicTrack, type MusicState,
+  recommendMusic, setMusicMode, setMusicVolume, setMusicVideo, getScreens,
+  type MusicTrack, type MusicState, type ScreenInfo,
 } from '../api'
 
 function safeMusicState(ms: MusicState): MusicState {
@@ -16,6 +16,7 @@ function safeMusicState(ms: MusicState): MusicState {
     current: ms.current ?? null, queue: ms.queue ?? [], started_by: ms.started_by ?? null,
     history: ms.history ?? [], mode: ms.mode ?? 'nas', stream_url: ms.stream_url ?? null,
     paused: ms.paused ?? false, volume: ms.volume ?? 80, repeat: ms.repeat ?? 'off', shuffle: ms.shuffle ?? false,
+    video: ms.video ?? false, video_screen: ms.video_screen ?? null,
   }
 }
 
@@ -30,8 +31,10 @@ export default function MusicPanel() {
   const [musicState, setMusicState] = useState<MusicState>({
     current: null, queue: [], started_by: null, history: [], mode: 'nas',
     stream_url: null, paused: false, volume: 80, repeat: 'off', shuffle: false,
+    video: false, video_screen: null,
   })
   const [showMenu, setShowMenu] = useState(false)
+  const [screens, setScreens] = useState<ScreenInfo[]>([])
   const audioRef = useRef<HTMLAudioElement>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<MusicTrack[]>([])
@@ -122,6 +125,14 @@ export default function MusicPanel() {
   async function handleToggleMode() {
     const newMode = musicState.mode === 'nas' ? 'browser' : 'nas'
     setMusicState(safeMusicState(await setMusicMode(newMode)))
+  }
+  async function handleToggleVideo(screen?: number) {
+    const newVideo = screen !== undefined ? true : !musicState.video
+    setMusicState(safeMusicState(await setMusicVideo(newVideo, screen)))
+  }
+  async function handleOpenMenu() {
+    setShowMenu(!showMenu)
+    if (!showMenu) { getScreens().then(setScreens).catch(() => {}) }
   }
   async function handleRecommend() {
     setLoadingMix(true)
@@ -289,13 +300,13 @@ export default function MusicPanel() {
                   <Square size={12} />
                 </button>
                 <div className="relative">
-                  <button onClick={() => setShowMenu(!showMenu)} className="p-1.5 rounded-lg hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+                  <button onClick={handleOpenMenu} className="p-1.5 rounded-lg hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
                     <MoreVertical size={14} />
                   </button>
                   {showMenu && (
                     <>
                       <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
-                      <div className="absolute right-0 bottom-full mb-1 z-20 rounded-lg p-2 min-w-[160px]"
+                      <div className="absolute right-0 bottom-full mb-1 z-20 rounded-lg p-2 min-w-[190px] space-y-1"
                         style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
                         <button onClick={() => { handleToggleMode(); setShowMenu(false) }}
                           className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-[11px] font-medium hover:opacity-80"
@@ -303,6 +314,32 @@ export default function MusicPanel() {
                           {musicState.mode === 'nas' ? <Speaker size={12} /> : <Monitor size={12} />}
                           Modo: {musicState.mode === 'nas' ? 'NAS' : 'PC'}
                         </button>
+                        {musicState.mode === 'nas' && (
+                          <>
+                            <div className="px-3 py-1">
+                              <span className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>Video en pantalla</span>
+                            </div>
+                            <button onClick={() => { handleToggleVideo(); setShowMenu(false) }}
+                              className="flex items-center gap-2 w-full px-3 py-1.5 rounded-lg text-[11px] font-medium hover:opacity-80"
+                              style={{ backgroundColor: musicState.video ? 'var(--accent)' + '20' : 'var(--bg-tertiary)', color: musicState.video ? 'var(--accent)' : 'var(--text-primary)' }}>
+                              <Tv size={12} />
+                              {musicState.video ? 'Desactivar video' : 'Solo audio'}
+                            </button>
+                            {screens.map(scr => (
+                              <button key={scr.index}
+                                onClick={() => { handleToggleVideo(scr.index); setShowMenu(false) }}
+                                className="flex items-center gap-2 w-full px-3 py-1.5 rounded-lg text-[11px] font-medium hover:opacity-80"
+                                style={{
+                                  backgroundColor: musicState.video && musicState.video_screen === scr.index ? 'var(--accent)' + '20' : 'var(--bg-tertiary)',
+                                  color: musicState.video && musicState.video_screen === scr.index ? 'var(--accent)' : 'var(--text-primary)',
+                                }}>
+                                <TvMinimalPlay size={12} />
+                                {scr.name}
+                                {musicState.video && musicState.video_screen === scr.index && ' ✓'}
+                              </button>
+                            ))}
+                          </>
+                        )}
                       </div>
                     </>
                   )}
