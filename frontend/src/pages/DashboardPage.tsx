@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import type { ReactNode } from 'react'
 import { HardDrive, Wifi, Activity, Database, Box, Music, Search, Play, Square, Loader2, X, SkipForward, Trash2, ListMusic, Plus, Sparkles } from 'lucide-react'
 import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus, searchMusic, playMusic, getCurrentMusic, stopMusic, nextMusic, removeFromQueue, recommendMusic, type MusicTrack, type MusicState } from '../api'
@@ -83,7 +83,6 @@ export default function DashboardPage() {
   const [searching, setSearching] = useState(false)
   const [loadingTrack, setLoadingTrack] = useState(false)
   const [loadingMix, setLoadingMix] = useState(false)
-  const audioRef = useRef<HTMLAudioElement>(null)
 
   useEffect(() => {
     async function loadData() {
@@ -132,32 +131,6 @@ export default function DashboardPage() {
     return () => clearInterval(interval)
   }, [])
 
-  // Sync audio element
-  useEffect(() => {
-    const audio = audioRef.current
-    if (!audio) return
-    if (musicState.current?.stream_url) {
-      if (audio.src !== musicState.current.stream_url) {
-        audio.src = musicState.current.stream_url
-        audio.play().catch(() => {})
-      }
-    } else {
-      audio.pause()
-      audio.src = ''
-    }
-  }, [musicState.current?.stream_url])
-
-  // Auto-next cuando termina la canción
-  useEffect(() => {
-    const audio = audioRef.current
-    if (!audio) return
-    const onEnded = () => {
-      nextMusic().then(ms => setMusicState(safeMusicState(ms))).catch(() => {})
-    }
-    audio.addEventListener('ended', onEnded)
-    return () => audio.removeEventListener('ended', onEnded)
-  }, [])
-
   async function handleSearch() {
     if (!searchQuery.trim()) return
     setSearching(true)
@@ -178,9 +151,7 @@ export default function DashboardPage() {
   }
 
   async function handleStop() {
-    const ms = await stopMusic()
-    setMusicState(safeMusicState(ms))
-    if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = '' }
+    setMusicState(safeMusicState(await stopMusic()))
   }
 
   async function handleNext() {
@@ -458,8 +429,6 @@ export default function DashboardPage() {
             No hay musica reproduciendose
           </p>
         )}
-
-        <audio ref={audioRef} />
 
         {/* Queue */}
         {musicState.queue.length > 0 && (

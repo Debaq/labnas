@@ -17,7 +17,6 @@ pub struct MusicTrack {
     pub artist: String,
     pub thumbnail: String,
     pub duration: u32,
-    pub stream_url: Option<String>,
     #[serde(default)]
     pub added_by: Option<String>,
 }
@@ -56,7 +55,7 @@ pub struct QueueRemoveRequest {
     pub index: usize,
 }
 
-// yt-dlp JSON output fields
+// yt-dlp JSON output
 #[derive(Debug, Deserialize)]
 struct YtDlpEntry {
     #[serde(default)]
@@ -98,7 +97,10 @@ fn extract_track_info(entry: &YtDlpEntry) -> (String, String) {
     (thumb, artist)
 }
 
-fn extract_username(sessions: &std::collections::HashMap<String, crate::state::SessionInfo>, headers: &axum::http::HeaderMap) -> String {
+fn extract_username(
+    sessions: &std::collections::HashMap<String, crate::state::SessionInfo>,
+    headers: &axum::http::HeaderMap,
+) -> String {
     headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -107,32 +109,72 @@ fn extract_username(sessions: &std::collections::HashMap<String, crate::state::S
         .unwrap_or_else(|| "alguien".to_string())
 }
 
-async fn resolve_stream(id: &str) -> Result<(String, YtDlpEntry), (StatusCode, String)> {
-    let video_url = format!("https://www.youtube.com/watch?v={}", id);
+/// Mata el proceso mpv actual si existe
+async fn kill_player(state: &AppState) {
+    let mut proc = state.music_process.lock().await;
+    if let Some(ref mut child) = *proc {
+        let _ = child.kill().await;
+    }
+    *proc = None;
+}
 
+/// Lanza mpv en el NAS para reproducir audio
+async fn spawn_player(state: &AppState, video_id: &str) {
+    kill_player(state).await;
+
+    let url = format!("https://www.youtube.com/watch?v={}", video_id);
+    // mpv --no-video usa yt-dlp internamente para resolver el stream
+    let child = Command::new("mpv")
+        .args(["--no-video", "--really-quiet", &url])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+
+    if let Ok(child) = child {
+        *state.music_process.lock().await = Some(child);
+    }
+}
+
+fn add_to_history(ms: &mut MusicState, track: &MusicTrack, played_by: &str) {
+    ms.history.push(HistoryEntry {
+        id: track.id.clone(),
+        title: track.title.clone(),
+        artist: track.artist.clone(),
+        thumbnail: track.thumbnail.clone(),
+        played_by: played_by.to_string(),
+    });
+    if ms.history.len() > MAX_HISTORY {
+        ms.history.remove(0);
+    }
+}
+
+async fn fetch_track_info(id: &str) -> Result<MusicTrack, (StatusCode, String)> {
     let output = Command::new("yt-dlp")
-        .args(["-f", "bestaudio", "-g", "--dump-json", "--no-warnings", "--no-playlist", &video_url])
+        .args([
+            "--flat-playlist", "--dump-json", "--no-warnings", "--no-playlist",
+            &format!("https://www.youtube.com/watch?v={}", id),
+        ])
         .output()
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error yt-dlp: {}", e)))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err((StatusCode::BAD_GATEWAY, format!("yt-dlp: {}", stderr)));
-    }
-
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let lines: Vec<&str> = stdout.lines().collect();
+    let entry: YtDlpEntry = stdout
+        .lines()
+        .next()
+        .and_then(|line| serde_json::from_str(line).ok())
+        .ok_or((StatusCode::NOT_FOUND, "No se encontro info del video".to_string()))?;
 
-    if lines.len() < 2 {
-        return Err((StatusCode::NOT_FOUND, "No se pudo obtener audio".to_string()));
-    }
-
-    let audio_url = lines[0].to_string();
-    let info: YtDlpEntry = serde_json::from_str(lines[1])
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Error parseando info".to_string()))?;
-
-    Ok((audio_url, info))
+    let (thumb, artist) = extract_track_info(&entry);
+    Ok(MusicTrack {
+        id: entry.id,
+        title: entry.title,
+        artist,
+        thumbnail: thumb,
+        duration: entry.duration.unwrap_or(0.0) as u32,
+        added_by: None,
+    })
 }
 
 // --- Handlers ---
@@ -167,7 +209,6 @@ pub async fn search(
                 artist,
                 thumbnail: thumb,
                 duration: entry.duration.unwrap_or(0.0) as u32,
-                stream_url: None,
                 added_by: None,
             })
         })
@@ -176,7 +217,7 @@ pub async fn search(
     Ok(Json(tracks))
 }
 
-/// POST /api/music/play - Reproduce inmediatamente (si no hay nada) o agrega a la cola
+/// POST /api/music/play - Reproduce en el NAS o agrega a la cola
 pub async fn play(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -190,72 +231,37 @@ pub async fn play(
     let mut ms = state.music.lock().await;
 
     if ms.current.is_some() {
-        // Ya hay algo reproduciéndose → agregar a la cola (sin resolver stream aún)
-        // Necesitamos info básica, la obtenemos con flat-playlist
-        let output = Command::new("yt-dlp")
-            .args(["--flat-playlist", "--dump-json", "--no-warnings", "--no-playlist",
-                   &format!("https://www.youtube.com/watch?v={}", req.id)])
-            .output()
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error yt-dlp: {}", e)))?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        if let Some(line) = stdout.lines().next() {
-            if let Ok(entry) = serde_json::from_str::<YtDlpEntry>(line) {
-                let (thumb, artist) = extract_track_info(&entry);
-                ms.queue.push(MusicTrack {
-                    id: req.id,
-                    title: entry.title,
-                    artist,
-                    thumbnail: thumb,
-                    duration: entry.duration.unwrap_or(0.0) as u32,
-                    stream_url: None,
-                    added_by: Some(username),
-                });
-            }
-        }
+        // Ya hay algo → agregar a la cola
+        let mut track = fetch_track_info(&req.id).await?;
+        track.added_by = Some(username);
+        ms.queue.push(track);
         return Ok(Json(ms.clone()));
     }
 
-    // Nada reproduciéndose → resolver stream y reproducir
-    drop(ms);
-    let (audio_url, info) = resolve_stream(&req.id).await?;
-    let (thumb, artist) = extract_track_info(&info);
+    // Nada reproduciéndose → reproducir ahora
+    let mut track = fetch_track_info(&req.id).await?;
+    track.added_by = Some(username.clone());
 
-    let track = MusicTrack {
-        id: req.id,
-        title: info.title.clone(),
-        artist,
-        thumbnail: thumb,
-        duration: info.duration.unwrap_or(0.0) as u32,
-        stream_url: Some(audio_url),
-        added_by: Some(username.clone()),
-    };
-
-    let mut ms = state.music.lock().await;
-    // Guardar en historial
-    ms.history.push(HistoryEntry {
-        id: track.id.clone(),
-        title: track.title.clone(),
-        artist: track.artist.clone(),
-        thumbnail: track.thumbnail.clone(),
-        played_by: username.clone(),
-    });
-    if ms.history.len() > MAX_HISTORY {
-        ms.history.remove(0);
-    }
-    ms.current = Some(track);
+    add_to_history(&mut ms, &track, &username);
+    ms.current = Some(track.clone());
     ms.started_by = Some(username.clone());
+    drop(ms);
 
-    state.log_activity("musica", &format!("Reproduciendo: {}", info.title), &username).await;
+    // Lanzar mpv en el NAS
+    spawn_player(&state, &req.id).await;
 
+    state.log_activity("musica", &format!("Reproduciendo: {}", track.title), &username).await;
+
+    let ms = state.music.lock().await;
     Ok(Json(ms.clone()))
 }
 
-/// POST /api/music/next - Pasar a la siguiente canción de la cola
+/// POST /api/music/next - Siguiente canción
 pub async fn next(
     State(state): State<AppState>,
 ) -> Result<Json<MusicState>, (StatusCode, String)> {
+    kill_player(&state).await;
+
     let mut ms = state.music.lock().await;
 
     if ms.queue.is_empty() {
@@ -266,41 +272,20 @@ pub async fn next(
 
     let next_track = ms.queue.remove(0);
     let next_id = next_track.id.clone();
-    let next_by = next_track.added_by.clone();
+    let next_by = next_track.added_by.clone().unwrap_or_default();
+
+    add_to_history(&mut ms, &next_track, &next_by);
+    ms.current = Some(next_track);
+    ms.started_by = Some(next_by);
     drop(ms);
 
-    // Resolver stream de la siguiente
-    let (audio_url, info) = resolve_stream(&next_id).await?;
-    let (thumb, artist) = extract_track_info(&info);
+    spawn_player(&state, &next_id).await;
 
-    let track = MusicTrack {
-        id: next_id,
-        title: info.title,
-        artist,
-        thumbnail: thumb,
-        duration: info.duration.unwrap_or(0.0) as u32,
-        stream_url: Some(audio_url),
-        added_by: next_by.clone(),
-    };
-
-    let mut ms = state.music.lock().await;
-    ms.history.push(HistoryEntry {
-        id: track.id.clone(),
-        title: track.title.clone(),
-        artist: track.artist.clone(),
-        thumbnail: track.thumbnail.clone(),
-        played_by: next_by.clone().unwrap_or_default(),
-    });
-    if ms.history.len() > MAX_HISTORY {
-        ms.history.remove(0);
-    }
-    ms.current = Some(track);
-    ms.started_by = next_by;
-
+    let ms = state.music.lock().await;
     Ok(Json(ms.clone()))
 }
 
-/// DELETE /api/music/queue - Quitar un track de la cola por índice
+/// DELETE /api/music/queue - Quitar de la cola
 pub async fn queue_remove(
     State(state): State<AppState>,
     Json(req): Json<QueueRemoveRequest>,
@@ -316,49 +301,75 @@ pub async fn queue_remove(
 pub async fn current(
     State(state): State<AppState>,
 ) -> Json<MusicState> {
-    Json(state.music.lock().await.clone())
-}
+    // Verificar si mpv sigue corriendo; si terminó, pasar a la siguiente
+    let mut proc = state.music_process.lock().await;
+    let finished = if let Some(ref mut child) = *proc {
+        match child.try_wait() {
+            Ok(Some(_)) => true,  // terminó
+            _ => false,
+        }
+    } else {
+        false
+    };
+    if finished {
+        *proc = None;
+    }
+    drop(proc);
 
-/// POST /api/music/stop
-pub async fn stop(
-    State(state): State<AppState>,
-) -> Json<MusicState> {
-    let mut ms = state.music.lock().await;
-    let history = ms.history.clone();
-    *ms = MusicState::default();
-    ms.history = history; // preservar historial
-    Json(ms.clone())
+    if finished {
+        // Auto-next
+        let mut ms = state.music.lock().await;
+        if !ms.queue.is_empty() {
+            let next_track = ms.queue.remove(0);
+            let next_id = next_track.id.clone();
+            let next_by = next_track.added_by.clone().unwrap_or_default();
+            add_to_history(&mut ms, &next_track, &next_by);
+            ms.current = Some(next_track);
+            ms.started_by = Some(next_by);
+            drop(ms);
+            spawn_player(&state, &next_id).await;
+        } else {
+            ms.current = None;
+            ms.started_by = None;
+        }
+    }
+
+    Json(state.music.lock().await.clone())
 }
 
 /// GET /api/music/history
 pub async fn history(
     State(state): State<AppState>,
 ) -> Json<Vec<HistoryEntry>> {
-    let ms = state.music.lock().await;
-    Json(ms.history.clone())
+    Json(state.music.lock().await.history.clone())
 }
 
-/// POST /api/music/recommend - Llenar cola con mix basado en la canción actual o última del historial
+/// POST /api/music/stop
+pub async fn stop(
+    State(state): State<AppState>,
+) -> Json<MusicState> {
+    kill_player(&state).await;
+    let mut ms = state.music.lock().await;
+    let history = ms.history.clone();
+    *ms = MusicState::default();
+    ms.history = history;
+    Json(ms.clone())
+}
+
+/// POST /api/music/recommend - Mix basado en canción actual/historial
 pub async fn recommend(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Result<Json<MusicState>, (StatusCode, String)> {
     let ms = state.music.lock().await;
 
-    // Elegir semilla: canción actual, o la última del historial
     let seed_id = ms.current.as_ref().map(|t| t.id.clone())
         .or_else(|| ms.history.last().map(|h| h.id.clone()))
-        .ok_or((StatusCode::BAD_REQUEST, "No hay canciones para recomendar. Reproduce algo primero.".to_string()))?;
+        .ok_or((StatusCode::BAD_REQUEST, "Reproduce algo primero".to_string()))?;
 
-    // IDs ya en cola o reproduciéndose para no repetir
     let mut existing: std::collections::HashSet<String> = ms.queue.iter().map(|t| t.id.clone()).collect();
-    if let Some(ref c) = ms.current {
-        existing.insert(c.id.clone());
-    }
-    // También excluir las últimas 10 del historial
-    for h in ms.history.iter().rev().take(10) {
-        existing.insert(h.id.clone());
-    }
+    if let Some(ref c) = ms.current { existing.insert(c.id.clone()); }
+    for h in ms.history.iter().rev().take(10) { existing.insert(h.id.clone()); }
     drop(ms);
 
     let username = {
@@ -366,7 +377,6 @@ pub async fn recommend(
         extract_username(&sessions, &headers)
     };
 
-    // YouTube Mix: playlist auto-generada basada en un video
     let mix_url = format!("https://www.youtube.com/watch?v={}&list=RD{}", seed_id, seed_id);
 
     let output = Command::new("yt-dlp")
@@ -380,9 +390,7 @@ pub async fn recommend(
         .lines()
         .filter_map(|line| {
             let entry: YtDlpEntry = serde_json::from_str(line).ok()?;
-            if entry.id.is_empty() || existing.contains(&entry.id) {
-                return None;
-            }
+            if entry.id.is_empty() || existing.contains(&entry.id) { return None; }
             let (thumb, artist) = extract_track_info(&entry);
             Some(MusicTrack {
                 id: entry.id,
@@ -390,7 +398,6 @@ pub async fn recommend(
                 artist,
                 thumbnail: thumb,
                 duration: entry.duration.unwrap_or(0.0) as u32,
-                stream_url: None,
                 added_by: Some(format!("Mix ({})", username)),
             })
         })
@@ -405,7 +412,6 @@ pub async fn recommend(
     let added = recommended.len();
     ms.queue.extend(recommended);
 
-    state.log_activity("musica", &format!("Mix: {} canciones recomendadas agregadas", added), &username).await;
-
+    state.log_activity("musica", &format!("Mix: {} recomendaciones", added), &username).await;
     Ok(Json(ms.clone()))
 }

@@ -39,6 +39,7 @@ async fn main() {
         email_inbox: Arc::new(Mutex::new(std::collections::HashMap::new())),
         mdns_service: Arc::new(Mutex::new(None)),
         music: Arc::new(Mutex::new(handlers::music::MusicState::default())),
+        music_process: Arc::new(Mutex::new(None)),
     };
 
     // Start mDNS if enabled

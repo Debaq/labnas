@@ -43,6 +43,7 @@ pub struct AppState {
     pub email_inbox: Arc<Mutex<HashMap<String, Vec<EmailMessage>>>>,
     pub mdns_service: Arc<Mutex<Option<mdns_sd::ServiceDaemon>>>,
     pub music: Arc<Mutex<MusicState>>,
+    pub music_process: Arc<Mutex<Option<tokio::process::Child>>>,
 }
 
 pub struct TgTerminal {
