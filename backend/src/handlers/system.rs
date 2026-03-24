@@ -65,26 +65,27 @@ pub async fn storage_info() -> Result<Json<Vec<DiskInfo>>, (StatusCode, String)>
     let disks_info = tokio::task::spawn_blocking(|| {
         let disks = Disks::new_with_refreshed_list();
         let mut result = Vec::new();
+        let mut seen_devices = std::collections::HashSet::new();
+
         for disk in disks.list() {
             let fs = String::from_utf8_lossy(disk.file_system().as_encoded_bytes()).to_string();
             let mount = disk.mount_point().to_string_lossy().to_string();
+            let name = disk.name().to_string_lossy().to_string();
 
-            // Filtrar filesystems virtuales y montajes del sistema
-            if SKIP_FS.iter().any(|s| fs == *s) {
-                continue;
-            }
-            if SKIP_MOUNTS.iter().any(|s| mount.starts_with(s)) {
-                continue;
-            }
-            // Filtrar discos sin espacio (pseudofs)
+            if SKIP_FS.iter().any(|s| fs == *s) { continue; }
+            if SKIP_MOUNTS.iter().any(|s| mount.starts_with(s)) { continue; }
+
             let total = disk.total_space();
-            if total == 0 {
-                continue;
-            }
+            if total == 0 { continue; }
+
+            // Deduplicar: mismo dispositivo (btrfs subvolúmenes, etc.)
+            // Usar nombre del dispositivo como clave; preferir montaje en /
+            if seen_devices.contains(&name) { continue; }
+            seen_devices.insert(name.clone());
 
             let available = disk.available_space();
             result.push(DiskInfo {
-                name: disk.name().to_string_lossy().to_string(),
+                name,
                 mount_point: mount,
                 total_space: total,
                 available_space: available,
