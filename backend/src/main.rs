@@ -107,6 +107,8 @@ async fn main() {
         .route("/api/music/next", post(handlers::music::next))
         .route("/api/music/current", get(handlers::music::current))
         .route("/api/music/stop", post(handlers::music::stop))
+        .route("/api/music/pause", post(handlers::music::pause))
+        .route("/api/music/previous", post(handlers::music::previous))
         .route("/api/music/queue", delete(handlers::music::queue_remove))
         .route("/api/music/history", get(handlers::music::history))
         .route("/api/music/recommend", post(handlers::music::recommend))

@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
-import { HardDrive, Wifi, Activity, Database, Box, Music, Search, Play, Square, Loader2, X, SkipForward, Trash2, ListMusic, Plus, Sparkles, Speaker, Monitor, ExternalLink } from 'lucide-react'
-import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus, searchMusic, playMusic, getCurrentMusic, stopMusic, nextMusic, removeFromQueue, recommendMusic, setMusicMode, getServices, type MusicTrack, type MusicState, type LabService } from '../api'
+import { HardDrive, Wifi, Activity, Database, Box, Music, Search, Play, Pause, Square, Loader2, X, SkipForward, SkipBack, Trash2, ListMusic, Plus, Sparkles, Speaker, Monitor, ExternalLink } from 'lucide-react'
+import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus, searchMusic, playMusic, getCurrentMusic, stopMusic, pauseMusic, previousMusic, nextMusic, removeFromQueue, recommendMusic, setMusicMode, getServices, type MusicTrack, type MusicState, type LabService } from '../api'
 import { useAuth } from '../auth/AuthContext'
 import type { DiskInfo, SystemInfo, NetworkHost, Printer3DConfig, Printer3DStatus } from '../types'
 
@@ -77,7 +77,7 @@ export default function DashboardPage() {
   const [services, setServices] = useState<LabService[]>([])
 
   // Music
-  const [musicState, setMusicState] = useState<MusicState>({ current: null, queue: [], started_by: null, history: [], mode: 'nas', stream_url: null })
+  const [musicState, setMusicState] = useState<MusicState>({ current: null, queue: [], started_by: null, history: [], mode: 'nas', stream_url: null, paused: false })
   const audioRef = useRef<HTMLAudioElement>(null)
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -126,7 +126,7 @@ export default function DashboardPage() {
   }, [])
 
   function safeMusicState(ms: MusicState): MusicState {
-    return { current: ms.current ?? null, queue: ms.queue ?? [], started_by: ms.started_by ?? null, history: ms.history ?? [], mode: ms.mode ?? 'nas', stream_url: ms.stream_url ?? null }
+    return { current: ms.current ?? null, queue: ms.queue ?? [], started_by: ms.started_by ?? null, history: ms.history ?? [], mode: ms.mode ?? 'nas', stream_url: ms.stream_url ?? null, paused: ms.paused ?? false }
   }
 
   // Poll music state every 5s
@@ -191,6 +191,22 @@ export default function DashboardPage() {
 
   async function handleStop() {
     setMusicState(safeMusicState(await stopMusic()))
+  }
+
+  async function handlePause() {
+    const ms = safeMusicState(await pauseMusic())
+    setMusicState(ms)
+    const audio = audioRef.current
+    if (audio && musicState.mode === 'browser') {
+      if (ms.paused) audio.pause()
+      else audio.play().catch(() => {})
+    }
+  }
+
+  async function handlePrevious() {
+    try {
+      setMusicState(safeMusicState(await previousMusic()))
+    } catch {}
   }
 
   async function handleNext() {
@@ -499,6 +515,20 @@ export default function DashboardPage() {
               </p>
             </div>
             <div className="flex items-center gap-1.5">
+              {musicState.history.length >= 2 && (
+                <button onClick={handlePrevious}
+                  className="p-2 rounded-lg transition-all hover:opacity-80"
+                  style={{ backgroundColor: 'var(--accent)' + '20', color: 'var(--accent)' }}
+                  title="Anterior">
+                  <SkipBack size={16} />
+                </button>
+              )}
+              <button onClick={handlePause}
+                className="p-2 rounded-lg transition-all hover:opacity-80"
+                style={{ backgroundColor: 'var(--accent)' + '20', color: 'var(--accent)' }}
+                title={musicState.paused ? 'Reanudar' : 'Pausar'}>
+                {musicState.paused ? <Play size={16} /> : <Pause size={16} />}
+              </button>
               {musicState.queue.length > 0 && (
                 <button onClick={handleNext}
                   className="p-2 rounded-lg transition-all hover:opacity-80"

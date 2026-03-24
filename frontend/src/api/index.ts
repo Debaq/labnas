@@ -860,6 +860,7 @@ export interface MusicState {
   history: { id: string; title: string; artist: string; thumbnail: string; played_by: string }[]
   mode: 'nas' | 'browser'
   stream_url: string | null
+  paused: boolean
 }
 
 export async function searchMusic(q: string): Promise<MusicTrack[]> {
@@ -893,6 +894,18 @@ export async function getCurrentMusic(): Promise<MusicState> {
 export async function stopMusic(): Promise<MusicState> {
   const res = await api('/api/music/stop', { method: 'POST' })
   if (!res.ok) throw new Error('Error deteniendo')
+  return res.json()
+}
+
+export async function pauseMusic(): Promise<MusicState> {
+  const res = await api('/api/music/pause', { method: 'POST' })
+  if (!res.ok) throw new Error('Error pausando')
+  return res.json()
+}
+
+export async function previousMusic(): Promise<MusicState> {
+  const res = await api('/api/music/previous', { method: 'POST' })
+  if (!res.ok) { const t = await res.text(); throw new Error(t) }
   return res.json()
 }
 
