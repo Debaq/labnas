@@ -49,21 +49,47 @@ pub async fn health_handler(State(state): State<AppState>) -> Json<HealthRespons
     })
 }
 
+/// Filesystems virtuales/irrelevantes que se filtran
+const SKIP_FS: &[&str] = &[
+    "tmpfs", "devtmpfs", "squashfs", "overlay", "efivarfs",
+    "proc", "sysfs", "devpts", "securityfs", "cgroup", "cgroup2",
+    "pstore", "bpf", "tracefs", "debugfs", "hugetlbfs", "mqueue",
+    "configfs", "fusectl", "ramfs", "fuse.portal",
+];
+
+const SKIP_MOUNTS: &[&str] = &[
+    "/boot", "/boot/efi", "/snap", "/run", "/dev",
+];
+
 pub async fn storage_info() -> Result<Json<Vec<DiskInfo>>, (StatusCode, String)> {
     let disks_info = tokio::task::spawn_blocking(|| {
         let disks = Disks::new_with_refreshed_list();
         let mut result = Vec::new();
         for disk in disks.list() {
+            let fs = String::from_utf8_lossy(disk.file_system().as_encoded_bytes()).to_string();
+            let mount = disk.mount_point().to_string_lossy().to_string();
+
+            // Filtrar filesystems virtuales y montajes del sistema
+            if SKIP_FS.iter().any(|s| fs == *s) {
+                continue;
+            }
+            if SKIP_MOUNTS.iter().any(|s| mount.starts_with(s)) {
+                continue;
+            }
+            // Filtrar discos sin espacio (pseudofs)
             let total = disk.total_space();
+            if total == 0 {
+                continue;
+            }
+
             let available = disk.available_space();
             result.push(DiskInfo {
                 name: disk.name().to_string_lossy().to_string(),
-                mount_point: disk.mount_point().to_string_lossy().to_string(),
+                mount_point: mount,
                 total_space: total,
                 available_space: available,
                 used_space: total.saturating_sub(available),
-                file_system: String::from_utf8_lossy(disk.file_system().as_encoded_bytes())
-                    .to_string(),
+                file_system: fs,
                 is_removable: disk.is_removable(),
             });
         }

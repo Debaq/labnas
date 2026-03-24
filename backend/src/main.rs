@@ -193,7 +193,9 @@ async fn main() {
     tokio::spawn(handlers::email::email_check_loop(state.clone()));
     tokio::spawn(handlers::notifications::daily_notification_loop(state.clone()));
     tokio::spawn(handlers::printers3d::printer_monitor_loop(state.clone()));
-    tokio::spawn(handlers::system::update_check_loop(state));
+    tokio::spawn(handlers::system::update_check_loop(state.clone()));
+    // Escaneo de red al inicio + periódico cada 5 min
+    tokio::spawn(handlers::network::network_scan_loop(state));
 
     // Static files
     let exe_dir = std::env::current_exe()

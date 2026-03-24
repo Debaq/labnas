@@ -85,38 +85,41 @@ export default function DashboardPage() {
   const [loadingTrack, setLoadingTrack] = useState(false)
   const [loadingMix, setLoadingMix] = useState(false)
 
-  useEffect(() => {
-    async function loadData() {
-      setLoading(true)
-      try {
-        const [disksData, hostsData, healthData, sysInfoData, printers3dData] = await Promise.allSettled([
-          fetchDisks(),
-          fetchHosts(),
-          fetchHealth(),
-          fetchSystemInfo(),
-          fetchPrinters3D(),
-        ])
-        if (disksData.status === 'fulfilled') setDisks(disksData.value)
-        if (hostsData.status === 'fulfilled') setHosts(hostsData.value)
-        if (healthData.status === 'fulfilled') setHealth(healthData.value)
-        if (sysInfoData.status === 'fulfilled') setSystemInfo(sysInfoData.value)
-        if (printers3dData.status === 'fulfilled') {
-          setPrinters3d(printers3dData.value)
-          // Fetch statuses
-          const statusResults = await Promise.allSettled(
-            printers3dData.value.map((p) => fetchPrinter3DStatus(p.id))
-          )
-          setPrinterStatuses(
-            statusResults
-              .filter((r): r is PromiseFulfilledResult<Printer3DStatus> => r.status === 'fulfilled')
-              .map((r) => r.value)
-          )
-        }
-      } finally {
-        setLoading(false)
+  async function loadData(initial = false) {
+    if (initial) setLoading(true)
+    try {
+      const [disksData, hostsData, healthData, sysInfoData, printers3dData] = await Promise.allSettled([
+        fetchDisks(),
+        fetchHosts(),
+        fetchHealth(),
+        fetchSystemInfo(),
+        fetchPrinters3D(),
+      ])
+      if (disksData.status === 'fulfilled') setDisks(disksData.value)
+      if (hostsData.status === 'fulfilled') setHosts(hostsData.value)
+      if (healthData.status === 'fulfilled') setHealth(healthData.value)
+      if (sysInfoData.status === 'fulfilled') setSystemInfo(sysInfoData.value)
+      if (printers3dData.status === 'fulfilled') {
+        setPrinters3d(printers3dData.value)
+        const statusResults = await Promise.allSettled(
+          printers3dData.value.map((p) => fetchPrinter3DStatus(p.id))
+        )
+        setPrinterStatuses(
+          statusResults
+            .filter((r): r is PromiseFulfilledResult<Printer3DStatus> => r.status === 'fulfilled')
+            .map((r) => r.value)
+        )
       }
+    } finally {
+      if (initial) setLoading(false)
     }
-    loadData()
+  }
+
+  useEffect(() => {
+    loadData(true)
+    // Refrescar dashboard cada 30 segundos
+    const interval = setInterval(() => loadData(), 30000)
+    return () => clearInterval(interval)
   }, [])
 
   function safeMusicState(ms: MusicState): MusicState {
