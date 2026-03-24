@@ -2,6 +2,7 @@ pub mod auth;
 pub mod email;
 pub mod extras;
 pub mod files;
+pub mod music;
 pub mod network;
 pub mod notifications;
 pub mod printers3d;

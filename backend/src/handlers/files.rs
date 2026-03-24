@@ -7,8 +7,10 @@ use axum::{
 use chrono::{DateTime, Utc};
 use std::path::PathBuf;
 
+use crate::config::resolve_home;
 use crate::models::files::{FileEntry, MkdirRequest, PathQuery, QuickAccess};
 use crate::state::AppState;
+
 
 const PROTECTED_PATHS: &[&str] = &[
     "/", "/bin", "/sbin", "/usr", "/etc", "/boot", "/dev", "/proc", "/sys", "/lib", "/lib64",
@@ -68,6 +70,9 @@ pub async fn list_files(
             Err(_) => continue,
         };
         let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
         let abs_path = entry.path().to_string_lossy().to_string();
         let modified = metadata
             .modified()
@@ -277,10 +282,9 @@ pub async fn create_directory(
 }
 
 pub async fn quick_access() -> Json<Vec<QuickAccess>> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+    let home = resolve_home();
 
     let candidates: Vec<(&str, &str, &str)> = vec![
-        ("Inicio", &home, "home"),
         ("Escritorio", "Desktop", "monitor"),
         ("Escritorio", "Escritorio", "monitor"),
         ("Documentos", "Documents", "file-text"),
@@ -313,9 +317,6 @@ pub async fn quick_access() -> Json<Vec<QuickAccess>> {
     }
 
     for (name, subdir, icon) in &candidates {
-        if *name == "Inicio" {
-            continue;
-        }
         let full_path = PathBuf::from(&home).join(subdir);
         if full_path.exists() && full_path.is_dir() && !seen_names.contains(*name) {
             result.push(QuickAccess {
@@ -327,15 +328,10 @@ pub async fn quick_access() -> Json<Vec<QuickAccess>> {
         }
     }
 
-    let system_dirs = vec![
-        ("Raiz", "/", "hard-drive"),
-        ("Tmp", "/tmp", "trash"),
-        ("Medios", "/media", "disc"),
-        ("Montajes", "/mnt", "disc"),
-    ];
-
-    for (name, path, icon) in system_dirs {
-        if PathBuf::from(path).exists() {
+    // Solo medios externos montados, no rutas de sistema
+    for (name, path, icon) in [("Medios", "/media", "disc"), ("Montajes", "/mnt", "disc")] {
+        let p = PathBuf::from(path);
+        if p.exists() && p.read_dir().map(|mut d| d.next().is_some()).unwrap_or(false) {
             result.push(QuickAccess {
                 name: name.to_string(),
                 path: path.to_string(),

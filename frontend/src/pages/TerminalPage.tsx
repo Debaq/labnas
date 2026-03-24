@@ -67,9 +67,17 @@ export default function TerminalPage() {
     // Fit after render
     setTimeout(() => fitAddon.fit(), 50)
 
-    // WebSocket
+    // WebSocket (con token via query param, ya que WS no soporta headers custom)
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${window.location.host}/api/terminal`)
+    let wsUrl = `${protocol}//${window.location.host}/api/terminal`
+    try {
+      const saved = localStorage.getItem('labnas_auth')
+      if (saved) {
+        const { token } = JSON.parse(saved)
+        if (token) wsUrl += `?token=${encodeURIComponent(token)}`
+      }
+    } catch {}
+    const ws = new WebSocket(wsUrl)
     ws.binaryType = 'arraybuffer'
 
     ws.onopen = () => {

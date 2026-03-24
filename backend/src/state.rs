@@ -1,4 +1,5 @@
 use crate::config::LabNasConfig;
+use crate::handlers::music::MusicState;
 use crate::models::email::EmailMessage;
 use crate::models::network::NetworkHost;
 use crate::models::notifications::{UserPermissions, UserRole};
@@ -41,6 +42,7 @@ pub struct AppState {
     pub tg_terminals: Arc<Mutex<HashMap<i64, TgTerminal>>>,
     pub email_inbox: Arc<Mutex<HashMap<String, Vec<EmailMessage>>>>,
     pub mdns_service: Arc<Mutex<Option<mdns_sd::ServiceDaemon>>>,
+    pub music: Arc<Mutex<MusicState>>,
 }
 
 pub struct TgTerminal {

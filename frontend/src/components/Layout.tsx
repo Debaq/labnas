@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight } from 'lucide-react'
+import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight, Mail } from 'lucide-react'
 import { useTheme } from '../themes/ThemeContext'
 import { useAuth } from '../auth/AuthContext'
 import { shutdownServer, getBranding } from '../api'
@@ -15,6 +15,7 @@ const pageTitles: Record<string, string> = {
   '/tasks': 'Tareas y Proyectos',
   '/notes': 'Notas',
   '/terminal': 'Terminal',
+  '/email': 'Correo',
   '/settings': 'Configuracion',
 }
 
@@ -72,6 +73,7 @@ export default function Layout() {
     { to: '/network', label: 'Red', icon: Network, show: true },
     { to: '/tasks', label: 'Tareas', icon: ClipboardList, show: true },
     { to: '/notes', label: 'Notas', icon: FileText, show: true },
+    { to: '/email', label: 'Correo', icon: Mail, show: true },
     { to: '/terminal', label: 'Terminal', icon: TerminalSquare, show: can('terminal') },
     { to: '/settings', label: 'Configuracion', icon: Settings, show: true },
   ]

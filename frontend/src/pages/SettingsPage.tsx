@@ -92,7 +92,10 @@ export default function SettingsPage() {
   const [scheduleMinute, setScheduleMinute] = useState(0)
   const [dailyEnabled, setDailyEnabled] = useState(false)
 
+  const isAdmin = isAdmin
+
   useEffect(() => {
+    if (!isAdmin) return
     fetchDisks().then(setDisks).catch(() => {})
     fetchSystemInfo().then(setSysInfo).catch(() => {})
     fetchAutostartStatus().then(setAutostart).catch(() => {})
@@ -106,7 +109,7 @@ export default function SettingsPage() {
       setScheduleHour(c.daily_hour)
       setScheduleMinute(c.daily_minute)
     }).catch(() => {})
-  }, [])
+  }, [isAdmin])
 
   function handleAutostartTerminal(install: boolean) {
     if (!autostart) return
@@ -117,7 +120,7 @@ export default function SettingsPage() {
   return (
     <div className="space-y-8 max-w-4xl">
       {/* Lab Branding (admin) */}
-      {authUser?.role === 'admin' && branding && (
+      {isAdmin && branding && (
         <section>
           <div className="flex items-center gap-3 mb-4">
             <Building2 size={22} style={{ color: 'var(--accent)' }} />
@@ -349,8 +352,8 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* Autostart */}
-      <section>
+      {/* Autostart (admin only) */}
+      {isAdmin && <section>
         <div className="flex items-center gap-3 mb-4">
           <Power size={22} style={{ color: 'var(--accent)' }} />
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -406,10 +409,10 @@ export default function SettingsPage() {
             )}
           </div>
         </div>
-      </section>
+      </section>}
 
       {/* Tailscale - Remote Access (admin only) */}
-      {authUser?.role === 'admin' && (
+      {isAdmin && (
         <section>
           <div className="flex items-center gap-3 mb-4">
             <Globe size={22} style={{ color: 'var(--accent)' }} />
@@ -447,7 +450,7 @@ export default function SettingsPage() {
       )}
 
       {/* mDNS - Local domain (admin only) */}
-      {authUser?.role === 'admin' && (
+      {isAdmin && (
         <section>
           <div className="flex items-center gap-3 mb-4">
             <Globe size={22} style={{ color: 'var(--accent)' }} />
@@ -498,8 +501,8 @@ export default function SettingsPage() {
         </section>
       )}
 
-      {/* Telegram Notifications */}
-      <section>
+      {/* Telegram Notifications (admin only) */}
+      {isAdmin && <section>
         <div className="flex items-center gap-3 mb-4">
           <MessageCircle size={22} style={{ color: 'var(--accent)' }} />
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -953,10 +956,10 @@ export default function SettingsPage() {
             )}
           </div>
         )}
-      </section>
+      </section>}
 
-      {/* Storage */}
-      <section>
+      {/* Storage (admin only) */}
+      {isAdmin && <section>
         <div className="flex items-center gap-3 mb-4">
           <HardDrive size={22} style={{ color: 'var(--accent)' }} />
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -1008,10 +1011,10 @@ export default function SettingsPage() {
             ))
           )}
         </div>
-      </section>
+      </section>}
 
-      {/* About */}
-      <section>
+      {/* About (admin only) */}
+      {isAdmin && <section>
         <div className="flex items-center gap-3 mb-4">
           <Info size={22} style={{ color: 'var(--accent)' }} />
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -1035,7 +1038,7 @@ export default function SettingsPage() {
               )}
             </div>
           </div>
-          {authUser?.role === 'admin' && updateInfo?.update_available && (
+          {isAdmin && updateInfo?.update_available && (
             <button
               onClick={async () => {
                 if (!confirm('Actualizar LabNAS? El servidor se reiniciara.')) return
@@ -1079,7 +1082,7 @@ export default function SettingsPage() {
             </p>
           </div>
         </div>
-      </section>
+      </section>}
     </div>
   )
 }

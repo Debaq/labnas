@@ -1,6 +1,7 @@
-import { useEffect, useState, useMemo, type ReactNode } from 'react'
-import { HardDrive, Wifi, Activity, Database, Box } from 'lucide-react'
-import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus } from '../api'
+import { useEffect, useState, useMemo, useRef } from 'react'
+import type { ReactNode } from 'react'
+import { HardDrive, Wifi, Activity, Database, Box, Music, Search, Play, Square, Loader2, X, SkipForward, Trash2, ListMusic, Plus, Sparkles } from 'lucide-react'
+import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus, searchMusic, playMusic, getCurrentMusic, stopMusic, nextMusic, removeFromQueue, recommendMusic, type MusicTrack, type MusicState } from '../api'
 import { useAuth } from '../auth/AuthContext'
 import type { DiskInfo, SystemInfo, NetworkHost, Printer3DConfig, Printer3DStatus } from '../types'
 
@@ -74,6 +75,16 @@ export default function DashboardPage() {
   const [printerStatuses, setPrinterStatuses] = useState<Printer3DStatus[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Music
+  const [musicState, setMusicState] = useState<MusicState>({ current: null, queue: [], started_by: null })
+  const [showSearch, setShowSearch] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<MusicTrack[]>([])
+  const [searching, setSearching] = useState(false)
+  const [loadingTrack, setLoadingTrack] = useState(false)
+  const [loadingMix, setLoadingMix] = useState(false)
+  const audioRef = useRef<HTMLAudioElement>(null)
+
   useEffect(() => {
     async function loadData() {
       setLoading(true)
@@ -107,6 +118,89 @@ export default function DashboardPage() {
     }
     loadData()
   }, [])
+
+  // Poll music state every 5s
+  useEffect(() => {
+    getCurrentMusic().then(setMusicState).catch(() => {})
+    const interval = setInterval(() => {
+      getCurrentMusic().then(setMusicState).catch(() => {})
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Sync audio element
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    if (musicState.current?.stream_url) {
+      if (audio.src !== musicState.current.stream_url) {
+        audio.src = musicState.current.stream_url
+        audio.play().catch(() => {})
+      }
+    } else {
+      audio.pause()
+      audio.src = ''
+    }
+  }, [musicState.current?.stream_url])
+
+  // Auto-next cuando termina la canción
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    const onEnded = () => {
+      nextMusic().then(setMusicState).catch(() => {})
+    }
+    audio.addEventListener('ended', onEnded)
+    return () => audio.removeEventListener('ended', onEnded)
+  }, [])
+
+  async function handleSearch() {
+    if (!searchQuery.trim()) return
+    setSearching(true)
+    try {
+      setSearchResults(await searchMusic(searchQuery))
+    } catch {} finally {
+      setSearching(false)
+    }
+  }
+
+  async function handlePlay(id: string) {
+    setLoadingTrack(true)
+    try {
+      setMusicState(await playMusic(id))
+    } catch {} finally {
+      setLoadingTrack(false)
+    }
+  }
+
+  async function handleStop() {
+    const ms = await stopMusic()
+    setMusicState(ms)
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = '' }
+  }
+
+  async function handleNext() {
+    setMusicState(await nextMusic())
+  }
+
+  async function handleRemoveFromQueue(index: number) {
+    setMusicState(await removeFromQueue(index))
+  }
+
+  async function handleRecommend() {
+    setLoadingMix(true)
+    try {
+      setMusicState(await recommendMusic())
+    } catch {} finally {
+      setLoadingMix(false)
+    }
+  }
+
+  function formatDuration(secs: number) {
+    const m = Math.floor(secs / 60)
+    const s = secs % 60
+    return `${m}:${String(s).padStart(2, '0')}`
+  }
 
   const activeHosts = hosts.filter((h) => h.is_alive).length
   const totalSpace = disks.reduce((acc, d) => acc + d.total_space, 0)
@@ -275,6 +369,176 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Music Player */}
+      <div
+        className="rounded-xl p-6 transition-all duration-200 hover:shadow-lg"
+        style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <Music size={22} style={{ color: 'var(--accent)' }} />
+            <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Musica</h2>
+            {musicState.queue.length > 0 && (
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: 'var(--accent)' + '25', color: 'var(--accent)' }}>
+                {musicState.queue.length} en cola
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRecommend}
+              disabled={loadingMix || (!musicState.current && musicState.history.length === 0)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-90"
+              style={{
+                backgroundColor: loadingMix ? 'var(--bg-tertiary)' : 'var(--success)' + '20',
+                color: 'var(--success)',
+                border: '1px solid var(--success)',
+              }}
+              title="Llenar cola con recomendaciones basadas en lo que suena"
+            >
+              {loadingMix ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+              Mix
+            </button>
+            <button
+              onClick={() => setShowSearch(!showSearch)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-90"
+              style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
+            >
+              <Search size={14} />
+              Buscar
+            </button>
+          </div>
+        </div>
+
+        {/* Now Playing */}
+        {musicState.current ? (
+          <div className="flex items-center gap-4">
+            <img
+              src={musicState.current.thumbnail}
+              alt=""
+              className="w-16 h-16 rounded-lg object-cover shrink-0"
+              style={{ border: '1px solid var(--border)' }}
+            />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                {musicState.current.title}
+              </p>
+              <p className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>
+                {musicState.current.artist}
+              </p>
+              <p className="text-[10px] mt-1" style={{ color: 'var(--text-secondary)', opacity: 0.6 }}>
+                Puesto por {musicState.current.added_by || musicState.started_by} · {formatDuration(musicState.current.duration)}
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              {musicState.queue.length > 0 && (
+                <button onClick={handleNext}
+                  className="p-2 rounded-lg transition-all hover:opacity-80"
+                  style={{ backgroundColor: 'var(--accent)' + '20', color: 'var(--accent)' }}
+                  title="Siguiente">
+                  <SkipForward size={16} />
+                </button>
+              )}
+              <button onClick={handleStop}
+                className="p-2 rounded-lg transition-all hover:opacity-80"
+                style={{ backgroundColor: 'var(--danger)' + '20', color: 'var(--danger)' }}
+                title="Detener">
+                <Square size={16} />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+            No hay musica reproduciendose
+          </p>
+        )}
+
+        <audio ref={audioRef} />
+
+        {/* Queue */}
+        {musicState.queue.length > 0 && (
+          <div className="mt-4 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+            <div className="flex items-center gap-2 mb-2">
+              <ListMusic size={14} style={{ color: 'var(--text-secondary)' }} />
+              <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>Cola de reproduccion</span>
+            </div>
+            <div className="space-y-1">
+              {musicState.queue.map((track, i) => (
+                <div key={`${track.id}-${i}`} className="flex items-center gap-3 px-3 py-2 rounded-lg"
+                  style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                  <span className="text-xs font-mono w-5 text-center" style={{ color: 'var(--text-secondary)' }}>{i + 1}</span>
+                  <img src={track.thumbnail} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs truncate" style={{ color: 'var(--text-primary)' }}>{track.title}</p>
+                    <p className="text-[10px] truncate" style={{ color: 'var(--text-secondary)' }}>
+                      {track.artist} · {formatDuration(track.duration)}{track.added_by ? ` · ${track.added_by}` : ''}
+                    </p>
+                  </div>
+                  <button onClick={() => handleRemoveFromQueue(i)}
+                    className="p-1 rounded transition-all hover:opacity-80" style={{ color: 'var(--danger)' }}>
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Search */}
+        {showSearch && (
+          <div className="mt-4 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+            <div className="flex items-center gap-2 mb-3">
+              <input
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSearch()}
+                placeholder="Buscar cancion o artista..."
+                className="flex-1 px-3 py-2 rounded-lg text-sm outline-none"
+                style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                autoFocus
+              />
+              <button onClick={handleSearch} disabled={searching || !searchQuery.trim()}
+                className="px-4 py-2 rounded-lg text-sm font-medium"
+                style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
+                {searching ? <Loader2 size={16} className="animate-spin" /> : 'Buscar'}
+              </button>
+              <button onClick={() => { setShowSearch(false); setSearchResults([]) }}
+                style={{ color: 'var(--text-secondary)' }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            {loadingTrack && (
+              <div className="flex items-center justify-center py-3 gap-2">
+                <Loader2 size={16} className="animate-spin" style={{ color: 'var(--accent)' }} />
+                <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Cargando...</span>
+              </div>
+            )}
+
+            {searchResults.length > 0 && (
+              <div className="space-y-1 max-h-72 overflow-y-auto">
+                {searchResults.map(track => (
+                  <div key={track.id}
+                    className="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all hover:opacity-80"
+                    style={{ backgroundColor: 'var(--bg-tertiary)' }}
+                    onClick={() => !loadingTrack && handlePlay(track.id)}>
+                    <img src={track.thumbnail} alt="" className="w-10 h-10 rounded object-cover shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm truncate" style={{ color: 'var(--text-primary)' }}>{track.title}</p>
+                      <p className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>{track.artist} · {formatDuration(track.duration)}</p>
+                    </div>
+                    {musicState.current
+                      ? <Plus size={16} style={{ color: 'var(--accent)' }} title="Agregar a la cola" />
+                      : <Play size={16} style={{ color: 'var(--accent)' }} />
+                    }
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

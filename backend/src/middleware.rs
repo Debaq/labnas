@@ -26,13 +26,20 @@ pub async fn permission_check(
         return next.run(request).await;
     }
 
-    // Extract token
+    // Extract token (header o query param para WebSocket)
     let token = request
         .headers()
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .map(|s| s.to_string());
+        .map(|s| s.to_string())
+        .or_else(|| {
+            request.uri().query().and_then(|q| {
+                q.split('&')
+                    .find(|p| p.starts_with("token="))
+                    .map(|p| p.trim_start_matches("token=").to_string())
+            })
+        });
 
     let Some(token) = token else {
         return (StatusCode::UNAUTHORIZED, "No autorizado").into_response();

@@ -9,6 +9,23 @@ use crate::state::AppState;
 const GITHUB_REPO: &str = "Debaq/labnas";
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+fn parse_semver(v: &str) -> Option<(u32, u32, u32)> {
+    let v = v.strip_prefix('v').unwrap_or(v);
+    let parts: Vec<&str> = v.split('.').collect();
+    if parts.len() == 3 {
+        Some((parts[0].parse().ok()?, parts[1].parse().ok()?, parts[2].parse().ok()?))
+    } else {
+        None
+    }
+}
+
+fn is_newer_version(latest: &str, current: &str) -> bool {
+    match (parse_semver(latest), parse_semver(current)) {
+        (Some(l), Some(c)) => l > c,
+        _ => false,
+    }
+}
+
 pub async fn shutdown_handler(State(state): State<AppState>) -> &'static str {
     let shutdown = state.shutdown.clone();
     tokio::spawn(async move {
@@ -170,7 +187,7 @@ pub async fn check_update(
     State(state): State<AppState>,
 ) -> Json<UpdateStatus> {
     let (latest, url) = fetch_latest_release(&state.http_client).await;
-    let update_available = latest.as_ref().map(|v| v.as_str() != format!("v{}", CURRENT_VERSION) && v.as_str() > format!("v{}", CURRENT_VERSION).as_str()).unwrap_or(false);
+    let update_available = latest.as_ref().map(|v| is_newer_version(v, CURRENT_VERSION)).unwrap_or(false);
 
     Json(UpdateStatus {
         current_version: CURRENT_VERSION.to_string(),
@@ -294,7 +311,7 @@ pub async fn update_check_loop(state: AppState) {
         let Some(latest) = latest else { continue };
         let current = format!("v{}", CURRENT_VERSION);
 
-        if latest != current && latest > current {
+        if is_newer_version(&latest, CURRENT_VERSION) {
             println!("[LabNAS] Nueva version disponible: {} (actual: {})", latest, current);
 
             // Notify admins via Telegram

@@ -716,3 +716,165 @@ export async function deleteNote(id: string): Promise<void> {
   const res = await api(`/api/notes/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar nota')
 }
+
+// --- Email ---
+
+export interface EmailMessage {
+  uid: number
+  from: string
+  subject: string
+  date: string
+  body_preview: string
+  ai_classification: string | null
+  ai_summary: string | null
+  ai_action: string | null
+  filter_label: string | null
+  filter_action: string | null
+  processed: boolean
+  task_created: boolean
+  fetched_at: string
+}
+
+export interface EmailFilter {
+  pattern: string
+  action: 'prioritario' | 'normal' | 'silencioso' | 'ignorar'
+  label: string
+  auto_tag: string | null
+}
+
+export async function configureEmailAccount(data: { imap_host: string; imap_port: number; email: string; password: string }): Promise<string> {
+  const res = await api('/api/email/account', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) { const t = await res.text(); throw new Error(t) }
+  return res.text()
+}
+
+export async function deleteEmailAccount(): Promise<void> {
+  const res = await api('/api/email/account', { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar cuenta')
+}
+
+export async function fetchInbox(): Promise<EmailMessage[]> {
+  const res = await api('/api/email/inbox')
+  if (!res.ok) throw new Error('Error al obtener bandeja')
+  return res.json()
+}
+
+export async function checkEmailNow(): Promise<string> {
+  const res = await api('/api/email/check', { method: 'POST' })
+  if (!res.ok) { const t = await res.text(); throw new Error(t) }
+  return res.text()
+}
+
+export async function classifyEmail(uid: number): Promise<EmailMessage> {
+  const res = await api(`/api/email/classify/${uid}`, { method: 'POST' })
+  if (!res.ok) throw new Error('Error al clasificar')
+  return res.json()
+}
+
+export async function emailToTask(uid: number): Promise<string> {
+  const res = await api(`/api/email/to-task/${uid}`, { method: 'POST' })
+  if (!res.ok) { const t = await res.text(); throw new Error(t) }
+  return res.text()
+}
+
+export async function setGroqKey(key: string): Promise<string> {
+  const res = await api('/api/email/groq-key', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key }),
+  })
+  if (!res.ok) throw new Error('Error al configurar key')
+  return res.text()
+}
+
+export async function fetchEmailFilters(): Promise<EmailFilter[]> {
+  const res = await api('/api/email/filters')
+  if (!res.ok) throw new Error('Error al obtener filtros')
+  return res.json()
+}
+
+export async function addEmailFilter(filter: { pattern: string; action: string; label: string; auto_tag?: string }): Promise<void> {
+  const res = await api('/api/email/filters', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(filter),
+  })
+  if (!res.ok) { const t = await res.text(); throw new Error(t) }
+}
+
+export async function deleteEmailFilter(pattern: string): Promise<void> {
+  const res = await api(`/api/email/filters/${encodeURIComponent(pattern)}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar filtro')
+}
+
+// --- Music ---
+
+export interface MusicTrack {
+  id: string
+  title: string
+  artist: string
+  thumbnail: string
+  duration: number
+  stream_url: string | null
+  added_by: string | null
+}
+
+export interface MusicState {
+  current: MusicTrack | null
+  queue: MusicTrack[]
+  started_by: string | null
+}
+
+export async function searchMusic(q: string): Promise<MusicTrack[]> {
+  const res = await api(`/api/music/search?q=${encodeURIComponent(q)}`)
+  if (!res.ok) throw new Error('Error buscando musica')
+  return res.json()
+}
+
+export async function playMusic(id: string): Promise<MusicState> {
+  const res = await api('/api/music/play', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  })
+  if (!res.ok) throw new Error('Error reproduciendo')
+  return res.json()
+}
+
+export async function nextMusic(): Promise<MusicState> {
+  const res = await api('/api/music/next', { method: 'POST' })
+  if (!res.ok) throw new Error('Error pasando cancion')
+  return res.json()
+}
+
+export async function getCurrentMusic(): Promise<MusicState> {
+  const res = await api('/api/music/current')
+  if (!res.ok) throw new Error('Error obteniendo estado')
+  return res.json()
+}
+
+export async function stopMusic(): Promise<MusicState> {
+  const res = await api('/api/music/stop', { method: 'POST' })
+  if (!res.ok) throw new Error('Error deteniendo')
+  return res.json()
+}
+
+export async function removeFromQueue(index: number): Promise<MusicState> {
+  const res = await api('/api/music/queue', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ index }),
+  })
+  if (!res.ok) throw new Error('Error eliminando de cola')
+  return res.json()
+}
+
+export async function recommendMusic(): Promise<MusicState> {
+  const res = await api('/api/music/recommend', { method: 'POST' })
+  if (!res.ok) { const t = await res.text(); throw new Error(t) }
+  return res.json()
+}

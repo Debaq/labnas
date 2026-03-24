@@ -930,7 +930,7 @@ async fn handle_event_rsvp(state: &AppState, user: &str, text: &str, accept: boo
 // Account linking
 // =====================
 
-async fn handle_link_command(state: &AppState, chat_id: i64, chat_name: &str, text: &str) -> String {
+async fn handle_link_command(state: &AppState, chat_id: i64, _chat_name: &str, text: &str) -> String {
     let code = text.strip_prefix("/vincular ").unwrap_or("").trim().to_uppercase();
     if code.is_empty() {
         return "Uso: `/vincular CODIGO`\n\nGenera el codigo desde la web en tu perfil.".to_string();

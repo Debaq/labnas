@@ -78,21 +78,46 @@ impl Default for LabBranding {
     }
 }
 
+/// Resuelve el home real del usuario dueño de la instalación.
+/// Deriva desde la ubicación del binario para ser consistente
+/// sin importar si se ejecuta con sudo, systemd o directamente.
+pub fn resolve_home() -> String {
+    // 1. Env var explícita
+    if let Ok(h) = std::env::var("LABNAS_HOME") {
+        return h;
+    }
+
+    // 2. Derivar desde la ruta del binario:
+    //    Si el binario está en /home/nick/labnas/labnas-backend
+    //    el home es /home/nick
+    if let Ok(exe) = std::env::current_exe() {
+        if let Ok(exe) = std::fs::canonicalize(&exe) {
+            let mut path = exe.as_path();
+            // Subir hasta encontrar /home/usuario
+            while let Some(parent) = path.parent() {
+                if parent.parent().map(|p| p == std::path::Path::new("/home")).unwrap_or(false) {
+                    return parent.to_string_lossy().to_string();
+                }
+                path = parent;
+            }
+        }
+    }
+
+    // 3. Fallback clásico
+    if let Ok(sudo_user) = std::env::var("SUDO_USER") {
+        return format!("/home/{}", sudo_user);
+    }
+    std::env::var("HOME").unwrap_or_else(|_| "/root".to_string())
+}
+
 fn config_path() -> PathBuf {
-    // 1. Explicit env var
+    // Override explícito
     if let Ok(p) = std::env::var("LABNAS_CONFIG") {
         return PathBuf::from(p);
     }
 
-    // 2. Resolve real user's home (even under sudo)
-    let home = if let Ok(sudo_user) = std::env::var("SUDO_USER") {
-        // Running with sudo: use the original user's home
-        format!("/home/{}", sudo_user)
-    } else {
-        std::env::var("HOME").unwrap_or_else(|_| "/root".to_string())
-    };
-
-    PathBuf::from(home).join(".labnas").join("config.json")
+    // ~/.labnas/config.json (home resuelto desde ubicación del binario)
+    PathBuf::from(resolve_home()).join(".labnas").join("config.json")
 }
 
 pub async fn load_config() -> LabNasConfig {

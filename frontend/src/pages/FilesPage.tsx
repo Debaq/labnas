@@ -110,10 +110,18 @@ export default function FilesPage() {
   const [printerOptions, setPrinterOptions] = useState<PrinterOption[]>([])
   const [optionValues, setOptionValues] = useState<Record<string, string>>({})
   const [optionsLoading, setOptionsLoading] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    fetchQuickAccess().then(setQuickAccess).catch(() => {})
+    fetchQuickAccess().then((qa) => {
+      setQuickAccess(qa)
+      // Iniciar en el home del usuario (primer quickAccess)
+      if (qa.length > 0 && currentPath === '/') {
+        setCurrentPath(qa[0].path)
+      }
+    }).catch(() => {})
     fetchCupsPrinters().then((p) => {
       setCupsPrinters(p)
       const def = p.find((pr) => pr.is_default)
@@ -188,6 +196,92 @@ export default function FilesPage() {
       await loadFiles()
     } catch (err) {
       console.error('Error creando carpeta:', err)
+    }
+  }
+
+  // --- Drag & Drop con soporte de carpetas ---
+
+  function readEntryAsFile(entry: FileSystemFileEntry): Promise<File> {
+    return new Promise((resolve, reject) => entry.file(resolve, reject))
+  }
+
+  function readDirectoryEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
+    return new Promise((resolve, reject) => reader.readEntries(resolve, reject))
+  }
+
+  async function collectFiles(entry: FileSystemEntry, basePath: string): Promise<{ file: File; destPath: string }[]> {
+    if (entry.isFile) {
+      const file = await readEntryAsFile(entry as FileSystemFileEntry)
+      return [{ file, destPath: basePath }]
+    }
+    if (entry.isDirectory) {
+      const dirEntry = entry as FileSystemDirectoryEntry
+      const dirPath = basePath === currentPath
+        ? (currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`)
+        : `${basePath}/${entry.name}`
+      const reader = dirEntry.createReader()
+      const results: { file: File; destPath: string }[] = []
+      let batch: FileSystemEntry[]
+      do {
+        batch = await readDirectoryEntries(reader)
+        for (const child of batch) {
+          results.push(...await collectFiles(child, dirPath))
+        }
+      } while (batch.length > 0)
+      return results
+    }
+    return []
+  }
+
+  async function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setDragOver(false)
+
+    const items = e.dataTransfer.items
+    if (!items || items.length === 0) return
+
+    const entries: FileSystemEntry[] = []
+    for (let i = 0; i < items.length; i++) {
+      const entry = items[i].webkitGetAsEntry?.()
+      if (entry) entries.push(entry)
+    }
+
+    if (entries.length === 0) {
+      // Fallback: archivos sueltos sin API de entries
+      const files = e.dataTransfer.files
+      if (files.length === 0) return
+      setUploading(true)
+      setUploadProgress({ current: 0, total: files.length })
+      try {
+        for (let i = 0; i < files.length; i++) {
+          setUploadProgress({ current: i + 1, total: files.length })
+          await uploadFile(files[i], currentPath)
+        }
+      } finally {
+        setUploading(false)
+        setUploadProgress(null)
+        await loadFiles()
+      }
+      return
+    }
+
+    // Recolectar todos los archivos recursivamente
+    setUploading(true)
+    try {
+      const allFiles: { file: File; destPath: string }[] = []
+      for (const entry of entries) {
+        allFiles.push(...await collectFiles(entry, currentPath))
+      }
+
+      setUploadProgress({ current: 0, total: allFiles.length })
+      for (let i = 0; i < allFiles.length; i++) {
+        setUploadProgress({ current: i + 1, total: allFiles.length })
+        await uploadFile(allFiles[i].file, allFiles[i].destPath)
+      }
+    } finally {
+      setUploading(false)
+      setUploadProgress(null)
+      await loadFiles()
     }
   }
 
@@ -454,11 +548,36 @@ export default function FilesPage() {
         </div>
       )}
 
-      {/* Files Table */}
+      {/* Upload progress */}
+      {uploadProgress && (
+        <div className="flex items-center gap-3 p-3 rounded-lg" style={{ backgroundColor: 'var(--accent)' + '15', border: '1px solid var(--accent)' }}>
+          <Loader2 size={16} className="animate-spin" style={{ color: 'var(--accent)' }} />
+          <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
+            Subiendo {uploadProgress.current} de {uploadProgress.total} archivos...
+          </span>
+        </div>
+      )}
+
+      {/* Files Table (drop zone) */}
       <div
-        className="rounded-xl overflow-hidden"
-        style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
+        className="rounded-xl overflow-hidden relative transition-all duration-200"
+        style={{
+          backgroundColor: 'var(--card-bg)',
+          border: dragOver ? '2px dashed var(--accent)' : '1px solid var(--card-border)',
+          opacity: dragOver ? 0.8 : 1,
+        }}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+        onDragLeave={(e) => { if (e.currentTarget.contains(e.relatedTarget as Node)) return; setDragOver(false) }}
+        onDrop={handleDrop}
       >
+        {dragOver && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-xl" style={{ backgroundColor: 'var(--accent)' + '20' }}>
+            <Upload size={40} style={{ color: 'var(--accent)' }} />
+            <p className="text-sm font-medium mt-2" style={{ color: 'var(--accent)' }}>
+              Soltar archivos o carpetas aqui
+            </p>
+          </div>
+        )}
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <Loader2 size={32} className="animate-spin" style={{ color: 'var(--accent)' }} />
@@ -468,6 +587,9 @@ export default function FilesPage() {
             <FolderOpen size={48} className="mx-auto mb-4" style={{ color: 'var(--text-secondary)' }} />
             <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
               Esta carpeta esta vacia
+            </p>
+            <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)', opacity: 0.6 }}>
+              Arrastra archivos o carpetas aqui para subirlos
             </p>
           </div>
         ) : (

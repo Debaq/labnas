@@ -1,0 +1,87 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Linux x86_64
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Leer versión
+        id: version
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Rust (musl estático)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Instalar musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Cache Rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            backend/target
+          key: ${{ runner.os }}-musl-cargo-${{ hashFiles('backend/Cargo.lock') }}
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npx vite build --emptyOutDir
+
+      - name: Build backend (release, estático)
+        working-directory: backend
+        run: cargo build --release --target x86_64-unknown-linux-musl
+
+      - name: Empaquetar release
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          RELEASE_DIR="labnas"
+          mkdir -p "$RELEASE_DIR"
+
+          # Binario estático
+          cp backend/target/x86_64-unknown-linux-musl/release/labnas-backend "$RELEASE_DIR/"
+
+          # Frontend
+          cp -r frontend/dist "$RELEASE_DIR/dist"
+
+          # Scripts y config
+          cp labnas.sh "$RELEASE_DIR/"
+          cp setup-tailscale.sh "$RELEASE_DIR/" 2>/dev/null || true
+          cp VERSION "$RELEASE_DIR/"
+
+          # Tarball
+          TARBALL="labnas-v${VERSION}-linux-x86_64.tar.gz"
+          tar czf "$TARBALL" "$RELEASE_DIR"
+          echo "tarball=$TARBALL" >> "$GITHUB_ENV"
+
+      - name: Crear Release en GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          name: LabNAS v${{ steps.version.outputs.version }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          draft: false
+          generate_release_notes: true
+          files: ${{ env.tarball }}

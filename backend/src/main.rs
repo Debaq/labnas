@@ -38,6 +38,7 @@ async fn main() {
         tg_terminals: Arc::new(Mutex::new(std::collections::HashMap::new())),
         email_inbox: Arc::new(Mutex::new(std::collections::HashMap::new())),
         mdns_service: Arc::new(Mutex::new(None)),
+        music: Arc::new(Mutex::new(handlers::music::MusicState::default())),
     };
 
     // Start mDNS if enabled
@@ -96,6 +97,15 @@ async fn main() {
         .route("/api/network/hosts", get(handlers::network::get_hosts))
         .route("/api/network/device/{mac}", post(handlers::network::label_host))
         .route("/api/network/device/{mac}", delete(handlers::network::unlabel_host))
+        // Music
+        .route("/api/music/search", get(handlers::music::search))
+        .route("/api/music/play", post(handlers::music::play))
+        .route("/api/music/next", post(handlers::music::next))
+        .route("/api/music/current", get(handlers::music::current))
+        .route("/api/music/stop", post(handlers::music::stop))
+        .route("/api/music/queue", delete(handlers::music::queue_remove))
+        .route("/api/music/history", get(handlers::music::history))
+        .route("/api/music/recommend", post(handlers::music::recommend))
         // Terminal
         .route("/api/terminal", get(handlers::terminal::terminal_handler))
         // Printers 3D
