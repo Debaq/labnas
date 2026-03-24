@@ -156,13 +156,17 @@ export default function DashboardPage() {
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
-    const onEnded = () => {
+    const autoNext = () => {
       if (musicState.mode === 'browser') {
         nextMusic().then(ms => setMusicState(safeMusicState(ms))).catch(() => {})
       }
     }
-    audio.addEventListener('ended', onEnded)
-    return () => audio.removeEventListener('ended', onEnded)
+    audio.addEventListener('ended', autoNext)
+    audio.addEventListener('error', autoNext)
+    return () => {
+      audio.removeEventListener('ended', autoNext)
+      audio.removeEventListener('error', autoNext)
+    }
   }, [musicState.mode])
 
   async function handleToggleMode() {
@@ -495,6 +499,21 @@ export default function DashboardPage() {
         </div>
 
         {/* Now Playing */}
+        {musicState.queue.length > 0 && !musicState.current && (
+          <div className="flex items-center gap-3 mb-3 p-3 rounded-lg" style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
+            <p className="flex-1 text-sm" style={{ color: 'var(--text-secondary)' }}>
+              {musicState.queue.length} cancion{musicState.queue.length !== 1 ? 'es' : ''} en cola
+            </p>
+            <button
+              onClick={handleNext}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-90"
+              style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
+            >
+              <Play size={14} />
+              Reproducir cola
+            </button>
+          </div>
+        )}
         {musicState.current ? (
           <div className="flex items-center gap-4">
             <img

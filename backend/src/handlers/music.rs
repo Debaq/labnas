@@ -375,34 +375,45 @@ pub async fn queue_remove(
 pub async fn current(
     State(state): State<AppState>,
 ) -> Json<MusicState> {
-    // En modo NAS: verificar si mpv terminó → auto-next
     let mode = state.music.lock().await.mode.clone();
+
+    // Verificar si mpv terminó (modo NAS)
+    let mut player_finished = false;
     if mode == PlaybackMode::Nas {
         let mut proc = state.music_process.lock().await;
         let finished = if let Some(ref mut child) = *proc {
             matches!(child.try_wait(), Ok(Some(_)))
         } else {
-            false
+            // No hay proceso pero hay current → se murió
+            state.music.lock().await.current.is_some()
         };
-        if finished { *proc = None; }
-        drop(proc);
-
         if finished {
+            *proc = None;
+            player_finished = true;
+        }
+        drop(proc);
+    }
+
+    // Auto-next si terminó la canción actual
+    if player_finished {
+        let mut ms = state.music.lock().await;
+        if !ms.queue.is_empty() {
+            let next_track = ms.queue.remove(0);
+            let next_id = next_track.id.clone();
+            let next_by = next_track.added_by.clone().unwrap_or_default();
+            add_to_history(&mut ms, &next_track, &next_by);
+            ms.current = Some(next_track);
+            ms.started_by = Some(next_by);
+            ms.paused = false;
+            drop(ms);
+            let stream = start_playback(&state, &next_id, &mode).await;
             let mut ms = state.music.lock().await;
-            if !ms.queue.is_empty() {
-                let next_track = ms.queue.remove(0);
-                let next_id = next_track.id.clone();
-                let next_by = next_track.added_by.clone().unwrap_or_default();
-                add_to_history(&mut ms, &next_track, &next_by);
-                ms.current = Some(next_track);
-                ms.started_by = Some(next_by);
-                drop(ms);
-                spawn_player(&state, &next_id).await;
-            } else {
-                ms.current = None;
-                ms.started_by = None;
-                ms.stream_url = None;
-            }
+            ms.stream_url = stream;
+        } else {
+            ms.current = None;
+            ms.started_by = None;
+            ms.stream_url = None;
+            ms.paused = false;
         }
     }
 
