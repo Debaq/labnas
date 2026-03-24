@@ -1,4 +1,4 @@
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{extract::{Path, State}, http::StatusCode, Json};
 use std::time::Duration;
 use sysinfo::{Disks, System};
 use tokio::process::Command;
@@ -460,6 +460,42 @@ pub async fn set_mdns(
         hostname: hostname.clone(),
         url: format!("http://{}.local:3001", hostname),
     }))
+}
+
+// --- Servicios del lab ---
+
+pub async fn get_services(State(state): State<AppState>) -> Json<Vec<crate::config::LabService>> {
+    let config = state.config.lock().await;
+    Json(config.services.clone())
+}
+
+pub async fn add_service(
+    State(state): State<AppState>,
+    Json(req): Json<crate::config::LabService>,
+) -> Result<Json<Vec<crate::config::LabService>>, (StatusCode, String)> {
+    let mut config = state.config.lock().await;
+    if config.services.iter().any(|s| s.port == req.port) {
+        return Err((StatusCode::CONFLICT, "Ya existe un servicio en ese puerto".to_string()));
+    }
+    config.services.push(req);
+    crate::config::save_config(&config).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(config.services.clone()))
+}
+
+pub async fn delete_service(
+    State(state): State<AppState>,
+    Path(port): Path<u16>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let mut config = state.config.lock().await;
+    let before = config.services.len();
+    config.services.retain(|s| s.port != port);
+    if config.services.len() == before {
+        return Err((StatusCode::NOT_FOUND, "Servicio no encontrado".to_string()));
+    }
+    crate::config::save_config(&config).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub fn start_mdns_service(hostname: &str) -> Result<mdns_sd::ServiceDaemon, String> {

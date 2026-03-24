@@ -1,6 +1,14 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MailProtocol {
+    #[default]
+    Imap,
+    Pop3,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum FilterAction {
@@ -28,8 +36,12 @@ pub struct EmailFilter {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailAccount {
     pub username: String,
-    pub imap_host: String,
-    pub imap_port: u16,
+    #[serde(alias = "imap_host")]
+    pub host: String,
+    #[serde(alias = "imap_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub protocol: MailProtocol,
     pub email: String,
     pub password: String,
     #[serde(default)]

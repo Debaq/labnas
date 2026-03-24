@@ -30,6 +30,18 @@ pub struct LabNasConfig {
     pub mdns_enabled: bool,
     #[serde(default = "default_mdns_hostname")]
     pub mdns_hostname: String,
+    #[serde(default)]
+    pub services: Vec<LabService>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LabService {
+    pub name: String,
+    pub port: u16,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub icon: String,
 }
 
 fn default_mdns_hostname() -> String {

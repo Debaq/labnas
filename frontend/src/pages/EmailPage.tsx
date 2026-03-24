@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   Mail, Settings, Loader2, Trash2, RefreshCw, Brain, ClipboardList,
-  Plus, X, Filter, AlertTriangle, Bell, BellOff, EyeOff, Key, Tag,
+  Plus, Filter, AlertTriangle, Bell, BellOff, EyeOff, Key, Tag,
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import {
@@ -23,8 +23,9 @@ export default function EmailPage() {
   const [tab, setTab] = useState<'inbox' | 'config'>('inbox')
 
   // Config state
-  const [imapHost, setImapHost] = useState('')
-  const [imapPort, setImapPort] = useState(993)
+  const [protocol, setProtocol] = useState<'imap' | 'pop3'>('imap')
+  const [host, setHost] = useState('')
+  const [port, setPort] = useState(993)
   const [emailAddr, setEmailAddr] = useState('')
   const [emailPw, setEmailPw] = useState('')
   const [configuring, setConfiguring] = useState(false)
@@ -77,11 +78,11 @@ export default function EmailPage() {
   }
 
   async function handleConfigure() {
-    if (!imapHost || !emailAddr || !emailPw) return
+    if (!host || !emailAddr || !emailPw) return
     setConfiguring(true)
     setConfigMsg(null)
     try {
-      const msg = await configureEmailAccount({ imap_host: imapHost, imap_port: imapPort, email: emailAddr, password: emailPw })
+      const msg = await configureEmailAccount({ host, port, protocol, email: emailAddr, password: emailPw })
       setConfigMsg({ ok: true, text: msg })
       setHasAccount(true)
       setEmailPw('')
@@ -99,7 +100,7 @@ export default function EmailPage() {
       await deleteEmailAccount()
       setHasAccount(false)
       setEmails([])
-      setImapHost('')
+      setHost('')
       setEmailAddr('')
       setConfigMsg(null)
     } catch {}
@@ -189,7 +190,7 @@ export default function EmailPage() {
               <Mail size={48} className="mx-auto mb-4" style={{ color: 'var(--text-secondary)' }} />
               <p className="text-sm mb-2" style={{ color: 'var(--text-primary)' }}>No tienes cuenta de correo configurada</p>
               <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                Ve a la pestana <strong>Configuracion</strong> para agregar tu cuenta IMAP
+                Ve a la pestana <strong>Configuracion</strong> para agregar tu cuenta de correo
               </p>
             </div>
           ) : (
@@ -328,19 +329,32 @@ export default function EmailPage() {
           <section>
             <div className="flex items-center gap-3 mb-4">
               <Mail size={22} style={{ color: 'var(--accent)' }} />
-              <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Cuenta IMAP</h2>
+              <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Cuenta de correo</h2>
             </div>
             <div className="rounded-xl p-6 space-y-4" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Servidor IMAP</label>
-                  <input value={imapHost} onChange={e => setImapHost(e.target.value)}
-                    placeholder="imap.gmail.com" className="w-full px-3 py-2 rounded-lg text-sm outline-none font-mono"
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Protocolo</label>
+                  <select value={protocol} onChange={e => {
+                    const p = e.target.value as 'imap' | 'pop3'
+                    setProtocol(p)
+                    setPort(p === 'pop3' ? 995 : 993)
+                  }}
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
+                    style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}>
+                    <option value="imap">IMAP</option>
+                    <option value="pop3">POP3</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Servidor</label>
+                  <input value={host} onChange={e => setHost(e.target.value)}
+                    placeholder={protocol === 'pop3' ? 'outlook.office365.com' : 'imap.gmail.com'} className="w-full px-3 py-2 rounded-lg text-sm outline-none font-mono"
                     style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
                 </div>
                 <div>
                   <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Puerto</label>
-                  <input type="number" value={imapPort} onChange={e => setImapPort(parseInt(e.target.value) || 993)}
+                  <input type="number" value={port} onChange={e => setPort(parseInt(e.target.value) || (protocol === 'pop3' ? 995 : 993))}
                     className="w-full px-3 py-2 rounded-lg text-sm outline-none"
                     style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
                 </div>
@@ -360,7 +374,7 @@ export default function EmailPage() {
               <div className="flex items-center gap-3">
                 <button
                   onClick={handleConfigure}
-                  disabled={configuring || !imapHost || !emailAddr || !emailPw}
+                  disabled={configuring || !host || !emailAddr || !emailPw}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:opacity-90"
                   style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
                 >
@@ -382,7 +396,9 @@ export default function EmailPage() {
                 <p className="text-xs" style={{ color: configMsg.ok ? 'var(--success)' : 'var(--danger)' }}>{configMsg.text}</p>
               )}
               <p className="text-xs" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>
-                Para Gmail usa imap.gmail.com:993 con una App Password (no tu contrasena normal).
+                {protocol === 'imap'
+                  ? 'Para Gmail usa imap.gmail.com:993 con una App Password.'
+                  : 'Para Outlook usa outlook.office365.com:995 con una Contrasena de aplicacion.'}
               </p>
             </div>
           </section>

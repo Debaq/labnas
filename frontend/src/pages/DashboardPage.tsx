@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
-import { HardDrive, Wifi, Activity, Database, Box, Music, Search, Play, Square, Loader2, X, SkipForward, Trash2, ListMusic, Plus, Sparkles, Speaker, Monitor } from 'lucide-react'
-import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus, searchMusic, playMusic, getCurrentMusic, stopMusic, nextMusic, removeFromQueue, recommendMusic, setMusicMode, type MusicTrack, type MusicState } from '../api'
+import { HardDrive, Wifi, Activity, Database, Box, Music, Search, Play, Square, Loader2, X, SkipForward, Trash2, ListMusic, Plus, Sparkles, Speaker, Monitor, ExternalLink } from 'lucide-react'
+import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus, searchMusic, playMusic, getCurrentMusic, stopMusic, nextMusic, removeFromQueue, recommendMusic, setMusicMode, getServices, type MusicTrack, type MusicState, type LabService } from '../api'
 import { useAuth } from '../auth/AuthContext'
 import type { DiskInfo, SystemInfo, NetworkHost, Printer3DConfig, Printer3DStatus } from '../types'
 
@@ -74,6 +74,7 @@ export default function DashboardPage() {
   const [printers3d, setPrinters3d] = useState<Printer3DConfig[]>([])
   const [printerStatuses, setPrinterStatuses] = useState<Printer3DStatus[]>([])
   const [loading, setLoading] = useState(true)
+  const [services, setServices] = useState<LabService[]>([])
 
   // Music
   const [musicState, setMusicState] = useState<MusicState>({ current: null, queue: [], started_by: null, history: [], mode: 'nas', stream_url: null })
@@ -88,17 +89,19 @@ export default function DashboardPage() {
   async function loadData(initial = false) {
     if (initial) setLoading(true)
     try {
-      const [disksData, hostsData, healthData, sysInfoData, printers3dData] = await Promise.allSettled([
+      const [disksData, hostsData, healthData, sysInfoData, printers3dData, servicesData] = await Promise.allSettled([
         fetchDisks(),
         fetchHosts(),
         fetchHealth(),
         fetchSystemInfo(),
         fetchPrinters3D(),
+        getServices(),
       ])
       if (disksData.status === 'fulfilled') setDisks(disksData.value)
       if (hostsData.status === 'fulfilled') setHosts(hostsData.value)
       if (healthData.status === 'fulfilled') setHealth(healthData.value)
       if (sysInfoData.status === 'fulfilled') setSystemInfo(sysInfoData.value)
+      if (servicesData.status === 'fulfilled') setServices(servicesData.value)
       if (printers3dData.status === 'fulfilled') {
         setPrinters3d(printers3dData.value)
         const statusResults = await Promise.allSettled(
@@ -382,6 +385,45 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Servicios del Lab */}
+      {services.length > 0 && (
+        <div
+          className="rounded-xl p-6 transition-all duration-200 hover:shadow-lg"
+          style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
+        >
+          <div className="flex items-center gap-3 mb-4">
+            <ExternalLink size={22} style={{ color: 'var(--accent)' }} />
+            <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+              Servicios del Lab
+            </h2>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            {services.map(svc => (
+              <a
+                key={svc.port}
+                href={`${window.location.protocol}//${window.location.hostname}:${svc.port}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 p-4 rounded-lg transition-all hover:opacity-80"
+                style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+              >
+                <div className="p-2 rounded-lg" style={{ backgroundColor: 'var(--accent-alpha)' }}>
+                  <span className="text-lg">{svc.icon || '🔗'}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{svc.name}</p>
+                  {svc.description && (
+                    <p className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>{svc.description}</p>
+                  )}
+                  <p className="text-xs font-mono" style={{ color: 'var(--accent)' }}>:{svc.port}</p>
+                </div>
+                <ExternalLink size={14} style={{ color: 'var(--text-secondary)' }} />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Music Player */}
       <div
         className="rounded-xl p-6 transition-all duration-200 hover:shadow-lg"
@@ -554,7 +596,7 @@ export default function DashboardPage() {
                       <p className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>{track.artist} · {formatDuration(track.duration)}</p>
                     </div>
                     {musicState.current
-                      ? <Plus size={16} style={{ color: 'var(--accent)' }} title="Agregar a la cola" />
+                      ? <Plus size={16} style={{ color: 'var(--accent)' }} />
                       : <Play size={16} style={{ color: 'var(--accent)' }} />
                     }
                   </div>

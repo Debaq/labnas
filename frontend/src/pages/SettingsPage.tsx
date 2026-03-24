@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, ShieldCheck, ShieldAlert, UserCheck, Link2, Globe, Building2 } from 'lucide-react'
+import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, ShieldCheck, ShieldAlert, UserCheck, Link2, Globe, Building2, ExternalLink, Plus } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, getThemeNames, type ThemeName } from '../themes/themes'
-import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, checkUpdate, doUpdate, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, type LabBranding } from '../api'
+import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, checkUpdate, doUpdate, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, type LabBranding, type LabService } from '../api'
 import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig, UserRole, UserPermissions } from '../types'
 
 function formatBytes(bytes: number): string {
@@ -81,6 +81,14 @@ export default function SettingsPage() {
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [autostart, setAutostart] = useState<AutostartStatus | null>(null)
 
+  // Servicios
+  const [services, setServices] = useState<LabService[]>([])
+  const [showAddService, setShowAddService] = useState(false)
+  const [svcName, setSvcName] = useState('')
+  const [svcPort, setSvcPort] = useState('')
+  const [svcDesc, setSvcDesc] = useState('')
+  const [svcIcon, setSvcIcon] = useState('')
+
   // Telegram
   const [notifConfig, setNotifConfig] = useState<NotificationConfig | null>(null)
   const [tokenInput, setTokenInput] = useState('')
@@ -103,6 +111,7 @@ export default function SettingsPage() {
     checkUpdate().then(setUpdateInfo).catch(() => {})
     getMdnsStatus().then(s => { setMdnsState(s); setMdnsHostname(s.hostname) }).catch(() => {})
     getBranding().then(setBrandingState).catch(() => {})
+    getServices().then(setServices).catch(() => {})
     fetchNotificationConfig().then((c) => {
       setNotifConfig(c)
       setDailyEnabled(c.daily_enabled)
@@ -241,6 +250,114 @@ export default function SettingsPage() {
             >
               Guardar
             </button>
+          </div>
+        </section>
+      )}
+
+      {/* Servicios del Lab (admin) */}
+      {isAdmin && (
+        <section>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <ExternalLink size={22} style={{ color: 'var(--accent)' }} />
+              <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Servicios del Lab</h2>
+            </div>
+            <button
+              onClick={() => setShowAddService(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-90"
+              style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
+            >
+              <Plus size={14} />
+              Agregar servicio
+            </button>
+          </div>
+
+          {showAddService && (
+            <div className="rounded-xl p-5 mb-4 space-y-3" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Nombre</label>
+                  <input value={svcName} onChange={e => setSvcName(e.target.value)}
+                    placeholder="CVAT" className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                    style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Puerto</label>
+                  <input type="number" value={svcPort} onChange={e => setSvcPort(e.target.value)}
+                    placeholder="8080" className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                    style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Descripcion (opcional)</label>
+                  <input value={svcDesc} onChange={e => setSvcDesc(e.target.value)}
+                    placeholder="Anotacion de imagenes" className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                    style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Icono emoji (opcional)</label>
+                  <input value={svcIcon} onChange={e => setSvcIcon(e.target.value)}
+                    placeholder="🏷️" className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                    style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={async () => {
+                    if (!svcName || !svcPort) return
+                    try {
+                      const updated = await addService({ name: svcName, port: parseInt(svcPort), description: svcDesc, icon: svcIcon })
+                      setServices(updated)
+                      setSvcName(''); setSvcPort(''); setSvcDesc(''); setSvcIcon('')
+                      setShowAddService(false)
+                    } catch (e: any) { alert(e.message) }
+                  }}
+                  disabled={!svcName || !svcPort}
+                  className="px-4 py-2 rounded-lg text-sm font-medium"
+                  style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
+                  Agregar
+                </button>
+                <button onClick={() => setShowAddService(false)}
+                  className="px-4 py-2 rounded-lg text-sm font-medium"
+                  style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="rounded-xl overflow-hidden" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
+            {services.length === 0 ? (
+              <div className="text-center py-8">
+                <ExternalLink size={32} className="mx-auto mb-2" style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
+                <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>No hay servicios configurados</p>
+              </div>
+            ) : (
+              <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
+                {services.map(svc => (
+                  <div key={svc.port} className="flex items-center justify-between px-5 py-3">
+                    <div className="flex items-center gap-3">
+                      <span className="text-lg">{svc.icon || '🔗'}</span>
+                      <div>
+                        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{svc.name}</span>
+                        <span className="text-xs font-mono ml-2" style={{ color: 'var(--accent)' }}>:{svc.port}</span>
+                      </div>
+                      {svc.description && (
+                        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{svc.description}</span>
+                      )}
+                    </div>
+                    <button onClick={async () => {
+                      try {
+                        await deleteService(svc.port)
+                        setServices(prev => prev.filter(s => s.port !== svc.port))
+                      } catch {}
+                    }}
+                      className="p-1.5 rounded-lg transition-all hover:opacity-80" style={{ color: 'var(--danger)' }}>
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </section>
       )}

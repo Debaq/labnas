@@ -93,6 +93,9 @@ async fn main() {
         .route("/api/system/branding", post(handlers::system::set_branding))
         .route("/api/system/mdns", get(handlers::system::get_mdns_status))
         .route("/api/system/mdns", post(handlers::system::set_mdns))
+        .route("/api/system/services", get(handlers::system::get_services))
+        .route("/api/system/services", post(handlers::system::add_service))
+        .route("/api/system/services/{port}", delete(handlers::system::delete_service))
         // Network
         .route("/api/network/scan", post(handlers::network::scan_network))
         .route("/api/network/hosts", get(handlers::network::get_hosts))

@@ -371,6 +371,36 @@ export async function setBranding(data: LabBranding): Promise<LabBranding> {
   return res.json()
 }
 
+// --- Servicios del lab ---
+
+export interface LabService {
+  name: string
+  port: number
+  description: string
+  icon: string
+}
+
+export async function getServices(): Promise<LabService[]> {
+  const res = await api('/api/system/services')
+  if (!res.ok) return []
+  return res.json()
+}
+
+export async function addService(data: LabService): Promise<LabService[]> {
+  const res = await api('/api/system/services', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) { const t = await res.text(); throw new Error(t) }
+  return res.json()
+}
+
+export async function deleteService(port: number): Promise<void> {
+  const res = await api(`/api/system/services/${port}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar servicio')
+}
+
 // --- mDNS ---
 
 export async function getMdnsStatus(): Promise<{ enabled: boolean; hostname: string; url: string }> {
@@ -742,7 +772,7 @@ export interface EmailFilter {
   auto_tag: string | null
 }
 
-export async function configureEmailAccount(data: { imap_host: string; imap_port: number; email: string; password: string }): Promise<string> {
+export async function configureEmailAccount(data: { host: string; port: number; protocol: 'imap' | 'pop3'; email: string; password: string }): Promise<string> {
   const res = await api('/api/email/account', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

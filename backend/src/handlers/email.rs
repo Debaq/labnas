@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::config::save_config;
-use crate::models::email::{EmailAccount, EmailFilter, EmailMessage, FilterAction};
+use crate::models::email::{EmailAccount, EmailFilter, EmailMessage, FilterAction, MailProtocol};
 use crate::models::notifications::UserRole;
 use crate::state::AppState;
 
@@ -33,8 +33,10 @@ fn extract_username(
 
 #[derive(Debug, Deserialize)]
 pub struct ConfigureAccountRequest {
-    pub imap_host: String,
-    pub imap_port: u16,
+    pub host: String,
+    pub port: u16,
+    #[serde(default)]
+    pub protocol: crate::models::email::MailProtocol,
     pub email: String,
     pub password: String,
 }
@@ -59,17 +61,23 @@ pub async fn configure_account(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    if req.imap_host.is_empty() || req.email.is_empty() || req.password.is_empty() {
+    if req.host.is_empty() || req.email.is_empty() || req.password.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
             "Host, email y password son requeridos".to_string(),
         ));
     }
 
+    let protocol_label = match req.protocol {
+        MailProtocol::Imap => "IMAP",
+        MailProtocol::Pop3 => "POP3",
+    };
+
     let account = EmailAccount {
         username: username.clone(),
-        imap_host: req.imap_host.trim().to_string(),
-        imap_port: req.imap_port,
+        host: req.host.trim().to_string(),
+        port: req.port,
+        protocol: req.protocol,
         email: req.email.trim().to_string(),
         password: req.password,
         filters: Vec::new(),
@@ -77,7 +85,7 @@ pub async fn configure_account(
 
     // Verificar conexion antes de guardar
     let test_account = account.clone();
-    let test_result = tokio::task::spawn_blocking(move || fetch_emails(&test_account))
+    let test_result = tokio::task::spawn_blocking(move || fetch_emails_dispatch(&test_account))
         .await
         .map_err(|e| {
             (
@@ -89,7 +97,7 @@ pub async fn configure_account(
     if let Err(e) = test_result {
         return Err((
             StatusCode::BAD_REQUEST,
-            format!("No se pudo conectar al servidor IMAP: {}", e),
+            format!("No se pudo conectar al servidor {}: {}", protocol_label, e),
         ));
     }
 
@@ -105,12 +113,12 @@ pub async fn configure_account(
     state
         .log_activity(
             "email_configurado",
-            &format!("Cuenta IMAP: {}", req.email),
+            &format!("Cuenta {}: {}", protocol_label, req.email),
             &username,
         )
         .await;
 
-    Ok((StatusCode::OK, "Cuenta IMAP configurada correctamente".to_string()))
+    Ok((StatusCode::OK, format!("Cuenta {} configurada correctamente", protocol_label)))
 }
 
 /// DELETE /api/email/account - Eliminar mi cuenta IMAP
@@ -130,7 +138,7 @@ pub async fn delete_account(
     if config.email.accounts.len() == before {
         return Err((
             StatusCode::NOT_FOUND,
-            "No tienes cuenta IMAP configurada".to_string(),
+            "No tienes cuenta de correo configurada".to_string(),
         ));
     }
 
@@ -145,7 +153,7 @@ pub async fn delete_account(
     inbox.remove(&username);
 
     state
-        .log_activity("email_eliminado", "Cuenta IMAP eliminada", &username)
+        .log_activity("email_eliminado", "Cuenta de correo eliminada", &username)
         .await;
 
     Ok(StatusCode::NO_CONTENT)
@@ -189,12 +197,12 @@ pub async fn check_now(
     let Some(account) = account else {
         return Err((
             StatusCode::NOT_FOUND,
-            "No tienes cuenta IMAP configurada".to_string(),
+            "No tienes cuenta de correo configurada".to_string(),
         ));
     };
 
     let cloned_account = account.clone();
-    let emails_result = tokio::task::spawn_blocking(move || fetch_emails(&cloned_account))
+    let emails_result = tokio::task::spawn_blocking(move || fetch_emails_dispatch(&cloned_account))
         .await
         .map_err(|e| {
             (
@@ -206,7 +214,7 @@ pub async fn check_now(
     let mut emails = emails_result.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Error IMAP: {}", e),
+            format!("Error obteniendo correos: {}", e),
         )
     })?;
 
@@ -505,15 +513,25 @@ fn apply_filters(filters: &[EmailFilter], from: &str) -> Option<(String, FilterA
 }
 
 // =====================
+// Dispatch por protocolo
+// =====================
+
+pub fn fetch_emails_dispatch(account: &EmailAccount) -> Result<Vec<EmailMessage>, String> {
+    match account.protocol {
+        MailProtocol::Imap => fetch_emails_imap(account),
+        MailProtocol::Pop3 => fetch_emails_pop3(account),
+    }
+}
+
+// =====================
 // IMAP - Fetch emails (BLOCKING)
 // =====================
 
-/// Conectar a IMAP y traer ultimos 20 emails no leidos
-pub fn fetch_emails(account: &EmailAccount) -> Result<Vec<EmailMessage>, String> {
+fn fetch_emails_imap(account: &EmailAccount) -> Result<Vec<EmailMessage>, String> {
     let tls = native_tls::TlsConnector::new().map_err(|e| format!("Error TLS: {}", e))?;
 
-    let addr = (&*account.imap_host, account.imap_port);
-    let client = imap::connect(addr, &account.imap_host, &tls)
+    let addr = (&*account.host, account.port);
+    let client = imap::connect(addr, &account.host, &tls)
         .map_err(|e| format!("Error conectando a IMAP: {}", e))?;
 
     let mut session = client
@@ -726,6 +744,170 @@ fn decode_mime_header(input: &str) -> String {
 }
 
 // =====================
+// POP3 - Fetch emails (BLOCKING)
+// =====================
+
+fn fetch_emails_pop3(account: &EmailAccount) -> Result<Vec<EmailMessage>, String> {
+    use std::io::{BufRead, BufReader, Write};
+
+    let tls = native_tls::TlsConnector::new().map_err(|e| format!("Error TLS: {}", e))?;
+    let tcp = std::net::TcpStream::connect((&*account.host, account.port))
+        .map_err(|e| format!("Error conectando a POP3 {}:{}: {}", account.host, account.port, e))?;
+    tcp.set_read_timeout(Some(std::time::Duration::from_secs(30))).ok();
+    tcp.set_write_timeout(Some(std::time::Duration::from_secs(15))).ok();
+
+    let stream = tls
+        .connect(&account.host, tcp)
+        .map_err(|e| format!("Error TLS POP3: {}", e))?;
+
+    let mut reader = BufReader::new(stream);
+
+    fn pop3_read_line(reader: &mut BufReader<native_tls::TlsStream<std::net::TcpStream>>) -> Result<String, String> {
+        let mut line = String::new();
+        reader.read_line(&mut line).map_err(|e| format!("Error leyendo POP3: {}", e))?;
+        Ok(line)
+    }
+
+    fn pop3_send(reader: &mut BufReader<native_tls::TlsStream<std::net::TcpStream>>, cmd: &str) -> Result<(), String> {
+        reader.get_mut().write_all(format!("{}\r\n", cmd).as_bytes())
+            .map_err(|e| format!("Error enviando POP3: {}", e))?;
+        reader.get_mut().flush().map_err(|e| format!("Error flush POP3: {}", e))?;
+        Ok(())
+    }
+
+    fn pop3_cmd(reader: &mut BufReader<native_tls::TlsStream<std::net::TcpStream>>, cmd: &str) -> Result<String, String> {
+        pop3_send(reader, cmd)?;
+        pop3_read_line(reader)
+    }
+
+    // Leer greeting
+    let greeting = pop3_read_line(&mut reader)?;
+    if !greeting.starts_with("+OK") {
+        return Err(format!("POP3 greeting inesperado: {}", greeting.trim()));
+    }
+
+    // AUTH
+    let resp = pop3_cmd(&mut reader, &format!("USER {}", account.email))?;
+    if !resp.starts_with("+OK") {
+        return Err(format!("POP3 USER rechazado: {}", resp.trim()));
+    }
+
+    let resp = pop3_cmd(&mut reader, &format!("PASS {}", account.password))?;
+    if !resp.starts_with("+OK") {
+        return Err(format!("POP3 login fallido: {}", resp.trim()));
+    }
+
+    // STAT para obtener cantidad de mensajes
+    let resp = pop3_cmd(&mut reader, "STAT")?;
+    if !resp.starts_with("+OK") {
+        return Err(format!("POP3 STAT error: {}", resp.trim()));
+    }
+    let total: usize = resp.trim()
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+
+    if total == 0 {
+        let _ = pop3_cmd(&mut reader, "QUIT");
+        return Ok(Vec::new());
+    }
+
+    // UIDL para IDs unicos
+    let resp = pop3_cmd(&mut reader, "UIDL")?;
+    if !resp.starts_with("+OK") {
+        return Err(format!("POP3 UIDL error: {}", resp.trim()));
+    }
+    let mut uidl_map: Vec<(usize, String)> = Vec::new();
+    loop {
+        let line = pop3_read_line(&mut reader)?;
+        let line = line.trim().to_string();
+        if line == "." { break; }
+        let parts: Vec<&str> = line.splitn(2, ' ').collect();
+        if parts.len() == 2 {
+            if let Ok(num) = parts[0].parse::<usize>() {
+                uidl_map.push((num, parts[1].to_string()));
+            }
+        }
+    }
+
+    // Tomar los ultimos 20
+    let start = if uidl_map.len() > 20 { uidl_map.len() - 20 } else { 0 };
+    let to_fetch: Vec<(usize, String)> = uidl_map[start..].to_vec();
+
+    let mut emails = Vec::new();
+
+    for (msg_num, uidl) in &to_fetch {
+        // RETR para obtener el mensaje completo
+        let resp = pop3_cmd(&mut reader, &format!("RETR {}", msg_num))?;
+        if !resp.starts_with("+OK") {
+            continue;
+        }
+
+        let mut raw_msg = Vec::new();
+        loop {
+            let line = pop3_read_line(&mut reader)?;
+            let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+            if trimmed == "." { break; }
+            // Byte-stuffing: lineas que empiezan con ".." se decodifican a "."
+            let decoded = if trimmed.starts_with("..") { &trimmed[1..] } else { trimmed };
+            raw_msg.extend_from_slice(decoded.as_bytes());
+            raw_msg.push(b'\n');
+        }
+
+        // Parsear con mailparse
+        let parsed = match mailparse::parse_mail(&raw_msg) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+
+        // Generar UID numerico a partir del UIDL string
+        let uid: u32 = uidl.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
+
+        let subject = parsed.headers.iter()
+            .find(|h| h.get_key().eq_ignore_ascii_case("subject"))
+            .map(|h| decode_mime_header(&h.get_value()))
+            .unwrap_or_default();
+
+        let from = parsed.headers.iter()
+            .find(|h| h.get_key().eq_ignore_ascii_case("from"))
+            .map(|h| decode_mime_header(&h.get_value()))
+            .unwrap_or_else(|| "desconocido".to_string());
+
+        let date = parsed.headers.iter()
+            .find(|h| h.get_key().eq_ignore_ascii_case("date"))
+            .map(|h| h.get_value())
+            .unwrap_or_default();
+
+        let body_preview = extract_text_body(&parsed);
+        let body_preview = if body_preview.len() > 500 {
+            format!("{}...", &body_preview[..497])
+        } else {
+            body_preview
+        };
+
+        emails.push(EmailMessage {
+            uid,
+            from,
+            subject,
+            date,
+            body_preview,
+            ai_classification: None,
+            ai_summary: None,
+            ai_action: None,
+            filter_label: None,
+            filter_action: None,
+            processed: false,
+            task_created: false,
+            fetched_at: Utc::now(),
+        });
+    }
+
+    let _ = pop3_cmd(&mut reader, "QUIT");
+    Ok(emails)
+}
+
+// =====================
 // Groq AI classification
 // =====================
 
@@ -816,7 +998,7 @@ pub async fn email_check_loop(state: AppState) {
         for account in &accounts {
             let account_clone = account.clone();
             let result =
-                tokio::task::spawn_blocking(move || fetch_emails(&account_clone)).await;
+                tokio::task::spawn_blocking(move || fetch_emails_dispatch(&account_clone)).await;
 
             let emails_result = match result {
                 Ok(r) => r,
@@ -832,7 +1014,7 @@ pub async fn email_check_loop(state: AppState) {
             let mut emails = match emails_result {
                 Ok(e) => e,
                 Err(e) => {
-                    eprintln!("[Email] Error IMAP para {}: {}", account.email, e);
+                    eprintln!("[Email] Error {:?} para {}: {}", account.protocol, account.email, e);
                     continue;
                 }
             };
@@ -990,7 +1172,7 @@ pub async fn get_emails_summary(state: &AppState, chat_name: &str) -> String {
         Some(e) if !e.is_empty() => e.clone(),
         _ => {
             return format!(
-                "*Correos de {}*\n\nNo hay correos. Configura tu cuenta IMAP desde la web o usa `/correos check` para revisar.",
+                "*Correos de {}*\n\nNo hay correos. Configura tu cuenta desde la web o usa `/correos check` para revisar.",
                 username
             );
         }
