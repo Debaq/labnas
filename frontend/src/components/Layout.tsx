@@ -4,6 +4,7 @@ import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare,
 import { useTheme } from '../themes/ThemeContext'
 import { useAuth } from '../auth/AuthContext'
 import { shutdownServer, getBranding } from '../api'
+import MusicPanel from './MusicPanel'
 // ThemeName ya no se usa directamente - el contexto maneja 'auto' + ThemeName
 
 const pageTitles: Record<string, string> = {
@@ -226,7 +227,7 @@ export default function Layout() {
             className="text-[10px] transition-opacity hover:opacity-80"
             style={{ color: 'var(--text-secondary)' }}
           >
-            {collapsed ? 'LabNAS' : 'Powered by LabNAS'}
+            {collapsed ? 'LabNAS' : 'Powered by TecMedHub'}
           </a>
         </div>
       </aside>
@@ -273,6 +274,9 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+
+      {/* Music Panel */}
+      <MusicPanel />
     </div>
   )
 }
