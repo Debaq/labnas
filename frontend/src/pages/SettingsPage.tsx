@@ -92,7 +92,7 @@ export default function SettingsPage() {
   const [scheduleMinute, setScheduleMinute] = useState(0)
   const [dailyEnabled, setDailyEnabled] = useState(false)
 
-  const isAdmin = isAdmin
+  const isAdmin = authUser?.role === 'admin'
 
   useEffect(() => {
     if (!isAdmin) return
