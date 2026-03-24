@@ -53,7 +53,11 @@ pub struct MusicState {
     pub stream_url: Option<String>,
     #[serde(default)]
     pub paused: bool,
+    #[serde(default = "default_volume")]
+    pub volume: u8,
 }
+
+fn default_volume() -> u8 { 80 }
 
 const MAX_HISTORY: usize = 50;
 
@@ -75,6 +79,11 @@ pub struct QueueRemoveRequest {
 #[derive(Debug, Deserialize)]
 pub struct SetModeRequest {
     pub mode: PlaybackMode,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetVolumeRequest {
+    pub volume: u8,
 }
 
 // yt-dlp JSON output
@@ -201,6 +210,23 @@ async fn start_playback(state: &AppState, video_id: &str, mode: &PlaybackMode) -
             get_stream_url(video_id).await
         }
     }
+}
+
+// Wrappers publicos para uso desde notifications
+pub fn add_to_history_pub(ms: &mut MusicState, track: &MusicTrack, played_by: &str) {
+    add_to_history(ms, track, played_by);
+}
+pub async fn start_playback_pub(state: &AppState, video_id: &str, mode: &PlaybackMode) -> Option<String> {
+    start_playback(state, video_id, mode).await
+}
+pub async fn kill_player_pub(state: &AppState) {
+    kill_player(state).await;
+}
+pub async fn pause_player_pub(state: &AppState) {
+    pause_player(state).await;
+}
+pub async fn resume_player_pub(state: &AppState) {
+    resume_player(state).await;
 }
 
 fn add_to_history(ms: &mut MusicState, track: &MusicTrack, played_by: &str) {
@@ -537,6 +563,34 @@ pub async fn set_mode(
     }
 
     Json(ms.clone())
+}
+
+/// POST /api/music/volume - Ajustar volumen (0-100)
+pub async fn set_volume(
+    State(state): State<AppState>,
+    Json(req): Json<SetVolumeRequest>,
+) -> Json<MusicState> {
+    let vol = req.volume.min(100);
+    let mut ms = state.music.lock().await;
+    ms.volume = vol;
+    let mode = ms.mode.clone();
+    drop(ms);
+
+    // En modo NAS, ajustar volumen del sistema
+    if mode == PlaybackMode::Nas {
+        let vol_str = format!("{}%", vol);
+        // Intentar pactl primero, luego amixer
+        let _ = Command::new("pactl")
+            .args(["set-sink-volume", "@DEFAULT_SINK@", &vol_str])
+            .output().await
+            .or_else(|_| {
+                std::process::Command::new("amixer")
+                    .args(["sset", "Master", &vol_str])
+                    .output()
+            });
+    }
+
+    Json(state.music.lock().await.clone())
 }
 
 /// POST /api/music/recommend - Mix basado en canción actual/historial

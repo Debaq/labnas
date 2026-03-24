@@ -113,6 +113,7 @@ async fn main() {
         .route("/api/music/history", get(handlers::music::history))
         .route("/api/music/recommend", post(handlers::music::recommend))
         .route("/api/music/mode", post(handlers::music::set_mode))
+        .route("/api/music/volume", post(handlers::music::set_volume))
         // Terminal
         .route("/api/terminal", get(handlers::terminal::terminal_handler))
         // Printers 3D

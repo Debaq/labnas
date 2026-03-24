@@ -861,6 +861,7 @@ export interface MusicState {
   mode: 'nas' | 'browser'
   stream_url: string | null
   paused: boolean
+  volume: number
 }
 
 export async function searchMusic(q: string): Promise<MusicTrack[]> {
@@ -906,6 +907,16 @@ export async function pauseMusic(): Promise<MusicState> {
 export async function previousMusic(): Promise<MusicState> {
   const res = await api('/api/music/previous', { method: 'POST' })
   if (!res.ok) { const t = await res.text(); throw new Error(t) }
+  return res.json()
+}
+
+export async function setMusicVolume(volume: number): Promise<MusicState> {
+  const res = await api('/api/music/volume', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ volume }),
+  })
+  if (!res.ok) throw new Error('Error ajustando volumen')
   return res.json()
 }
 

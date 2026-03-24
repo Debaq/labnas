@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
-import { HardDrive, Wifi, Activity, Database, Box, Music, Search, Play, Pause, Square, Loader2, X, SkipForward, SkipBack, Trash2, ListMusic, Plus, Sparkles, Speaker, Monitor, ExternalLink } from 'lucide-react'
-import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus, searchMusic, playMusic, getCurrentMusic, stopMusic, pauseMusic, previousMusic, nextMusic, removeFromQueue, recommendMusic, setMusicMode, getServices, type MusicTrack, type MusicState, type LabService } from '../api'
+import { HardDrive, Wifi, Activity, Database, Box, Music, Search, Play, Pause, Square, Loader2, X, SkipForward, SkipBack, Trash2, ListMusic, Plus, Sparkles, Speaker, Monitor, ExternalLink, MoreVertical, Volume2 } from 'lucide-react'
+import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus, searchMusic, playMusic, getCurrentMusic, stopMusic, pauseMusic, previousMusic, nextMusic, removeFromQueue, recommendMusic, setMusicMode, setMusicVolume, getServices, type MusicTrack, type MusicState, type LabService } from '../api'
 import { useAuth } from '../auth/AuthContext'
 import type { DiskInfo, SystemInfo, NetworkHost, Printer3DConfig, Printer3DStatus } from '../types'
 
@@ -77,7 +77,8 @@ export default function DashboardPage() {
   const [services, setServices] = useState<LabService[]>([])
 
   // Music
-  const [musicState, setMusicState] = useState<MusicState>({ current: null, queue: [], started_by: null, history: [], mode: 'nas', stream_url: null, paused: false })
+  const [musicState, setMusicState] = useState<MusicState>({ current: null, queue: [], started_by: null, history: [], mode: 'nas', stream_url: null, paused: false, volume: 80 })
+  const [showPlayerMenu, setShowPlayerMenu] = useState(false)
   const audioRef = useRef<HTMLAudioElement>(null)
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -126,7 +127,7 @@ export default function DashboardPage() {
   }, [])
 
   function safeMusicState(ms: MusicState): MusicState {
-    return { current: ms.current ?? null, queue: ms.queue ?? [], started_by: ms.started_by ?? null, history: ms.history ?? [], mode: ms.mode ?? 'nas', stream_url: ms.stream_url ?? null, paused: ms.paused ?? false }
+    return { current: ms.current ?? null, queue: ms.queue ?? [], started_by: ms.started_by ?? null, history: ms.history ?? [], mode: ms.mode ?? 'nas', stream_url: ms.stream_url ?? null, paused: ms.paused ?? false, volume: ms.volume ?? 80 }
   }
 
   // Poll music state every 5s
@@ -142,6 +143,7 @@ export default function DashboardPage() {
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
+    audio.volume = musicState.volume / 100
     if (musicState.mode === 'browser' && musicState.stream_url) {
       if (audio.src !== musicState.stream_url) {
         audio.src = musicState.stream_url
@@ -151,7 +153,7 @@ export default function DashboardPage() {
       audio.pause()
       audio.src = ''
     }
-  }, [musicState.stream_url, musicState.mode])
+  }, [musicState.stream_url, musicState.mode, musicState.volume])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -211,6 +213,13 @@ export default function DashboardPage() {
     try {
       setMusicState(safeMusicState(await previousMusic()))
     } catch {}
+  }
+
+  async function handleVolume(vol: number) {
+    const ms = safeMusicState(await setMusicVolume(vol))
+    setMusicState(ms)
+    const audio = audioRef.current
+    if (audio) audio.volume = vol / 100
   }
 
   async function handleNext() {
@@ -461,19 +470,6 @@ export default function DashboardPage() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={handleToggleMode}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-90"
-              style={{
-                backgroundColor: 'var(--bg-tertiary)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border)',
-              }}
-              title={musicState.mode === 'nas' ? 'Sonando en NAS' : 'Sonando en navegador'}
-            >
-              {musicState.mode === 'nas' ? <Speaker size={14} /> : <Monitor size={14} />}
-              {musicState.mode === 'nas' ? 'NAS' : 'PC'}
-            </button>
-            <button
               onClick={handleRecommend}
               disabled={loadingMix || (!musicState.current && (musicState.history?.length ?? 0) === 0)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-90"
@@ -495,6 +491,41 @@ export default function DashboardPage() {
               <Search size={14} />
               Buscar
             </button>
+            <div className="relative">
+              <button
+                onClick={() => setShowPlayerMenu(!showPlayerMenu)}
+                className="p-1.5 rounded-lg transition-all hover:opacity-80"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                <MoreVertical size={18} />
+              </button>
+              {showPlayerMenu && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowPlayerMenu(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-20 rounded-lg p-2 min-w-[180px] space-y-1"
+                    style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+                    <button
+                      onClick={() => { handleToggleMode(); setShowPlayerMenu(false) }}
+                      className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs font-medium transition-all hover:opacity-80"
+                      style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)' }}
+                    >
+                      {musicState.mode === 'nas' ? <Speaker size={14} /> : <Monitor size={14} />}
+                      Modo: {musicState.mode === 'nas' ? 'NAS (parlante)' : 'PC (navegador)'}
+                    </button>
+                    <div className="px-3 py-2">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Volume2 size={12} style={{ color: 'var(--text-secondary)' }} />
+                        <span className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>Volumen: {musicState.volume}%</span>
+                      </div>
+                      <input type="range" min="0" max="100" value={musicState.volume}
+                        onChange={e => handleVolume(parseInt(e.target.value))}
+                        className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+                        style={{ accentColor: 'var(--accent)', backgroundColor: 'var(--bg-tertiary)' }} />
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
