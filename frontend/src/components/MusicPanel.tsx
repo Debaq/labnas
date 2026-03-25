@@ -8,7 +8,7 @@ import {
 import {
   searchMusic, playMusic, getCurrentMusic, stopMusic, pauseMusic, previousMusic,
   nextMusic, removeFromQueue, playFromQueue, moveInQueue, toggleShuffle, toggleRepeat,
-  recommendMusic, setMusicMode, setMusicVolume, setMusicVideo, getScreens, startRadio, luckyPlay,
+  recommendMusic, setMusicMode, setMusicVolume, setMusicVideo, getScreens, startRadio, luckyPlay, clearQueue,
   type MusicTrack, type MusicState, type ScreenInfo,
 } from '../api'
 
@@ -45,6 +45,8 @@ export default function MusicPanel() {
   const [loadingRadio, setLoadingRadio] = useState(false)
   const [loadingLucky, setLoadingLucky] = useState(false)
   const [radioError, setRadioError] = useState<string | null>(null)
+  const [elapsed, setElapsed] = useState(0)
+  const [showVolume, setShowVolume] = useState(false)
 
   useEffect(() => {
     localStorage.setItem('labnas-music-panel', open ? 'open' : 'closed')
@@ -91,6 +93,27 @@ export default function MusicPanel() {
       audio.removeEventListener('error', autoNext)
     }
   }, [musicState.mode])
+
+  // Track elapsed time
+  useEffect(() => {
+    if (!musicState.current || musicState.paused) return
+    const audio = audioRef.current
+    if (musicState.mode === 'browser' && audio && audio.src) {
+      const tick = () => setElapsed(Math.floor(audio.currentTime))
+      audio.addEventListener('timeupdate', tick)
+      return () => audio.removeEventListener('timeupdate', tick)
+    }
+    // NAS mode: estimate with timer
+    const start = Date.now() - elapsed * 1000
+    const interval = setInterval(() => {
+      const secs = Math.floor((Date.now() - start) / 1000)
+      setElapsed(Math.min(secs, musicState.current?.duration || secs))
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [musicState.current?.id, musicState.paused, musicState.mode])
+
+  // Reset elapsed on new track
+  useEffect(() => { setElapsed(0) }, [musicState.current?.id])
 
   async function handleSearch() {
     if (!searchQuery.trim()) return
@@ -144,6 +167,7 @@ export default function MusicPanel() {
   }
 
   async function handleRadio(artist: string, track: string) {
+    if (musicState.queue.length > 0 && !confirm(`Esto reemplazara tu cola actual (${musicState.queue.length} canciones). Continuar?`)) return
     setLoadingRadio(true)
     setRadioError(null)
     try {
@@ -240,10 +264,23 @@ export default function MusicPanel() {
               <p className="text-xs font-medium leading-tight" style={{ color: 'var(--text-primary)' }}>{musicState.current.title}</p>
               <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>{musicState.current.artist}</p>
               <p className="text-[9px] mt-1" style={{ color: 'var(--text-secondary)', opacity: 0.6 }}>
-                {musicState.current.added_by || musicState.started_by} · {formatDuration(musicState.current.duration)}
+                {musicState.current.added_by || musicState.started_by}
               </p>
             </div>
           </div>
+          {/* Progress bar */}
+          {musicState.current.duration > 0 && (
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-[9px] font-mono w-8 text-right" style={{ color: 'var(--text-secondary)' }}>{formatDuration(elapsed)}</span>
+              <div className="flex-1 h-1 rounded-full" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                <div className="h-full rounded-full transition-all duration-1000" style={{
+                  width: `${Math.min((elapsed / musicState.current.duration) * 100, 100)}%`,
+                  backgroundColor: 'var(--accent)',
+                }} />
+              </div>
+              <span className="text-[9px] font-mono w-8" style={{ color: 'var(--text-secondary)' }}>{formatDuration(musicState.current.duration)}</span>
+            </div>
+          )}
         ) : (
           <div className="text-center py-1">
             <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
@@ -299,14 +336,30 @@ export default function MusicPanel() {
           </button>
         </div>
 
-        {/* Volume - SIEMPRE visible */}
-        <div className="flex items-center gap-2">
-          <Volume2 size={12} style={{ color: 'var(--text-secondary)' }} />
-          <input type="range" min="0" max="100" value={musicState.volume}
-            onChange={e => handleVolume(parseInt(e.target.value))}
-            className="flex-1 h-1 rounded-full appearance-none cursor-pointer"
-            style={{ accentColor: 'var(--accent)', backgroundColor: 'var(--bg-tertiary)' }} />
-          <span className="text-[9px] w-7 text-right" style={{ color: 'var(--text-secondary)' }}>{musicState.volume}%</span>
+        {/* Volume - boton compacto */}
+        <div className="flex items-center justify-center">
+          <div className="relative">
+            <button onClick={() => setShowVolume(!showVolume)}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg hover:opacity-80"
+              style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--bg-tertiary)' }}>
+              <Volume2 size={12} />
+              <span className="text-[9px] font-mono">{musicState.volume}%</span>
+            </button>
+            {showVolume && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowVolume(false)} />
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-20 flex flex-col items-center gap-1 p-2 rounded-lg"
+                  style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+                  <input type="range" min="0" max="100" value={musicState.volume}
+                    onChange={e => handleVolume(parseInt(e.target.value))}
+                    className="h-20 appearance-none cursor-pointer"
+                    orient="vertical"
+                    style={{ accentColor: 'var(--accent)', writingMode: 'vertical-lr', direction: 'rtl', width: '6px' }} />
+                  <span className="text-[9px] font-mono" style={{ color: 'var(--text-secondary)' }}>{musicState.volume}%</span>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Mix + Menu - SIEMPRE visibles */}
@@ -426,9 +479,19 @@ export default function MusicPanel() {
         {/* Queue */}
         {musicState.queue.length > 0 && (
           <div className="px-3 py-2">
-            <div className="flex items-center gap-1.5 mb-2">
-              <ListMusic size={12} style={{ color: 'var(--text-secondary)' }} />
-              <span className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>Cola ({musicState.queue.length})</span>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <ListMusic size={12} style={{ color: 'var(--text-secondary)' }} />
+                <span className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>Cola ({musicState.queue.length})</span>
+              </div>
+              <button
+                onClick={() => clearQueue().then(ms => setMusicState(safeMusicState(ms))).catch(() => {})}
+                className="text-[9px] px-1.5 py-0.5 rounded hover:opacity-80"
+                style={{ color: 'var(--danger)', border: '1px solid var(--danger)' + '40' }}
+                title="Vaciar cola"
+              >
+                <Trash2 size={10} />
+              </button>
             </div>
             <div className="space-y-1">
               {musicState.queue.map((track, i) => (

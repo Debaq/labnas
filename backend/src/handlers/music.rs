@@ -523,6 +523,15 @@ async fn advance_queue(state: &AppState) {
     ms.stream_url = stream;
 }
 
+/// POST /api/music/queue/clear - Vaciar la cola completa
+pub async fn queue_clear(
+    State(state): State<AppState>,
+) -> Json<MusicState> {
+    let mut ms = state.music.lock().await;
+    ms.queue.clear();
+    Json(ms.clone())
+}
+
 /// DELETE /api/music/queue - Quitar de la cola
 pub async fn queue_remove(
     State(state): State<AppState>,

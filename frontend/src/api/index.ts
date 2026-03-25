@@ -465,6 +465,12 @@ export async function setLastfmKey(key: string): Promise<string> {
   return res.text()
 }
 
+export async function clearQueue(): Promise<MusicState> {
+  const res = await api('/api/music/queue/clear', { method: 'POST' })
+  if (!res.ok) throw new Error('Error vaciando cola')
+  return res.json()
+}
+
 export async function luckyPlay(artist: string, track: string): Promise<MusicState> {
   const res = await api('/api/music/lucky', {
     method: 'POST',

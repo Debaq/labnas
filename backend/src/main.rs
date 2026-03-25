@@ -120,6 +120,7 @@ async fn main() {
         .route("/api/music/volume", post(handlers::music::set_volume))
         .route("/api/music/queue/play/{index}", post(handlers::music::queue_play))
         .route("/api/music/queue/move", post(handlers::music::queue_move))
+        .route("/api/music/queue/clear", post(handlers::music::queue_clear))
         .route("/api/music/shuffle", post(handlers::music::toggle_shuffle))
         .route("/api/music/repeat", post(handlers::music::toggle_repeat))
         .route("/api/music/video", post(handlers::music::set_video))
