@@ -11,6 +11,13 @@ export default function NetworkPage() {
   const [scanning, setScanning] = useState(false)
   const [labelModal, setLabelModal] = useState<NetworkHost | null>(null)
   const [labelInput, setLabelInput] = useState('')
+  const [iconInput, setIconInput] = useState('')
+
+  const deviceIcons = [
+    '💻', '🖥️', '📱', '🖨️', '📷', '🎮', '📺', '🔌',
+    '🌐', '📡', '🏠', '🔒', '💡', '🎵', '🤖', '⚡',
+    '🔧', '📦', '🖲️', '⌨️', '🎧', '🕹️', '📻', '🔬',
+  ]
 
   useEffect(() => {
     loadHosts()
@@ -42,9 +49,10 @@ export default function NetworkPage() {
   async function handleLabel() {
     if (!labelModal?.mac || !labelInput.trim()) return
     try {
-      await labelDevice(labelModal.mac, labelInput.trim())
+      await labelDevice(labelModal.mac, labelInput.trim(), iconInput || null)
       setLabelModal(null)
       setLabelInput('')
+      setIconInput('')
       const data = await fetchHosts()
       setHosts(data)
     } catch {}
@@ -168,8 +176,9 @@ export default function NetworkPage() {
                   {/* Device info */}
                   <td className="px-4 py-3">
                     <div>
-                      {host.label && (
+                      {(host.label || host.icon) && (
                         <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                          {host.icon && <span className="mr-1.5">{host.icon}</span>}
                           {host.label}
                         </span>
                       )}
@@ -205,7 +214,7 @@ export default function NetworkPage() {
                     <div className="flex items-center justify-end gap-1.5">
                       {host.mac && !host.is_known && (
                         <button
-                          onClick={() => { setLabelModal(host); setLabelInput('') }}
+                          onClick={() => { setLabelModal(host); setLabelInput(''); setIconInput('') }}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all duration-200 hover:opacity-80"
                           style={{ color: 'var(--success)', border: '1px solid var(--success)' }}
                           title="Marcar como conocido"
@@ -215,14 +224,24 @@ export default function NetworkPage() {
                         </button>
                       )}
                       {host.is_known && host.mac && (
-                        <button
-                          onClick={() => handleUnlabel(host.mac!)}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all duration-200 hover:opacity-80"
-                          style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
-                          title="Quitar etiqueta"
-                        >
-                          <X size={12} />
-                        </button>
+                        <>
+                          <button
+                            onClick={() => { setLabelModal(host); setLabelInput(host.label || ''); setIconInput(host.icon || '') }}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all duration-200 hover:opacity-80"
+                            style={{ color: 'var(--accent)', border: '1px solid var(--accent)' }}
+                            title="Editar etiqueta"
+                          >
+                            <Tag size={12} />
+                          </button>
+                          <button
+                            onClick={() => handleUnlabel(host.mac!)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all duration-200 hover:opacity-80"
+                            style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                            title="Quitar etiqueta"
+                          >
+                            <X size={12} />
+                          </button>
+                        </>
                       )}
                       {host.is_alive && (
                         <button
@@ -262,6 +281,25 @@ export default function NetworkPage() {
               <p>MAC: <span className="font-mono" style={{ color: 'var(--text-primary)' }}>{labelModal.mac}</span></p>
               {labelModal.vendor && <p>Fabricante: <span style={{ color: 'var(--accent)' }}>{labelModal.vendor}</span></p>}
               {labelModal.hostname && <p>Hostname: <span style={{ color: 'var(--text-primary)' }}>{labelModal.hostname}</span></p>}
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Icono</label>
+              <div className="flex flex-wrap gap-1 mb-3">
+                {deviceIcons.map((emoji) => (
+                  <button
+                    key={emoji}
+                    onClick={() => setIconInput(iconInput === emoji ? '' : emoji)}
+                    className="w-8 h-8 rounded-lg text-base flex items-center justify-center transition-all"
+                    style={{
+                      backgroundColor: iconInput === emoji ? 'var(--accent)' : 'var(--bg-tertiary)',
+                      border: iconInput === emoji ? '2px solid var(--accent)' : '1px solid var(--border)',
+                      opacity: iconInput === emoji ? 1 : 0.7,
+                    }}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
             </div>
             <div>
               <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Nombre del dispositivo</label>

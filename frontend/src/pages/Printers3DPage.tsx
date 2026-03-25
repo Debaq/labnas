@@ -27,6 +27,7 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowRight,
+  ExternalLink,
 } from 'lucide-react'
 import {
   fetchPrinters3D,
@@ -86,6 +87,15 @@ export default function Printers3DPage() {
   const [cameraKey, setCameraKey] = useState(0)
   const [actionFeedback, setActionFeedback] = useState<Record<string, string>>({})
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
+
+  function printerWebUrl(printer: Printer3DConfig): string | null {
+    switch (printer.printer_type) {
+      case 'OctoPrint': return `http://${printer.ip}:${printer.port}`
+      case 'Moonraker': return `http://${printer.ip}`
+      case 'CrealityStock': return `http://${printer.ip}`
+      case 'FlashForge': return null
+    }
+  }
 
   // Form state
   const [formName, setFormName] = useState('')
@@ -454,8 +464,20 @@ export default function Printers3DPage() {
                         <h3 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
                           {printer.name}
                         </h3>
-                        <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                        <p className="text-xs font-mono mt-0.5 flex items-center gap-1.5" style={{ color: 'var(--text-secondary)' }}>
                           {printer.ip}:{printer.port}
+                          {printerWebUrl(printer) && (
+                            <a
+                              href={printerWebUrl(printer)!}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center hover:opacity-70 transition-opacity"
+                              style={{ color: 'var(--accent)' }}
+                              title="Abrir gestor web"
+                            >
+                              <ExternalLink size={11} />
+                            </a>
+                          )}
                         </p>
                       </div>
                     </div>

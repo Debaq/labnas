@@ -71,6 +71,7 @@ pub async fn scan_network(
             if let Some(device) = known.iter().find(|d| d.mac.to_uppercase() == mac_upper) {
                 host.is_known = true;
                 host.label = Some(device.label.clone());
+                host.icon = device.icon.clone();
             }
         }
     }
@@ -184,6 +185,7 @@ pub async fn network_scan_loop(state: AppState) {
                         if let Some(device) = known.iter().find(|d| d.mac.to_uppercase() == mac_upper) {
                             host.is_known = true;
                             host.label = Some(device.label.clone());
+                            host.icon = device.icon.clone();
                         }
                     }
                 }
@@ -218,6 +220,7 @@ pub async fn label_host(
     let mut config = state.config.lock().await;
 
     let label = req.label;
+    let icon = req.icon;
 
     // Update or add
     if let Some(existing) = config
@@ -226,10 +229,12 @@ pub async fn label_host(
         .find(|d| d.mac.to_uppercase() == mac_upper)
     {
         existing.label = label.clone();
+        existing.icon = icon.clone();
     } else {
         config.known_devices.push(KnownDevice {
             mac: mac_upper.clone(),
             label: label.clone(),
+            icon: icon.clone(),
         });
     }
 
@@ -243,6 +248,7 @@ pub async fn label_host(
         if host.mac.as_ref().map(|m| m.to_uppercase()) == Some(mac_upper.clone()) {
             host.is_known = true;
             host.label = Some(label.clone());
+            host.icon = icon.clone();
         }
     }
 
@@ -275,6 +281,7 @@ pub async fn unlabel_host(
         if host.mac.as_ref().map(|m| m.to_uppercase()) == Some(mac_upper.clone()) {
             host.is_known = false;
             host.label = None;
+            host.icon = None;
         }
     }
 
@@ -299,6 +306,7 @@ async fn ping_host(ip: Ipv4Addr) -> NetworkHost {
                 is_alive: false,
                 is_known: false,
                 label: None,
+                icon: None,
                 last_seen: Utc::now(),
                 response_time_ms: None,
             };
@@ -336,6 +344,7 @@ async fn ping_host(ip: Ipv4Addr) -> NetworkHost {
         is_alive,
         is_known: false,
         label: None,
+        icon: None,
         last_seen: Utc::now(),
         response_time_ms: if is_alive {
             Some((elapsed * 100.0).round() / 100.0)

@@ -140,11 +140,11 @@ export async function fetchHosts(): Promise<NetworkHost[]> {
   return res.json()
 }
 
-export async function labelDevice(mac: string, label: string): Promise<void> {
+export async function labelDevice(mac: string, label: string, icon?: string | null): Promise<void> {
   const res = await api(`/api/network/device/${encodeURIComponent(mac)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label }),
+    body: JSON.stringify({ label, icon: icon || null }),
   })
   if (!res.ok) throw new Error('Error al etiquetar dispositivo')
 }

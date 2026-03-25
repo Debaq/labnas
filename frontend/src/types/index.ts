@@ -15,6 +15,7 @@ export interface NetworkHost {
   is_alive: boolean
   is_known: boolean
   label: string | null
+  icon: string | null
   last_seen: string
   response_time_ms: number | null
 }
