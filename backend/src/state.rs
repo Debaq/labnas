@@ -44,6 +44,15 @@ pub struct AppState {
     pub mdns_service: Arc<Mutex<Option<mdns_sd::ServiceDaemon>>>,
     pub music: Arc<Mutex<MusicState>>,
     pub music_process: Arc<Mutex<Option<tokio::process::Child>>>,
+    pub update_cache: Arc<Mutex<UpdateCache>>,
+}
+
+/// Cache de la ultima consulta de actualizacion a GitHub
+#[derive(Debug, Clone, Default)]
+pub struct UpdateCache {
+    pub latest_tag: Option<String>,
+    pub download_url: Option<String>,
+    pub checked_at: Option<Instant>,
 }
 
 pub struct TgTerminal {

@@ -213,8 +213,35 @@ pub struct UpdateStatus {
 pub async fn check_update(
     State(state): State<AppState>,
 ) -> Json<UpdateStatus> {
+    // Usar cache si fue consultado hace menos de 30 minutos
+    let cache = state.update_cache.lock().await;
+    let use_cache = cache.checked_at
+        .map(|t| t.elapsed() < Duration::from_secs(30 * 60))
+        .unwrap_or(false);
+
+    if use_cache {
+        let update_available = cache.latest_tag.as_ref()
+            .map(|v| is_newer_version(v, CURRENT_VERSION))
+            .unwrap_or(false);
+        return Json(UpdateStatus {
+            current_version: CURRENT_VERSION.to_string(),
+            latest_version: cache.latest_tag.clone(),
+            update_available,
+            download_url: cache.download_url.clone(),
+        });
+    }
+    drop(cache);
+
     let (latest, url) = fetch_latest_release(&state.http_client).await;
     let update_available = latest.as_ref().map(|v| is_newer_version(v, CURRENT_VERSION)).unwrap_or(false);
+
+    // Guardar en cache
+    if latest.is_some() {
+        let mut cache = state.update_cache.lock().await;
+        cache.latest_tag = latest.clone();
+        cache.download_url = url.clone();
+        cache.checked_at = Some(std::time::Instant::now());
+    }
 
     Json(UpdateStatus {
         current_version: CURRENT_VERSION.to_string(),
@@ -295,9 +322,40 @@ pub async fn do_update(
 }
 
 async fn fetch_latest_release(client: &reqwest::Client) -> (Option<String>, Option<String>) {
+    // Intentar con releases/latest primero
     let url = format!("https://api.github.com/repos/{}/releases/latest", GITHUB_REPO);
 
     let resp = client.get(&url)
+        .header("User-Agent", "LabNAS")
+        .header("Accept", "application/vnd.github+json")
+        .timeout(Duration::from_secs(10))
+        .send().await;
+
+    if let Ok(r) = resp {
+        if r.status().is_success() {
+            if let Ok(json) = r.json::<serde_json::Value>().await {
+                let tag = json["tag_name"].as_str().map(|s| s.to_string());
+
+                let download_url = json["assets"].as_array()
+                    .and_then(|assets| {
+                        assets.iter().find(|a| {
+                            a["name"].as_str()
+                                .map(|n| n.contains("linux") && n.contains("x86_64") && n.ends_with(".tar.gz"))
+                                .unwrap_or(false)
+                        })
+                    })
+                    .and_then(|a| a["browser_download_url"].as_str().map(|s| s.to_string()));
+
+                if tag.is_some() {
+                    return (tag, download_url);
+                }
+            }
+        }
+    }
+
+    // Fallback: consultar tags (usa menos rate limit y funciona sin auth)
+    let tags_url = format!("https://api.github.com/repos/{}/tags?per_page=1", GITHUB_REPO);
+    let resp = client.get(&tags_url)
         .header("User-Agent", "LabNAS")
         .timeout(Duration::from_secs(10))
         .send().await;
@@ -312,20 +370,12 @@ async fn fetch_latest_release(client: &reqwest::Client) -> (Option<String>, Opti
         _ => return (None, None),
     };
 
-    let tag = json["tag_name"].as_str().map(|s| s.to_string());
+    let tag = json.as_array()
+        .and_then(|arr| arr.first())
+        .and_then(|t| t["name"].as_str())
+        .map(|s| s.to_string());
 
-    // Find the linux x86_64 asset
-    let download_url = json["assets"].as_array()
-        .and_then(|assets| {
-            assets.iter().find(|a| {
-                a["name"].as_str()
-                    .map(|n| n.contains("linux") && n.contains("x86_64") && n.ends_with(".tar.gz"))
-                    .unwrap_or(false)
-            })
-        })
-        .and_then(|a| a["browser_download_url"].as_str().map(|s| s.to_string()));
-
-    (tag, download_url)
+    (tag, None)
 }
 
 pub async fn update_check_loop(state: AppState) {

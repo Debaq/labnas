@@ -40,6 +40,7 @@ async fn main() {
         mdns_service: Arc::new(Mutex::new(None)),
         music: Arc::new(Mutex::new(handlers::music::MusicState::default())),
         music_process: Arc::new(Mutex::new(None)),
+        update_cache: Arc::new(Mutex::new(state::UpdateCache::default())),
     };
 
     // Start mDNS if enabled
