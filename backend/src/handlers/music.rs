@@ -63,6 +63,12 @@ pub struct MusicState {
     pub video: bool,
     #[serde(default)]
     pub video_screen: Option<u8>,
+    /// Segundos transcurridos desde que empezo la cancion actual
+    #[serde(default)]
+    pub elapsed: u32,
+    /// Timestamp (epoch secs) de cuando empezo a reproducir
+    #[serde(skip)]
+    pub playback_started_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -72,6 +78,13 @@ pub enum RepeatMode {
     Off,
     All,
     One,
+}
+
+fn now_epoch_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 fn default_volume() -> u8 { 80 }
@@ -451,6 +464,8 @@ pub async fn play(
 
     add_to_history(&mut ms, &track, &username);
     ms.current = Some(track.clone());
+    ms.playback_started_at = Some(now_epoch_secs());
+    ms.elapsed = 0;
     ms.started_by = Some(username.clone());
     ms.paused = false;
     drop(ms);
@@ -514,6 +529,8 @@ async fn advance_queue(state: &AppState) {
 
     add_to_history(&mut ms, &next_track, &next_by);
     ms.current = Some(next_track);
+    ms.playback_started_at = Some(now_epoch_secs());
+    ms.elapsed = 0;
     ms.started_by = Some(next_by);
     ms.paused = false;
     drop(ms);
@@ -572,7 +589,14 @@ pub async fn current(
         advance_queue(&state).await;
     }
 
-    Json(state.music.lock().await.clone())
+    let mut ms = state.music.lock().await;
+    // Calcular elapsed dinamicamente
+    if ms.current.is_some() && !ms.paused {
+        if let Some(started) = ms.playback_started_at {
+            ms.elapsed = (now_epoch_secs() - started) as u32;
+        }
+    }
+    Json(ms.clone())
 }
 
 /// GET /api/music/history
@@ -659,6 +683,8 @@ pub async fn previous(
     let mode = ms.mode.clone();
     add_to_history(&mut ms, &track, &prev.played_by);
     ms.current = Some(track);
+    ms.playback_started_at = Some(now_epoch_secs());
+    ms.elapsed = 0;
     ms.started_by = Some(prev.played_by);
     ms.paused = false;
     drop(ms);
@@ -748,6 +774,8 @@ pub async fn queue_play(
 
     add_to_history(&mut ms, &track, &played_by);
     ms.current = Some(track);
+    ms.playback_started_at = Some(now_epoch_secs());
+    ms.elapsed = 0;
     ms.started_by = Some(played_by);
     ms.paused = false;
     drop(ms);
@@ -1015,6 +1043,45 @@ pub async fn recommend(
     Ok(Json(ms.clone()))
 }
 
+/// Limpiar titulo de YouTube para Last.fm
+/// Quita "(Official Video)", "(HD)", "(Lyrics)", "[MV]", etc.
+fn clean_track_title(title: &str) -> String {
+    let mut clean = title.to_string();
+    // Quitar contenido entre parentesis y corchetes con palabras clave
+    let patterns = [
+        r"\((?i)official\s*(music\s*)?video\)",
+        r"\((?i)oficial\s*(hd\s*)?(video|music)?\)",
+        r"\((?i)video\s*(oficial|clip|musical)\)",
+        r"\((?i)lyric(s)?\s*(video)?\)",
+        r"\((?i)audio\s*(oficial|official)?\)",
+        r"\((?i)hd\s*(video)?\)",
+        r"\((?i)live\)",
+        r"\((?i)remastered\s*\d*\)",
+        r"\((?i)version\s*\w*\)",
+        r"\[(?i)official\s*(music\s*)?video\]",
+        r"\[(?i)mv\]",
+        r"\[(?i)hd\]",
+        r"\[(?i)lyrics?\]",
+        r"(?i)\|\s*official\s*video",
+        r"(?i)official\s*(music\s*)?video",
+        r"(?i)video\s*oficial",
+        r"(?i)\bft\.?\s",
+        r"(?i)\bfeat\.?\s",
+    ];
+    for pat in &patterns {
+        if let Ok(re) = regex_lite::Regex::new(pat) {
+            clean = re.replace_all(&clean, "").to_string();
+        }
+    }
+    // Limpiar espacios extra y guiones sueltos
+    clean = clean.trim().trim_end_matches('-').trim().to_string();
+    // Quitar dobles espacios
+    while clean.contains("  ") {
+        clean = clean.replace("  ", " ");
+    }
+    clean
+}
+
 /// POST /api/music/lastfm-key - Guardar API key de Last.fm (admin only)
 pub async fn set_lastfm_key(
     State(state): State<AppState>,
@@ -1052,11 +1119,13 @@ pub async fn radio(
         ))?;
     drop(config);
 
-    // 2. Llamar a Last.fm track.getSimilar
+    // 2. Limpiar titulo y llamar a Last.fm track.getSimilar
+    let clean_artist = clean_track_title(&req.artist);
+    let clean_track = clean_track_title(&req.track);
     let url = format!(
         "https://ws.audioscrobbler.com/2.0/?method=track.getSimilar&artist={}&track={}&api_key={}&format=json&limit=20",
-        urlencoding::encode(&req.artist),
-        urlencoding::encode(&req.track),
+        urlencoding::encode(&clean_artist),
+        urlencoding::encode(&clean_track),
         api_key,
     );
 
@@ -1192,11 +1261,13 @@ pub async fn lucky(
         ))?;
     drop(config);
 
-    // Pedir muchas similares para tener variedad
+    // Limpiar titulo y pedir muchas similares para tener variedad
+    let clean_artist = clean_track_title(&req.artist);
+    let clean_track = clean_track_title(&req.track);
     let url = format!(
         "https://ws.audioscrobbler.com/2.0/?method=track.getSimilar&artist={}&track={}&api_key={}&format=json&limit=50",
-        urlencoding::encode(&req.artist),
-        urlencoding::encode(&req.track),
+        urlencoding::encode(&clean_artist),
+        urlencoding::encode(&clean_track),
         api_key,
     );
 
@@ -1286,6 +1357,8 @@ pub async fn lucky(
 
                 add_to_history(&mut ms, &track, &username);
                 ms.current = Some(track);
+                ms.playback_started_at = Some(now_epoch_secs());
+                ms.elapsed = 0;
                 ms.started_by = Some(username.clone());
                 ms.paused = false;
                 let mode = ms.mode.clone();

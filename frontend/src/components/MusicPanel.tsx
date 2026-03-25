@@ -17,7 +17,7 @@ function safeMusicState(ms: MusicState): MusicState {
     current: ms.current ?? null, queue: ms.queue ?? [], started_by: ms.started_by ?? null,
     history: ms.history ?? [], mode: ms.mode ?? 'nas', stream_url: ms.stream_url ?? null,
     paused: ms.paused ?? false, volume: ms.volume ?? 80, repeat: ms.repeat ?? 'off', shuffle: ms.shuffle ?? false,
-    video: ms.video ?? false, video_screen: ms.video_screen ?? null,
+    video: ms.video ?? false, video_screen: ms.video_screen ?? null, elapsed: ms.elapsed ?? 0,
   }
 }
 
@@ -32,7 +32,7 @@ export default function MusicPanel() {
   const [musicState, setMusicState] = useState<MusicState>({
     current: null, queue: [], started_by: null, history: [], mode: 'nas',
     stream_url: null, paused: false, volume: 80, repeat: 'off', shuffle: false,
-    video: false, video_screen: null,
+    video: false, video_screen: null, elapsed: 0,
   })
   const [showMenu, setShowMenu] = useState(false)
   const [screens, setScreens] = useState<ScreenInfo[]>([])
@@ -52,11 +52,20 @@ export default function MusicPanel() {
     localStorage.setItem('labnas-music-panel', open ? 'open' : 'closed')
   }, [open])
 
-  // Poll music state
+  // Poll music state (solo actualizar si cambió para no romper inputs en otras paginas)
+  const musicStateRef = useRef(JSON.stringify(musicState))
   useEffect(() => {
-    getCurrentMusic().then(ms => setMusicState(safeMusicState(ms))).catch(() => {})
+    const update = (ms: MusicState) => {
+      const safe = safeMusicState(ms)
+      const json = JSON.stringify(safe)
+      if (json !== musicStateRef.current) {
+        musicStateRef.current = json
+        setMusicState(safe)
+      }
+    }
+    getCurrentMusic().then(update).catch(() => {})
     const interval = setInterval(() => {
-      getCurrentMusic().then(ms => setMusicState(safeMusicState(ms))).catch(() => {})
+      getCurrentMusic().then(update).catch(() => {})
     }, 5000)
     return () => clearInterval(interval)
   }, [])
@@ -94,26 +103,21 @@ export default function MusicPanel() {
     }
   }, [musicState.mode])
 
-  // Track elapsed time
+  // Usar elapsed del servidor (viene en el polling cada 5s)
+  // En browser mode, complementar con audio.currentTime para mayor precision
   useEffect(() => {
-    if (!musicState.current || musicState.paused) return
-    const audio = audioRef.current
-    if (musicState.mode === 'browser' && audio && audio.src) {
-      const tick = () => setElapsed(Math.floor(audio.currentTime))
-      audio.addEventListener('timeupdate', tick)
-      return () => audio.removeEventListener('timeupdate', tick)
+    if (!musicState.current) { setElapsed(0); return }
+    if (musicState.mode === 'browser') {
+      const audio = audioRef.current
+      if (audio && audio.src) {
+        const tick = () => setElapsed(Math.floor(audio.currentTime))
+        audio.addEventListener('timeupdate', tick)
+        return () => audio.removeEventListener('timeupdate', tick)
+      }
     }
-    // NAS mode: estimate with timer
-    const start = Date.now() - elapsed * 1000
-    const interval = setInterval(() => {
-      const secs = Math.floor((Date.now() - start) / 1000)
-      setElapsed(Math.min(secs, musicState.current?.duration || secs))
-    }, 1000)
-    return () => clearInterval(interval)
-  }, [musicState.current?.id, musicState.paused, musicState.mode])
-
-  // Reset elapsed on new track
-  useEffect(() => { setElapsed(0) }, [musicState.current?.id])
+    // NAS mode: usar elapsed del servidor
+    setElapsed(musicState.elapsed || 0)
+  }, [musicState.current?.id, musicState.paused, musicState.mode, musicState.elapsed])
 
   async function handleSearch() {
     if (!searchQuery.trim()) return
@@ -337,30 +341,14 @@ export default function MusicPanel() {
           </button>
         </div>
 
-        {/* Volume - boton compacto */}
-        <div className="flex items-center justify-center">
-          <div className="relative">
-            <button onClick={() => setShowVolume(!showVolume)}
-              className="flex items-center gap-1 px-2 py-1 rounded-lg hover:opacity-80"
-              style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--bg-tertiary)' }}>
-              <Volume2 size={12} />
-              <span className="text-[9px] font-mono">{musicState.volume}%</span>
-            </button>
-            {showVolume && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setShowVolume(false)} />
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-20 flex flex-col items-center gap-1 p-2 rounded-lg"
-                  style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
-                  <input type="range" min="0" max="100" value={musicState.volume}
-                    onChange={e => handleVolume(parseInt(e.target.value))}
-                    className="h-20 appearance-none cursor-pointer"
-                    orient="vertical"
-                    style={{ accentColor: 'var(--accent)', writingMode: 'vertical-lr', direction: 'rtl', width: '6px' }} />
-                  <span className="text-[9px] font-mono" style={{ color: 'var(--text-secondary)' }}>{musicState.volume}%</span>
-                </div>
-              </>
-            )}
-          </div>
+        {/* Volume */}
+        <div className="flex items-center gap-1.5 px-1">
+          <Volume2 size={11} style={{ color: 'var(--text-secondary)' }} />
+          <input type="range" min="0" max="100" value={musicState.volume}
+            onChange={e => handleVolume(parseInt(e.target.value))}
+            className="w-16 h-1 rounded-full appearance-none cursor-pointer"
+            style={{ accentColor: 'var(--text-secondary)', backgroundColor: 'var(--bg-tertiary)' }} />
+          <span className="text-[8px] font-mono w-6" style={{ color: 'var(--text-secondary)' }}>{musicState.volume}</span>
         </div>
 
         {/* Mix + Menu - SIEMPRE visibles */}

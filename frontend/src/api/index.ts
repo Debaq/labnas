@@ -914,6 +914,7 @@ export interface MusicState {
   shuffle: boolean
   video: boolean
   video_screen: number | null
+  elapsed: number
 }
 
 export async function searchMusic(q: string): Promise<MusicTrack[]> {
