@@ -964,6 +964,7 @@ export async function toggleRepeat(): Promise<MusicState> {
 
 export interface ScreenInfo {
   index: number
+  connector: string
   name: string
   connected: boolean
 }

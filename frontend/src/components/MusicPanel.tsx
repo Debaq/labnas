@@ -322,7 +322,7 @@ export default function MusicPanel() {
                             color: musicState.video && musicState.video_screen === scr.index ? 'var(--accent)' : 'var(--text-primary)',
                           }}>
                           <TvMinimalPlay size={12} />
-                          {scr.name}
+                          <span className="truncate">{scr.name}{scr.name !== scr.connector && <span className="opacity-50"> ({scr.connector})</span>}</span>
                           {musicState.video && musicState.video_screen === scr.index && ' ✓'}
                         </button>
                       ))}
