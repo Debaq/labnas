@@ -3,9 +3,11 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight, Mail } from 'lucide-react'
 import { useTheme } from '../themes/ThemeContext'
 import { useAuth } from '../auth/AuthContext'
-import { shutdownServer, getBranding } from '../api'
+import { shutdownServer, getBranding, fetchHealth } from '../api'
 import MusicPanel from './MusicPanel'
-// ThemeName ya no se usa directamente - el contexto maneja 'auto' + ThemeName
+
+declare const __APP_VERSION__: string
+const FRONTEND_VERSION = __APP_VERSION__
 
 const pageTitles: Record<string, string> = {
   '/dashboard': 'Dashboard',
@@ -55,6 +57,21 @@ export default function Layout() {
         document.documentElement.style.setProperty('--sidebar-active', b.accent_color)
       }
     }).catch(() => {})
+  }, [])
+
+  // Auto-reload cuando el backend se actualiza
+  useEffect(() => {
+    const checkVersion = async () => {
+      try {
+        const health = await fetchHealth()
+        if (health.version && health.version !== FRONTEND_VERSION) {
+          console.log(`[LabNAS] Backend ${health.version} != Frontend ${FRONTEND_VERSION}, recargando...`)
+          window.location.reload()
+        }
+      } catch {}
+    }
+    const interval = setInterval(checkVersion, 30000)
+    return () => clearInterval(interval)
   }, [])
 
   async function handleShutdown() {

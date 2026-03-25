@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, ShieldCheck, ShieldAlert, UserCheck, Link2, Globe, Building2, ExternalLink, Plus } from 'lucide-react'
+import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, getThemeNames, type ThemeName } from '../themes/themes'
@@ -469,102 +469,169 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* User Management (admin only) */}
+      {/* Usuarios y Telegram (admin only) */}
       {isAdmin && <section>
         <div className="flex items-center gap-3 mb-4">
           <Users size={22} style={{ color: 'var(--accent)' }} />
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
-            Gestion de Usuarios
+            Usuarios
           </h2>
+          <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--accent)' + '20', color: 'var(--accent)' }}>
+            {webUsers.length} web · {notifConfig?.telegram_chats.length ?? 0} telegram
+          </span>
         </div>
-        <div className="rounded-xl overflow-hidden" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
-          {webUsers.length === 0 ? (
-            <div className="text-center py-8">
-              <Users size={32} className="mx-auto mb-2" style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
-              <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>No hay usuarios registrados</p>
-            </div>
-          ) : (
-            <div>
-              {webUsers.map((u) => {
-                const roleColor = u.role === 'admin' ? 'var(--accent)' : u.role === 'operador' ? 'var(--success)' : u.role === 'observador' ? 'var(--text-secondary)' : 'var(--warning)'
-                return (
-                  <div key={u.username} className="px-5 py-4 flex items-center justify-between flex-wrap gap-3" style={{ borderBottom: '1px solid var(--border)' }}>
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold" style={{ backgroundColor: roleColor + '20', color: roleColor }}>
-                        {u.username[0].toUpperCase()}
-                      </div>
-                      <div>
+
+        <div className="space-y-2">
+          {webUsers.map((u) => {
+            const roleColor = u.role === 'admin' ? 'var(--accent)' : u.role === 'operador' ? 'var(--success)' : u.role === 'observador' ? 'var(--text-secondary)' : 'var(--warning)'
+            const linkedChat = notifConfig?.telegram_chats.find(c => c.linked_web_user === u.username)
+            return (
+              <div key={u.username} className="rounded-xl p-4 space-y-3" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
+                {/* User header */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold" style={{ backgroundColor: roleColor + '20', color: roleColor }}>
+                      {u.username[0].toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
                         <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{u.username}</span>
-                        <span className="text-xs ml-2 px-1.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: roleColor + '20', color: roleColor }}>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: roleColor + '20', color: roleColor }}>
                           {u.role === 'admin' ? 'Admin' : u.role === 'operador' ? 'Operador' : u.role === 'observador' ? 'Observador' : 'Pendiente'}
                         </span>
                       </div>
-                    </div>
-
-                    <div className="flex items-center gap-3 flex-wrap">
-                      {/* Role */}
-                      {u.role !== 'admin' && (
-                        <select
-                          value={u.role}
-                          onChange={async (e) => {
-                            try {
-                              await setWebUserRole(u.username, e.target.value, u.permissions)
-                              const users = await fetchWebUsers()
-                              setWebUsers(users)
-                            } catch {}
-                          }}
-                          className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer"
-                          style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
-                        >
-                          <option value="pendiente">Pendiente</option>
-                          <option value="observador">Observador</option>
-                          <option value="operador">Operador</option>
-                        </select>
-                      )}
-
-                      {/* Permissions (operador) */}
-                      {u.role === 'operador' && (
-                        <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                          {(['terminal', 'impresion', 'archivos_escritura'] as const).map((perm) => (
-                            <label key={perm} className="flex items-center gap-1 cursor-pointer">
-                              <input type="checkbox" checked={u.permissions[perm]}
-                                onChange={async (e) => {
-                                  try {
-                                    await setWebUserRole(u.username, u.role, { ...u.permissions, [perm]: e.target.checked })
-                                    const users = await fetchWebUsers()
-                                    setWebUsers(users)
-                                  } catch {}
-                                }} />
-                              {perm === 'terminal' ? 'Terminal' : perm === 'impresion' ? 'Impresion' : 'Archivos'}
-                            </label>
-                          ))}
+                      {linkedChat && (
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <MessageCircle size={10} style={{ color: 'var(--success)' }} />
+                          <span className="text-[10px]" style={{ color: 'var(--success)' }}>
+                            {linkedChat.name}{linkedChat.username && ` @${linkedChat.username}`}
+                            {linkedChat.daily_enabled && ` · ${String(linkedChat.daily_hour).padStart(2, '0')}:${String(linkedChat.daily_minute).padStart(2, '0')}`}
+                          </span>
                         </div>
-                      )}
-
-                      {/* Delete (no admin, no self) */}
-                      {u.role !== 'admin' && u.username !== authUser?.username && (
-                        <button
-                          onClick={async () => {
-                            if (!confirm(`Eliminar usuario ${u.username}?`)) return
-                            try {
-                              await deleteWebUser(u.username)
-                              const users = await fetchWebUsers()
-                              setWebUsers(users)
-                            } catch {}
-                          }}
-                          className="p-1.5 rounded-lg transition-all hover:opacity-80"
-                          style={{ color: 'var(--danger)' }}
-                          title="Eliminar usuario"
-                        >
-                          <Trash2 size={14} />
-                        </button>
                       )}
                     </div>
                   </div>
-                )
-              })}
-            </div>
-          )}
+                  {u.role !== 'admin' && u.username !== authUser?.username && (
+                    <button onClick={async () => {
+                      if (!confirm(`Eliminar usuario ${u.username}?`)) return
+                      try { await deleteWebUser(u.username); setWebUsers(await fetchWebUsers()) } catch {}
+                    }} className="p-1.5 rounded-lg hover:opacity-80" style={{ color: 'var(--danger)' }} title="Eliminar">
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Role + Permissions + Telegram link */}
+                {u.role !== 'admin' && (
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <select value={u.role} onChange={async (e) => {
+                      try { await setWebUserRole(u.username, e.target.value, u.permissions); setWebUsers(await fetchWebUsers()) } catch {}
+                    }} className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer"
+                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}>
+                      <option value="pendiente">Pendiente</option>
+                      <option value="observador">Observador</option>
+                      <option value="operador">Operador</option>
+                    </select>
+
+                    {u.role === 'operador' && (
+                      <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                        {(['terminal', 'impresion', 'archivos_escritura'] as const).map((perm) => (
+                          <label key={perm} className="flex items-center gap-1 cursor-pointer">
+                            <input type="checkbox" checked={u.permissions[perm]} onChange={async (e) => {
+                              try { await setWebUserRole(u.username, u.role, { ...u.permissions, [perm]: e.target.checked }); setWebUsers(await fetchWebUsers()) } catch {}
+                            }} />
+                            {perm === 'terminal' ? 'Terminal' : perm === 'impresion' ? 'Impresion' : 'Archivos'}
+                          </label>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Telegram link selector */}
+                    {notifConfig && notifConfig.telegram_chats.length > 0 && (
+                      <div className="flex items-center gap-1">
+                        <Link2 size={12} style={{ color: 'var(--text-secondary)' }} />
+                        <select value={linkedChat?.chat_id ?? ''} onChange={async (e) => {
+                          try {
+                            if (e.target.value) await adminLinkChat(parseInt(e.target.value), u.username)
+                            setNotifConfig(await fetchNotificationConfig())
+                          } catch {}
+                        }} className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer"
+                          style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}>
+                          <option value="">Telegram: sin vincular</option>
+                          {notifConfig.telegram_chats.map(c => (
+                            <option key={c.chat_id} value={c.chat_id}>{c.name}{c.username ? ` @${c.username}` : ''}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+
+          {/* Telegram chats sin vincular */}
+          {notifConfig?.telegram_chats.filter(c => !c.linked_web_user).map(c => {
+            const roleColor = c.role === 'admin' ? 'var(--accent)' : c.role === 'operador' ? 'var(--success)' : c.role === 'observador' ? 'var(--text-secondary)' : 'var(--warning)'
+            return (
+              <div key={c.chat_id} className="rounded-xl p-4 space-y-2" style={{ backgroundColor: 'var(--card-bg)', border: '1px dashed var(--border)' }}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                      <MessageCircle size={16} style={{ color: 'var(--text-secondary)' }} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{c.name}</span>
+                        {c.username && <span className="text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>@{c.username}</span>}
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: roleColor + '20', color: roleColor }}>
+                          {c.role === 'admin' ? 'Admin' : c.role === 'operador' ? 'Operador' : c.role === 'observador' ? 'Observador' : 'Pendiente'}
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--warning)' + '20', color: 'var(--warning)' }}>
+                          Solo Telegram
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <button onClick={async () => {
+                    try { await deleteTelegramChat(c.chat_id); setNotifConfig(await fetchNotificationConfig()) } catch {}
+                  }} className="p-1.5 rounded-lg hover:opacity-80" style={{ color: 'var(--danger)' }}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+                {c.role !== 'admin' && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {c.role === 'pendiente' && (
+                      <button onClick={async () => {
+                        try { await setChatRole(c.chat_id, 'observador'); setNotifConfig(await fetchNotificationConfig()) } catch {}
+                      }} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium"
+                        style={{ color: 'var(--success)', border: '1px solid var(--success)' }}>
+                        <UserCheck size={12} /> Aprobar
+                      </button>
+                    )}
+                    <select value={c.role} onChange={async (e) => {
+                      try { await setChatRole(c.chat_id, e.target.value); setNotifConfig(await fetchNotificationConfig()) } catch {}
+                    }} className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer"
+                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}>
+                      <option value="pendiente">Pendiente</option>
+                      <option value="observador">Observador</option>
+                      <option value="operador">Operador</option>
+                    </select>
+                    <select value="" onChange={async (e) => {
+                      if (!e.target.value) return
+                      try { await adminLinkChat(c.chat_id, e.target.value); setNotifConfig(await fetchNotificationConfig()) } catch {}
+                    }} className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer"
+                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}>
+                      <option value="">Vincular a usuario web...</option>
+                      {webUsers.filter(u => !notifConfig?.telegram_chats.some(tc => tc.linked_web_user === u.username)).map(u => (
+                        <option key={u.username} value={u.username}>{u.username}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       </section>}
 
@@ -889,205 +956,31 @@ export default function SettingsPage() {
           )}
         </div>
 
-        {/* Chats + Test */}
+        {/* Test + Commands */}
         {notifConfig?.bot_configured && (
-          <div
-            className="rounded-xl p-6 space-y-4 mb-4"
-            style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
-          >
+          <div className="rounded-xl p-6 space-y-4 mb-4" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Users size={16} style={{ color: 'var(--accent)' }} />
-                <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                  Chats registrados ({notifConfig.telegram_chats.length})
-                </span>
-              </div>
-              <button
-                onClick={async () => {
-                  setSendingTest(true)
-                  setTestResult(null)
-                  try {
-                    const result = await sendTestTelegram()
-                    setTestResult(result)
-                  } catch (e: any) {
-                    setTestResult(e.message)
-                  } finally {
-                    setSendingTest(false)
-                  }
-                }}
-                disabled={sendingTest || !notifConfig.telegram_chats.length}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 hover:opacity-90"
-                style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
-              >
+              <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                {notifConfig.telegram_chats.length} chats registrados
+              </span>
+              <button onClick={async () => {
+                setSendingTest(true); setTestResult(null)
+                try { setTestResult(await sendTestTelegram()) } catch (e: any) { setTestResult(e.message) } finally { setSendingTest(false) }
+              }} disabled={sendingTest || !notifConfig.telegram_chats.length}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium hover:opacity-90"
+                style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
                 {sendingTest ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
                 Enviar Test
               </button>
             </div>
-
             {testResult && (
-              <div className="text-xs rounded-lg p-3" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>
-                {testResult}
-              </div>
+              <div className="text-xs rounded-lg p-3" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>{testResult}</div>
             )}
-
-            {notifConfig.telegram_chats.length === 0 && (
-              <div className="text-xs py-4 text-center" style={{ color: 'var(--text-secondary)' }}>
-                Nadie se ha registrado aun. Los usuarios deben enviar <span className="font-mono px-1 rounded" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--accent)' }}>/start</span> al bot <strong style={{ color: 'var(--accent)' }}>@{notifConfig.bot_username}</strong> en Telegram.
-              </div>
-            )}
-
-            {notifConfig.telegram_chats.map((c) => {
-              const roleColor = c.role === 'admin' ? 'var(--accent)' : c.role === 'operador' ? 'var(--success)' : c.role === 'observador' ? 'var(--text-secondary)' : 'var(--warning)'
-              const roleLabel = c.role === 'admin' ? 'Admin' : c.role === 'operador' ? 'Operador' : c.role === 'observador' ? 'Observador' : 'Pendiente'
-              const RoleIcon = c.role === 'pendiente' ? ShieldAlert : ShieldCheck
-
-              return (
-                <div key={c.chat_id} className="py-3 space-y-2" style={{ borderTop: '1px solid var(--border)' }}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <RoleIcon size={14} style={{ color: roleColor }} />
-                      <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{c.name}</span>
-                      {c.username && (
-                        <span className="text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>@{c.username}</span>
-                      )}
-                      <span className="text-xs px-1.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: roleColor + '20', color: roleColor }}>
-                        {roleLabel}
-                      </span>
-                      {c.linked_web_user && (
-                        <span className="text-xs px-1.5 py-0.5 rounded flex items-center gap-1" style={{ backgroundColor: 'var(--success)' + '20', color: 'var(--success)' }}>
-                          <Link2 size={10} />{c.linked_web_user}
-                        </span>
-                      )}
-                      {c.daily_enabled && (
-                        <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--accent)' + '20', color: 'var(--accent)' }}>
-                          {String(c.daily_hour).padStart(2, '0')}:{String(c.daily_minute).padStart(2, '0')}
-                        </span>
-                      )}
-                    </div>
-                    <button
-                      onClick={async () => {
-                        try {
-                          await deleteTelegramChat(c.chat_id)
-                          const cfg = await fetchNotificationConfig()
-                          setNotifConfig(cfg)
-                        } catch {}
-                      }}
-                      className="p-1.5 rounded-lg transition-all duration-200 hover:opacity-80"
-                      style={{ color: 'var(--danger)' }}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-
-                  {/* Role controls (no admin) */}
-                  {c.role !== 'admin' && (
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {c.role === 'pendiente' && (
-                        <button
-                          onClick={async () => {
-                            try {
-                              await setChatRole(c.chat_id, 'observador')
-                              const cfg = await fetchNotificationConfig()
-                              setNotifConfig(cfg)
-                            } catch {}
-                          }}
-                          className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium"
-                          style={{ color: 'var(--success)', border: '1px solid var(--success)' }}
-                        >
-                          <UserCheck size={12} />
-                          Aprobar
-                        </button>
-                      )}
-                      <select
-                        value={c.role}
-                        onChange={async (e) => {
-                          try {
-                            await setChatRole(c.chat_id, e.target.value, c.permissions)
-                            const cfg = await fetchNotificationConfig()
-                            setNotifConfig(cfg)
-                          } catch {}
-                        }}
-                        className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer"
-                        style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
-                      >
-                        <option value="pendiente">Pendiente</option>
-                        <option value="observador">Observador</option>
-                        <option value="operador">Operador</option>
-                      </select>
-                      {(c.role === 'operador') && (
-                        <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                          <label className="flex items-center gap-1 cursor-pointer">
-                            <input type="checkbox" checked={c.permissions.terminal}
-                              onChange={async (e) => {
-                                try {
-                                  await setChatRole(c.chat_id, c.role, { ...c.permissions, terminal: e.target.checked })
-                                  const cfg = await fetchNotificationConfig()
-                                  setNotifConfig(cfg)
-                                } catch {}
-                              }} />
-                            Terminal
-                          </label>
-                          <label className="flex items-center gap-1 cursor-pointer">
-                            <input type="checkbox" checked={c.permissions.impresion}
-                              onChange={async (e) => {
-                                try {
-                                  await setChatRole(c.chat_id, c.role, { ...c.permissions, impresion: e.target.checked })
-                                  const cfg = await fetchNotificationConfig()
-                                  setNotifConfig(cfg)
-                                } catch {}
-                              }} />
-                            Impresion
-                          </label>
-                          <label className="flex items-center gap-1 cursor-pointer">
-                            <input type="checkbox" checked={c.permissions.archivos_escritura}
-                              onChange={async (e) => {
-                                try {
-                                  await setChatRole(c.chat_id, c.role, { ...c.permissions, archivos_escritura: e.target.checked })
-                                  const cfg = await fetchNotificationConfig()
-                                  setNotifConfig(cfg)
-                                } catch {}
-                              }} />
-                            Archivos
-                          </label>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {/* Link to web user (todos) */}
-                  <div className="flex items-center gap-2">
-                    <Link2 size={12} style={{ color: 'var(--text-secondary)' }} />
-                    <select
-                      value={c.linked_web_user || ''}
-                      onChange={async (e) => {
-                        try {
-                          if (e.target.value) {
-                            await adminLinkChat(c.chat_id, e.target.value)
-                          }
-                          const cfg = await fetchNotificationConfig()
-                          setNotifConfig(cfg)
-                        } catch {}
-                      }}
-                      className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer"
-                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
-                    >
-                      <option value="">Sin vincular</option>
-                      {webUsers.map(u => (
-                        <option key={u.username} value={u.username}>{u.username}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )
-            })}
-
-            {/* Available commands reference */}
-            <div className="pt-3" style={{ borderTop: '1px solid var(--border)' }}>
-              <p className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Comandos disponibles en el bot:</p>
+            <div className="pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+              <p className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Comandos del bot:</p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                {['/estado', '/discos', '/ram', '/cpu', '/uptime', '/red', '/impresoras', '/actividad', '/horario', '/ayuda'].map((cmd) => (
-                  <span key={cmd} className="text-xs font-mono px-2 py-1 rounded text-center" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--accent)' }}>
-                    {cmd}
-                  </span>
+                {['/estado', '/discos', '/ram', '/cpu', '/uptime', '/red', '/musica', '/play', '/correos', '/ayuda'].map((cmd) => (
+                  <span key={cmd} className="text-xs font-mono px-2 py-1 rounded text-center" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--accent)' }}>{cmd}</span>
                 ))}
               </div>
             </div>
