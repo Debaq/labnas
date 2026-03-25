@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight, Mail } from 'lucide-react'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight, Mail, Download } from 'lucide-react'
 import { useTheme } from '../themes/ThemeContext'
 import { useAuth } from '../auth/AuthContext'
-import { shutdownServer, getBranding, fetchHealth } from '../api'
+import { shutdownServer, getBranding, fetchHealth, checkUpdate } from '../api'
 import MusicPanel from './MusicPanel'
 
 declare const __APP_VERSION__: string
@@ -15,7 +15,7 @@ const pageTitles: Record<string, string> = {
   '/printing': 'Impresion de Documentos',
   '/printers3d': 'Impresoras 3D',
   '/network': 'Red Local',
-  '/tasks': 'Tareas y Proyectos',
+  '/tasks': 'Tareas / Horario',
   '/notes': 'Notas',
   '/terminal': 'Terminal',
   '/email': 'Correo',
@@ -26,8 +26,10 @@ export default function Layout() {
   const { theme, setTheme, themeNames } = useTheme()
   const { user, logout, can, isAdmin } = useAuth()
   const location = useLocation()
+  const navigate = useNavigate()
   const pageTitle = pageTitles[location.pathname] || 'LabNAS'
   const [shuttingDown, setShuttingDown] = useState(false)
+  const [newVersion, setNewVersion] = useState<string | null>(null)
   const [labName, setLabName] = useState('LabNAS')
   const [logoUrl, setLogoUrl] = useState('')
 
@@ -74,6 +76,23 @@ export default function Layout() {
     return () => clearInterval(interval)
   }, [])
 
+  // Chequear actualizaciones (solo admin)
+  useEffect(() => {
+    if (!isAdmin) return
+    const check = () => {
+      checkUpdate().then(info => {
+        if (info.update_available && info.latest_version) {
+          setNewVersion(info.latest_version)
+        } else {
+          setNewVersion(null)
+        }
+      }).catch(() => {})
+    }
+    check()
+    const interval = setInterval(check, 30 * 60 * 1000) // cada 30 min
+    return () => clearInterval(interval)
+  }, [isAdmin])
+
   async function handleShutdown() {
     if (!confirm('Apagar LabNAS? El servidor se detendrá.')) return
     setShuttingDown(true)
@@ -89,7 +108,7 @@ export default function Layout() {
     { to: '/printing', label: 'Impresion', icon: Printer, show: can('impresion') },
     { to: '/printers3d', label: 'Impresoras 3D', icon: Box, show: true },
     { to: '/network', label: 'Red', icon: Network, show: true },
-    { to: '/tasks', label: 'Tareas', icon: ClipboardList, show: true },
+    { to: '/tasks', label: 'Tareas / Horario', icon: ClipboardList, show: true },
     { to: '/notes', label: 'Notas', icon: FileText, show: true },
     { to: '/email', label: 'Correo', icon: Mail, show: true },
     { to: '/terminal', label: 'Terminal', icon: TerminalSquare, show: can('terminal') },
@@ -285,6 +304,21 @@ export default function Layout() {
             )}
           </div>
         </header>
+
+        {/* Update banner */}
+        {newVersion && (
+          <div
+            className="flex items-center justify-between px-6 py-2 cursor-pointer hover:opacity-90 transition-opacity"
+            style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
+            onClick={() => navigate('/settings')}
+          >
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <Download size={16} />
+              Nueva version disponible: {newVersion}
+            </div>
+            <span className="text-xs opacity-80">Click para actualizar</span>
+          </div>
+        )}
 
         {/* Content */}
         <main className="flex-1 overflow-auto p-8" style={{ backgroundColor: 'var(--bg-primary)' }}>

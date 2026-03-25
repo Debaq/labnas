@@ -62,6 +62,8 @@ export default function TasksPage() {
   const [eventTime, setEventTime] = useState('')
   const [eventInvitees, setEventInvitees] = useState('')
   const [eventRemind, setEventRemind] = useState(15)
+  const [eventRecurrence, setEventRecurrence] = useState('')
+  const [eventRecurrenceEnd, setEventRecurrenceEnd] = useState('')
 
   // Formulario de nueva tarea
   const [taskTitle, setTaskTitle] = useState('')
@@ -235,7 +237,7 @@ export default function TasksPage() {
               {events.length} evento{events.length !== 1 ? 's' : ''}
             </span>
             <button
-              onClick={() => { setShowEventModal(true); setEventTitle(''); setEventDate(''); setEventTime(''); setEventInvitees(''); setEventRemind(15) }}
+              onClick={() => { setShowEventModal(true); setEventTitle(''); setEventDate(''); setEventTime(''); setEventInvitees(''); setEventRemind(15); setEventRecurrence(''); setEventRecurrenceEnd('') }}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
               style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
             >
@@ -273,6 +275,12 @@ export default function TasksPage() {
                           </p>
                           <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
                             Por: {ev.created_by} | Aviso: {ev.remind_before_min}min antes
+                            {ev.recurrence && ev.recurrence !== 'none' && (
+                              <span className="ml-2 px-1.5 py-0.5 rounded text-[10px]" style={{ backgroundColor: 'var(--accent)' + '20', color: 'var(--accent)' }}>
+                                {ev.recurrence === 'daily' ? 'Diario' : ev.recurrence === 'weekly' ? 'Semanal' : 'Mensual'}
+                                {ev.recurrence_end && ` hasta ${ev.recurrence_end}`}
+                              </span>
+                            )}
                           </p>
                           {ev.invitees.length > 0 && (
                             <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
@@ -353,12 +361,33 @@ export default function TasksPage() {
                       className="w-full px-3 py-2 rounded-lg text-sm outline-none"
                       style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Avisar (minutos antes)</label>
-                    <input type="number" min={1} value={eventRemind} onChange={e => setEventRemind(parseInt(e.target.value) || 15)}
-                      className="w-24 px-3 py-2 rounded-lg text-sm outline-none"
-                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Avisar (min antes)</label>
+                      <input type="number" min={1} value={eventRemind} onChange={e => setEventRemind(parseInt(e.target.value) || 15)}
+                        className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                        style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Repetir</label>
+                      <select value={eventRecurrence} onChange={e => setEventRecurrence(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
+                        style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}>
+                        <option value="">No repetir</option>
+                        <option value="daily">Diario</option>
+                        <option value="weekly">Semanal</option>
+                        <option value="monthly">Mensual</option>
+                      </select>
+                    </div>
                   </div>
+                  {eventRecurrence && (
+                    <div>
+                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Repetir hasta (opcional)</label>
+                      <input type="date" value={eventRecurrenceEnd} onChange={e => setEventRecurrenceEnd(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                        style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+                    </div>
+                  )}
                 </div>
                 <div className="flex justify-end gap-3 mt-5">
                   <button onClick={() => setShowEventModal(false)} className="px-4 py-2 rounded-lg text-sm font-medium"
@@ -367,7 +396,7 @@ export default function TasksPage() {
                     onClick={async () => {
                       if (!eventTitle.trim() || !eventDate || !eventTime) return
                       const invitees = eventInvitees.split(',').map(s => s.trim()).filter(Boolean)
-                      await createEvent({ title: eventTitle, date: eventDate, time: eventTime, invitees, remind_before_min: eventRemind })
+                      await createEvent({ title: eventTitle, date: eventDate, time: eventTime, invitees, remind_before_min: eventRemind, recurrence: eventRecurrence || undefined, recurrence_end: eventRecurrenceEnd || null })
                       setShowEventModal(false)
                       await loadData()
                     }}

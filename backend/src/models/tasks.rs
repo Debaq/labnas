@@ -77,6 +77,12 @@ pub struct CalendarEvent {
     pub remind_before_min: u32, // avisar N min antes
     #[serde(default)]
     pub reminded: bool,
+    /// Recurrencia: "none", "daily", "weekly", "monthly"
+    #[serde(default)]
+    pub recurrence: String,
+    /// Fecha fin de recurrencia (opcional, "2026-12-31")
+    #[serde(default)]
+    pub recurrence_end: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 

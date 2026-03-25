@@ -584,6 +584,10 @@ pub struct CreateEventRequest {
     pub invitees: Vec<String>,
     #[serde(default = "default_event_rem")]
     pub remind_before_min: u32,
+    #[serde(default)]
+    pub recurrence: String,
+    #[serde(default)]
+    pub recurrence_end: Option<String>,
 }
 
 fn default_event_rem() -> u32 { 15 }
@@ -618,6 +622,8 @@ pub async fn create_event(
         declined: Vec::new(),
         remind_before_min: req.remind_before_min,
         reminded: false,
+        recurrence: req.recurrence,
+        recurrence_end: req.recurrence_end,
         created_at: Utc::now(),
     };
     let mut config = state.config.lock().await;

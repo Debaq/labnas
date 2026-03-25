@@ -852,6 +852,8 @@ async fn handle_event_command(state: &AppState, creator: &str, text: &str) -> St
         declined: Vec::new(),
         remind_before_min: 15,
         reminded: false,
+        recurrence: String::new(),
+        recurrence_end: None,
         created_at: chrono::Utc::now(),
     };
     let id = event.id.clone();
@@ -1370,6 +1372,8 @@ pub async fn task_reminder_loop(state: AppState) {
         let mut config = state.config.lock().await;
         let local_now = chrono::Local::now();
         let today = local_now.format("%Y-%m-%d").to_string();
+        let now_min = local_now.format("%H").to_string().parse::<u32>().unwrap_or(0) * 60
+            + local_now.format("%M").to_string().parse::<u32>().unwrap_or(0);
 
         for event in &mut config.tasks.events {
             if event.reminded || event.date != today {
@@ -1385,8 +1389,6 @@ pub async fn task_reminder_loop(state: AppState) {
                 _ => continue,
             };
             let event_min = eh * 60 + em;
-            let now_min = local_now.format("%H").to_string().parse::<u32>().unwrap_or(0) * 60
-                + local_now.format("%M").to_string().parse::<u32>().unwrap_or(0);
             let remind_at = event_min.saturating_sub(event.remind_before_min);
 
             if now_min >= remind_at && now_min < event_min {
@@ -1413,6 +1415,53 @@ pub async fn task_reminder_loop(state: AppState) {
                 event.reminded = true;
             }
         }
+
+        // Avanzar eventos recurrentes que ya pasaron
+        let mut new_events: Vec<crate::models::tasks::CalendarEvent> = Vec::new();
+        for event in &mut config.tasks.events {
+            if !event.reminded || event.recurrence.is_empty() || event.recurrence == "none" {
+                continue;
+            }
+            // Si el evento ya paso hoy, generar proxima ocurrencia
+            let event_min_total = event.time.split(':')
+                .map(|p| p.parse::<u32>().unwrap_or(0))
+                .collect::<Vec<_>>();
+            if event_min_total.len() != 2 { continue; }
+            let ev_min = event_min_total[0] * 60 + event_min_total[1];
+            if ev_min > now_min { continue; } // aun no paso
+
+            // Calcular proxima fecha
+            if let Ok(date) = chrono::NaiveDate::parse_from_str(&event.date, "%Y-%m-%d") {
+                use chrono::Datelike;
+                let next_date = match event.recurrence.as_str() {
+                    "daily" => Some(date + chrono::Duration::days(1)),
+                    "weekly" => Some(date + chrono::Duration::weeks(1)),
+                    "monthly" => {
+                        let m = if date.month() == 12 { 1 } else { date.month() + 1 };
+                        let y = if date.month() == 12 { date.year() + 1 } else { date.year() };
+                        chrono::NaiveDate::from_ymd_opt(y, m, date.day().min(28))
+                    }
+                    _ => None,
+                };
+
+                if let Some(next) = next_date {
+                    let next_str = next.format("%Y-%m-%d").to_string();
+                    // Verificar que no pase del fin de recurrencia
+                    let within_range = event.recurrence_end.as_ref()
+                        .map(|end| next_str.as_str() <= end.as_str())
+                        .unwrap_or(true);
+
+                    if within_range {
+                        // Actualizar fecha del evento para la proxima ocurrencia
+                        event.date = next_str;
+                        event.reminded = false;
+                        event.accepted.clear();
+                        event.declined.clear();
+                    }
+                }
+            }
+        }
+        config.tasks.events.extend(new_events);
         let _ = save_config(&config).await;
         drop(config);
 

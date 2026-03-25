@@ -214,6 +214,8 @@ export interface CalendarEvent {
   accepted: string[]
   declined: string[]
   remind_before_min: number
+  recurrence: string
+  recurrence_end: string | null
   created_at: string
 }
 

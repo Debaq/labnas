@@ -691,7 +691,8 @@ export async function fetchEvents(): Promise<CalendarEvent[]> {
 
 export async function createEvent(data: {
   title: string; date: string; time: string;
-  description?: string; invitees?: string[]; remind_before_min?: number
+  description?: string; invitees?: string[]; remind_before_min?: number;
+  recurrence?: string; recurrence_end?: string | null
 }): Promise<CalendarEvent> {
   const res = await api('/api/events', {
     method: 'POST',
