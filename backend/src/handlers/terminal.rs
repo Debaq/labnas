@@ -13,6 +13,21 @@ struct ResizeMessage {
     rows: u16,
 }
 
+/// Detecta el usuario con sesión activa (no root)
+fn detect_session_user() -> Option<String> {
+    let output = std::process::Command::new("who").output().ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if line.contains("(:0)") || line.contains("tty") {
+            let user = line.split_whitespace().next()?;
+            if user != "root" {
+                return Some(user.to_string());
+            }
+        }
+    }
+    None
+}
+
 pub async fn terminal_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
     ws.on_upgrade(handle_terminal_socket)
 }
@@ -33,14 +48,39 @@ async fn handle_terminal_socket(socket: WebSocket) {
         }
     };
 
-    let user_shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
-    let user_home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-    let user_name = std::env::var("USER")
-        .or_else(|_| std::env::var("LOGNAME"))
-        .unwrap_or_else(|_| "root".to_string());
+    // Detectar el usuario real de la sesión (no root)
+    let real_user = detect_session_user();
+    let (user_name, user_home, user_shell) = if let Some(ref user) = real_user {
+        let home = format!("/home/{}", user);
+        // Leer shell del usuario desde /etc/passwd
+        let shell = std::fs::read_to_string("/etc/passwd").ok()
+            .and_then(|passwd| {
+                passwd.lines()
+                    .find(|l| l.starts_with(&format!("{}:", user)))
+                    .and_then(|l| l.rsplit(':').next())
+                    .map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| "/bin/bash".to_string());
+        (user.clone(), home, shell)
+    } else {
+        (
+            std::env::var("USER").unwrap_or_else(|_| "root".to_string()),
+            std::env::var("HOME").unwrap_or_else(|_| "/root".to_string()),
+            std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string()),
+        )
+    };
 
-    let mut cmd = CommandBuilder::new(&user_shell);
-    cmd.arg("-l");
+    // Usar su para lanzar el shell como el usuario real
+    let mut cmd = if real_user.is_some() && user_name != "root" {
+        let mut c = CommandBuilder::new("su");
+        c.arg("-");
+        c.arg(&user_name);
+        c
+    } else {
+        let mut c = CommandBuilder::new(&user_shell);
+        c.arg("-l");
+        c
+    };
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("HOME", &user_home);
