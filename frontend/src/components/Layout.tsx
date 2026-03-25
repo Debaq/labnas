@@ -6,9 +6,6 @@ import { useAuth } from '../auth/AuthContext'
 import { shutdownServer, getBranding, fetchHealth, checkUpdate } from '../api'
 import MusicPanel from './MusicPanel'
 
-declare const __APP_VERSION__: string
-const FRONTEND_VERSION = __APP_VERSION__
-
 const pageTitles: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/files': 'Explorador de Archivos',
@@ -61,17 +58,25 @@ export default function Layout() {
     }).catch(() => {})
   }, [])
 
-  // Auto-reload cuando el backend se actualiza
+  // Auto-reload cuando el backend se actualiza (solo si la version del backend CAMBIA durante la sesion)
   useEffect(() => {
+    let lastBackendVersion: string | null = null
     const checkVersion = async () => {
       try {
         const health = await fetchHealth()
-        if (health.version && health.version !== FRONTEND_VERSION) {
-          console.log(`[LabNAS] Backend ${health.version} != Frontend ${FRONTEND_VERSION}, recargando...`)
+        if (!health.version) return
+        if (lastBackendVersion === null) {
+          // Primera comprobacion: guardar version actual sin recargar
+          lastBackendVersion = health.version
+          return
+        }
+        if (health.version !== lastBackendVersion) {
+          console.log(`[LabNAS] Backend cambio de ${lastBackendVersion} a ${health.version}, recargando...`)
           window.location.reload()
         }
       } catch {}
     }
+    checkVersion()
     const interval = setInterval(checkVersion, 30000)
     return () => clearInterval(interval)
   }, [])

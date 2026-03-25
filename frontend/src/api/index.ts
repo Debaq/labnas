@@ -433,6 +433,21 @@ export async function changePassword(currentPassword: string, newPassword: strin
   }
 }
 
+// --- Rename ---
+
+export async function renameUser(newUsername: string): Promise<{ token: string; username: string; role: import('../types').UserRole; permissions: import('../types').UserPermissions }> {
+  const res = await api('/api/auth/rename', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ new_username: newUsername }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Error al renombrar usuario')
+  }
+  return res.json()
+}
+
 // --- Linking ---
 
 export async function generateLinkCode(token: string): Promise<string> {

@@ -975,7 +975,25 @@ pub async fn recommend(
         extract_username(&sessions, &headers)
     };
 
-    // Buscar recomendaciones de cada seed en paralelo
+    // Recoger titulos/artistas de las seeds para fallback de busqueda
+    let seed_info: Vec<(String, String)> = {
+        let ms = state.music.lock().await;
+        let mut info = Vec::new();
+        if let Some(ref c) = ms.current {
+            info.push((c.artist.clone(), c.title.clone()));
+        }
+        for h in ms.history.iter().rev() {
+            if info.len() < 4 {
+                let key = h.artist.to_lowercase();
+                if !info.iter().any(|(a, _)| a.to_lowercase() == key) {
+                    info.push((h.artist.clone(), h.title.clone()));
+                }
+            }
+        }
+        info
+    };
+
+    // Buscar recomendaciones de cada seed en paralelo (YouTube Mix playlists)
     let mut handles = Vec::new();
     for seed_id in &seeds {
         let sid = seed_id.clone();
@@ -1007,6 +1025,42 @@ pub async fn recommend(
                         });
                     }
                 }
+            }
+        }
+    }
+
+    // Fallback: si YouTube Mix no devolvio nada, buscar por artista
+    if all_candidates.is_empty() {
+        let mut fb_handles = Vec::new();
+        for (artist, _title) in &seed_info {
+            let a = artist.clone();
+            let user = username.clone();
+            let existing_clone = existing.clone();
+            fb_handles.push(tokio::spawn(async move {
+                let search = format!("ytsearch8:{} mix", a);
+                let output = Command::new("yt-dlp")
+                    .args(["--flat-playlist", "--dump-json", "--no-warnings", "--ignore-errors", &search])
+                    .output().await.ok()?;
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let mut tracks = Vec::new();
+                for line in stdout.lines() {
+                    if let Ok(entry) = serde_json::from_str::<YtDlpEntry>(line) {
+                        if !entry.id.is_empty() && !existing_clone.contains(&entry.id) {
+                            let (thumb, artist) = extract_track_info(&entry);
+                            tracks.push(MusicTrack {
+                                id: entry.id, title: entry.title, artist, thumbnail: thumb,
+                                duration: entry.duration.unwrap_or(0.0) as u32,
+                                added_by: Some(format!("Mix ({})", user)),
+                            });
+                        }
+                    }
+                }
+                Some(tracks)
+            }));
+        }
+        for handle in fb_handles {
+            if let Ok(Some(tracks)) = handle.await {
+                all_candidates.extend(tracks);
             }
         }
     }
@@ -1082,6 +1136,31 @@ fn clean_track_title(title: &str) -> String {
     clean
 }
 
+/// Separa el nombre del artista del titulo si esta en formato "Artista - Cancion"
+/// YouTube suele poner titulos como "Queen - Bohemian Rhapsody (Official Video)"
+fn strip_artist_from_title(title: &str, artist: &str) -> String {
+    let title_lower = title.to_lowercase();
+    let artist_lower = artist.to_lowercase().trim().to_string();
+
+    for sep in [" - ", " – ", " — ", " | "] {
+        if let Some(pos) = title_lower.find(sep) {
+            let before = title_lower[..pos].trim();
+            // Si la parte antes del separador coincide con el artista (o es substring significativo)
+            if before == artist_lower
+                || artist_lower.starts_with(before)
+                || before.starts_with(&artist_lower)
+            {
+                let after = title[pos + sep.len()..].trim();
+                if !after.is_empty() {
+                    return after.to_string();
+                }
+            }
+        }
+    }
+
+    title.to_string()
+}
+
 /// POST /api/music/lastfm-key - Guardar API key de Last.fm (admin only)
 pub async fn set_lastfm_key(
     State(state): State<AppState>,
@@ -1119,9 +1198,11 @@ pub async fn radio(
         ))?;
     drop(config);
 
-    // 2. Limpiar titulo y llamar a Last.fm track.getSimilar
+    // 2. Limpiar titulo y separar artista del titulo (YouTube pone "Artista - Cancion")
     let clean_artist = clean_track_title(&req.artist);
-    let clean_track = clean_track_title(&req.track);
+    let clean_track = strip_artist_from_title(&clean_track_title(&req.track), &clean_artist);
+
+    // Intentar primero con track.getSimilar, si falla probar con artist.getSimilar
     let url = format!(
         "https://ws.audioscrobbler.com/2.0/?method=track.getSimilar&artist={}&track={}&api_key={}&format=json&limit=20",
         urlencoding::encode(&clean_artist),
@@ -1142,12 +1223,26 @@ pub async fn radio(
         .await
         .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Error JSON Last.fm: {}", e)))?;
 
-    let similar = json["similartracks"]["track"]
-        .as_array()
-        .ok_or((
-            StatusCode::NOT_FOUND,
-            "Last.fm no devolvio resultados para esta cancion".to_string(),
-        ))?;
+    // Si track.getSimilar no devuelve resultados, intentar con artist.getTopTracks como fallback
+    let similar = match json["similartracks"]["track"].as_array() {
+        Some(arr) if !arr.is_empty() => arr.clone(),
+        _ => {
+            let fallback_url = format!(
+                "https://ws.audioscrobbler.com/2.0/?method=artist.getTopTracks&artist={}&api_key={}&format=json&limit=20",
+                urlencoding::encode(&clean_artist),
+                api_key,
+            );
+            let fb_resp = state.http_client.get(&fallback_url)
+                .timeout(Duration::from_secs(10))
+                .send().await
+                .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Error Last.fm fallback: {}", e)))?;
+            let fb_json: serde_json::Value = fb_resp.json().await
+                .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Error JSON Last.fm: {}", e)))?;
+            fb_json["toptracks"]["track"].as_array()
+                .ok_or((StatusCode::NOT_FOUND, format!("Last.fm no encontro resultados para '{}' - '{}'", clean_artist, clean_track)))?
+                .clone()
+        }
+    };
 
     if similar.is_empty() {
         return Err((
@@ -1261,9 +1356,9 @@ pub async fn lucky(
         ))?;
     drop(config);
 
-    // Limpiar titulo y pedir muchas similares para tener variedad
+    // Limpiar titulo, separar artista, y pedir muchas similares para tener variedad
     let clean_artist = clean_track_title(&req.artist);
-    let clean_track = clean_track_title(&req.track);
+    let clean_track = strip_artist_from_title(&clean_track_title(&req.track), &clean_artist);
     let url = format!(
         "https://ws.audioscrobbler.com/2.0/?method=track.getSimilar&artist={}&track={}&api_key={}&format=json&limit=50",
         urlencoding::encode(&clean_artist),
@@ -1284,9 +1379,26 @@ pub async fn lucky(
         .await
         .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Error JSON Last.fm: {}", e)))?;
 
-    let similar = json["similartracks"]["track"]
-        .as_array()
-        .ok_or((StatusCode::NOT_FOUND, "Sin canciones similares".to_string()))?;
+    // Fallback a artist.getTopTracks si track.getSimilar no devuelve nada
+    let similar = match json["similartracks"]["track"].as_array() {
+        Some(arr) if !arr.is_empty() => arr.clone(),
+        _ => {
+            let fallback_url = format!(
+                "https://ws.audioscrobbler.com/2.0/?method=artist.getTopTracks&artist={}&api_key={}&format=json&limit=50",
+                urlencoding::encode(&clean_artist),
+                api_key,
+            );
+            let fb_resp = state.http_client.get(&fallback_url)
+                .timeout(Duration::from_secs(10))
+                .send().await
+                .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Error Last.fm: {}", e)))?;
+            let fb_json: serde_json::Value = fb_resp.json().await
+                .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Error JSON: {}", e)))?;
+            fb_json["toptracks"]["track"].as_array()
+                .ok_or((StatusCode::NOT_FOUND, "Sin canciones similares".to_string()))?
+                .clone()
+        }
+    };
 
     if similar.is_empty() {
         return Err((StatusCode::NOT_FOUND, "Sin canciones similares".to_string()));

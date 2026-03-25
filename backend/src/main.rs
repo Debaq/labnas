@@ -67,6 +67,7 @@ async fn main() {
         .route("/api/auth/me", get(handlers::auth::me))
         .route("/api/auth/logout", post(handlers::auth::logout))
         .route("/api/auth/password", post(handlers::auth::change_password))
+        .route("/api/auth/rename", post(handlers::auth::rename_user))
         .route("/api/auth/users", get(handlers::auth::list_users))
         .route("/api/auth/usernames", get(handlers::auth::list_usernames))
         .route("/api/auth/users/{username}/role", post(handlers::auth::set_user_role))

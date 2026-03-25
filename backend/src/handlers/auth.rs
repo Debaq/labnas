@@ -331,6 +331,76 @@ pub async fn delete_user(
     Ok(StatusCode::NO_CONTENT)
 }
 
+// --- Rename user (self) ---
+
+pub async fn rename_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<crate::models::auth::RenameUserRequest>,
+) -> Result<Json<AuthResponse>, (StatusCode, String)> {
+    let token = extract_token(&headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    let sessions = state.sessions.lock().await;
+    let session = sessions.get(&token)
+        .ok_or((StatusCode::UNAUTHORIZED, "Sesion invalida".to_string()))?;
+    let old_username = session.username.clone();
+    drop(sessions);
+
+    let new_username = req.new_username.trim().to_lowercase();
+
+    if new_username.len() < 2 || new_username.len() > 32 {
+        return Err((StatusCode::BAD_REQUEST, "Usuario debe tener entre 2 y 32 caracteres".to_string()));
+    }
+    if !new_username.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.') {
+        return Err((StatusCode::BAD_REQUEST, "Usuario solo puede contener letras, numeros, _ y .".to_string()));
+    }
+    if new_username == old_username {
+        return Err((StatusCode::BAD_REQUEST, "El nuevo nombre es igual al actual".to_string()));
+    }
+
+    let mut config = state.config.lock().await;
+
+    if config.web_users.iter().any(|u| u.username == new_username) {
+        return Err((StatusCode::CONFLICT, "Ese nombre de usuario ya esta en uso".to_string()));
+    }
+
+    let user = config.web_users.iter_mut()
+        .find(|u| u.username == old_username)
+        .ok_or((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()))?;
+
+    user.username = new_username.clone();
+    let role = user.role.clone();
+    let permissions = user.permissions.clone();
+
+    // Actualizar linked_web_user en telegram chats
+    for chat in &mut config.notifications.telegram_chats {
+        if chat.linked_web_user.as_deref() == Some(&old_username) {
+            chat.linked_web_user = Some(new_username.clone());
+        }
+    }
+
+    save_config(&config).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    drop(config);
+
+    // Actualizar todas las sesiones del usuario
+    let mut sessions = state.sessions.lock().await;
+    for session in sessions.values_mut() {
+        if session.username == old_username {
+            session.username = new_username.clone();
+        }
+    }
+
+    state.log_activity("Renombrado", &format!("{} -> {}", old_username, new_username), &new_username).await;
+
+    Ok(Json(AuthResponse {
+        token: token,
+        username: new_username,
+        role,
+        permissions,
+    }))
+}
+
 // --- Generate link code (user requests from web) ---
 
 pub async fn generate_link_code(

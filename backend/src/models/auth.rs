@@ -48,3 +48,8 @@ pub struct SetWebUserRoleRequest {
     #[serde(default)]
     pub permissions: Option<UserPermissions>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct RenameUserRequest {
+    pub new_username: String,
+}

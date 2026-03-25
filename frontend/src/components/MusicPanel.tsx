@@ -46,7 +46,8 @@ export default function MusicPanel() {
   const [loadingLucky, setLoadingLucky] = useState(false)
   const [radioError, setRadioError] = useState<string | null>(null)
   const [elapsed, setElapsed] = useState(0)
-  const [showVolume, setShowVolume] = useState(false)
+  const [localVolume, setLocalVolume] = useState(80)
+  const volumeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     localStorage.setItem('labnas-music-panel', open ? 'open' : 'closed')
@@ -103,6 +104,11 @@ export default function MusicPanel() {
     }
   }, [musicState.mode])
 
+  // Sincronizar volumen local con el del servidor (solo si no estamos arrastrando)
+  useEffect(() => {
+    if (!volumeTimer.current) setLocalVolume(musicState.volume)
+  }, [musicState.volume])
+
   // Usar elapsed del servidor (viene en el polling cada 5s)
   // En browser mode, complementar con audio.currentTime para mayor precision
   useEffect(() => {
@@ -147,11 +153,19 @@ export default function MusicPanel() {
   async function handlePlayFromQueue(i: number) { setMusicState(safeMusicState(await playFromQueue(i))) }
   async function handleMoveInQueue(from: number, to: number) { setMusicState(safeMusicState(await moveInQueue(from, to))) }
   async function handleRemoveFromQueue(i: number) { setMusicState(safeMusicState(await removeFromQueue(i))) }
-  async function handleVolume(vol: number) {
-    const ms = safeMusicState(await setMusicVolume(vol))
-    setMusicState(ms)
+  function handleVolume(vol: number) {
+    setLocalVolume(vol)
     const audio = audioRef.current
     if (audio) audio.volume = vol / 100
+    // Debounce: enviar al backend solo cuando deje de mover por 300ms
+    if (volumeTimer.current) clearTimeout(volumeTimer.current)
+    volumeTimer.current = setTimeout(async () => {
+      volumeTimer.current = null
+      try {
+        const ms = safeMusicState(await setMusicVolume(vol))
+        setMusicState(ms)
+      } catch {}
+    }, 300)
   }
   async function handleToggleMode() {
     const newMode = musicState.mode === 'nas' ? 'browser' : 'nas'
@@ -344,11 +358,11 @@ export default function MusicPanel() {
         {/* Volume */}
         <div className="flex items-center gap-1.5 px-1">
           <Volume2 size={11} style={{ color: 'var(--text-secondary)' }} />
-          <input type="range" min="0" max="100" value={musicState.volume}
+          <input type="range" min="0" max="100" value={localVolume}
             onChange={e => handleVolume(parseInt(e.target.value))}
             className="w-16 h-1 rounded-full appearance-none cursor-pointer"
             style={{ accentColor: 'var(--text-secondary)', backgroundColor: 'var(--bg-tertiary)' }} />
-          <span className="text-[8px] font-mono w-6" style={{ color: 'var(--text-secondary)' }}>{musicState.volume}</span>
+          <span className="text-[8px] font-mono w-6" style={{ color: 'var(--text-secondary)' }}>{localVolume}</span>
         </div>
 
         {/* Mix + Menu - SIEMPRE visibles */}

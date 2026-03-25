@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio } from 'lucide-react'
+import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, getThemeNames, type ThemeName } from '../themes/themes'
-import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, checkUpdate, doUpdate, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, setLastfmKey, type LabBranding, type LabService } from '../api'
+import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, doUpdate, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, setLastfmKey, type LabBranding, type LabService } from '../api'
 import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig, UserRole, UserPermissions } from '../types'
 
 function formatBytes(bytes: number): string {
@@ -79,6 +79,8 @@ export default function SettingsPage() {
   const [currentPw, setCurrentPw] = useState('')
   const [newPw, setNewPw] = useState('')
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [newName, setNewName] = useState('')
+  const [renameMsg, setRenameMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [autostart, setAutostart] = useState<AutostartStatus | null>(null)
 
   // Last.fm
@@ -410,6 +412,66 @@ export default function SettingsPage() {
               onClick={() => setTheme(t)}
             />
           ))}
+        </div>
+      </section>
+
+      {/* Rename user */}
+      <section>
+        <div className="flex items-center gap-3 mb-4">
+          <PenLine size={22} style={{ color: 'var(--accent)' }} />
+          <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+            Cambiar Nombre de Usuario
+          </h2>
+        </div>
+        <div
+          className="rounded-xl p-6"
+          style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
+        >
+          <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
+            Usuario actual: <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{authUser?.username}</span>
+          </p>
+          <div className="flex items-end gap-3 flex-wrap">
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Nuevo nombre</label>
+              <input
+                value={newName}
+                onChange={e => { setNewName(e.target.value); setRenameMsg(null) }}
+                placeholder="nuevo_nombre"
+                className="px-3 py-2 rounded-lg text-sm outline-none w-52"
+                style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+              />
+            </div>
+            <button
+              onClick={async () => {
+                if (!newName.trim()) return
+                try {
+                  const result = await renameUser(newName.trim())
+                  setRenameMsg({ ok: true, text: `Nombre cambiado a ${result.username}` })
+                  setNewName('')
+                  // Actualizar auth en localStorage
+                  const saved = localStorage.getItem('labnas_auth')
+                  if (saved) {
+                    const parsed = JSON.parse(saved)
+                    parsed.username = result.username
+                    localStorage.setItem('labnas_auth', JSON.stringify(parsed))
+                    window.location.reload()
+                  }
+                } catch (e: any) {
+                  setRenameMsg({ ok: false, text: e.message })
+                }
+              }}
+              disabled={!newName.trim()}
+              className="px-4 py-2 rounded-lg text-sm font-medium"
+              style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
+            >
+              Cambiar
+            </button>
+          </div>
+          {renameMsg && (
+            <p className="text-xs mt-3" style={{ color: renameMsg.ok ? 'var(--success)' : 'var(--danger)' }}>
+              {renameMsg.text}
+            </p>
+          )}
         </div>
       </section>
 
