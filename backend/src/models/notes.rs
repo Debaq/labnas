@@ -8,6 +8,10 @@ pub struct Note {
     pub content: String, // Markdown
     pub created_by: String,
     pub updated_by: String,
+    #[serde(default)]
+    pub shared_with: Vec<String>,
+    #[serde(default)]
+    pub is_public: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

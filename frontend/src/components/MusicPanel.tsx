@@ -3,11 +3,12 @@ import {
   Music, Search, Play, Pause, Square, Loader2, X, SkipForward, SkipBack,
   Trash2, ListMusic, Plus, Sparkles, Speaker, Monitor, MoreVertical, Volume2,
   Shuffle, Repeat, Repeat1, ChevronUp, ChevronDown, ChevronRight, Tv, TvMinimalPlay,
+  ArrowUpToLine, Radio, Dices,
 } from 'lucide-react'
 import {
   searchMusic, playMusic, getCurrentMusic, stopMusic, pauseMusic, previousMusic,
   nextMusic, removeFromQueue, playFromQueue, moveInQueue, toggleShuffle, toggleRepeat,
-  recommendMusic, setMusicMode, setMusicVolume, setMusicVideo, getScreens,
+  recommendMusic, setMusicMode, setMusicVolume, setMusicVideo, getScreens, startRadio, luckyPlay,
   type MusicTrack, type MusicState, type ScreenInfo,
 } from '../api'
 
@@ -41,6 +42,9 @@ export default function MusicPanel() {
   const [searching, setSearching] = useState(false)
   const [loadingTrack, setLoadingTrack] = useState(false)
   const [loadingMix, setLoadingMix] = useState(false)
+  const [loadingRadio, setLoadingRadio] = useState(false)
+  const [loadingLucky, setLoadingLucky] = useState(false)
+  const [radioError, setRadioError] = useState<string | null>(null)
 
   useEffect(() => {
     localStorage.setItem('labnas-music-panel', open ? 'open' : 'closed')
@@ -137,6 +141,33 @@ export default function MusicPanel() {
   async function handleRecommend() {
     setLoadingMix(true)
     try { setMusicState(safeMusicState(await recommendMusic())) } catch {} finally { setLoadingMix(false) }
+  }
+
+  async function handleRadio(artist: string, track: string) {
+    setLoadingRadio(true)
+    setRadioError(null)
+    try {
+      setMusicState(safeMusicState(await startRadio(artist, track)))
+    } catch (e: any) {
+      setRadioError(e.message || 'Error iniciando radio')
+      setTimeout(() => setRadioError(null), 5000)
+    } finally {
+      setLoadingRadio(false)
+    }
+  }
+
+  async function handleLucky() {
+    if (!musicState.current) return
+    setLoadingLucky(true)
+    setRadioError(null)
+    try {
+      setMusicState(safeMusicState(await luckyPlay(musicState.current.artist, musicState.current.title)))
+    } catch (e: any) {
+      setRadioError(e.message || 'Sin suerte esta vez')
+      setTimeout(() => setRadioError(null), 5000)
+    } finally {
+      setLoadingLucky(false)
+    }
   }
 
   // Mini floating button when closed
@@ -287,6 +318,22 @@ export default function MusicPanel() {
             {loadingMix ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
             Mix
           </button>
+          <button
+            onClick={() => musicState.current && handleRadio(musicState.current.artist, musicState.current.title)}
+            disabled={loadingRadio || !musicState.current}
+            className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[10px] font-medium hover:opacity-90"
+            style={{ backgroundColor: 'var(--accent)' + '20', color: 'var(--accent)', border: '1px solid var(--accent)' + '40' }}>
+            {loadingRadio ? <Loader2 size={12} className="animate-spin" /> : <Radio size={12} />}
+            Radio
+          </button>
+          <button
+            onClick={handleLucky}
+            disabled={loadingLucky || !musicState.current}
+            className="p-1.5 rounded-lg hover:opacity-90"
+            style={{ backgroundColor: 'var(--warning)' + '20', color: 'var(--warning)', border: '1px solid var(--warning)' + '40' }}
+            title="Voy a tener suerte">
+            {loadingLucky ? <Loader2 size={12} className="animate-spin" /> : <Dices size={13} />}
+          </button>
           <div className="relative">
             <button onClick={handleOpenMenu} className="p-1.5 rounded-lg hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
               <MoreVertical size={14} />
@@ -334,6 +381,12 @@ export default function MusicPanel() {
           </div>
         </div>
       </div>
+
+      {radioError && (
+        <div className="px-3 py-2 text-[10px]" style={{ backgroundColor: 'var(--danger)' + '15', color: 'var(--danger)' }}>
+          {radioError}
+        </div>
+      )}
 
       {/* Scrollable: resultados + cola */}
       <div className="flex-1 overflow-y-auto">
@@ -389,6 +442,11 @@ export default function MusicPanel() {
                     <p className="text-[9px] truncate" style={{ color: 'var(--text-secondary)' }}>{track.artist} · {formatDuration(track.duration)}</p>
                   </div>
                   <div className="flex items-center gap-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {i > 0 && (
+                      <button onClick={() => handleMoveInQueue(i, 0)} className="p-0.5" style={{ color: 'var(--accent)' }} title="Poner siguiente">
+                        <ArrowUpToLine size={10} />
+                      </button>
+                    )}
                     {i > 0 && (
                       <button onClick={() => handleMoveInQueue(i, i - 1)} className="p-0.5" style={{ color: 'var(--text-secondary)' }}>
                         <ChevronUp size={10} />

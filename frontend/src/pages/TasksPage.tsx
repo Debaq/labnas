@@ -29,6 +29,7 @@ import {
   deleteEvent,
   acceptEvent,
   declineEvent,
+  fetchUsernames,
 } from '../api'
 import type { Task, Project, TaskStatus, CalendarEvent } from '../types'
 import { useAuth } from '../auth/AuthContext'
@@ -70,14 +71,16 @@ export default function TasksPage() {
   const [taskRequiresConfirmation, setTaskRequiresConfirmation] = useState(false)
   const [taskInsistent, setTaskInsistent] = useState(false)
   const [taskReminderMinutes, setTaskReminderMinutes] = useState(8)
+  const [allUsers, setAllUsers] = useState<string[]>([])
 
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [p, t, e] = await Promise.all([fetchProjects(), fetchTasks(), fetchEvents()])
+      const [p, t, e, u] = await Promise.all([fetchProjects(), fetchTasks(), fetchEvents(), fetchUsernames().catch(() => [] as string[])])
       setProjects(p)
       setTasks(t)
       setEvents(e)
+      setAllUsers(u)
     } catch {
       // silenciar
     } finally {
@@ -653,13 +656,54 @@ export default function TasksPage() {
 
               {/* Asignar a */}
               <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Asignar a (separar por comas, o @all)</label>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Asignar a</label>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => setTaskAssignedTo('all')}
+                    className="px-2.5 py-1 rounded-full text-xs font-medium transition-all"
+                    style={{
+                      backgroundColor: taskAssignedTo === 'all' ? 'var(--accent)' : 'var(--bg-tertiary)',
+                      color: taskAssignedTo === 'all' ? '#ffffff' : 'var(--text-secondary)',
+                      border: `1px solid ${taskAssignedTo === 'all' ? 'var(--accent)' : 'var(--border)'}`,
+                    }}
+                  >
+                    @todos
+                  </button>
+                  {allUsers.map((u) => {
+                    const selected = taskAssignedTo.split(',').map(s => s.trim()).includes(u)
+                    return (
+                      <button
+                        key={u}
+                        type="button"
+                        onClick={() => {
+                          const current = taskAssignedTo.split(',').map(s => s.trim()).filter(Boolean)
+                          if (current.includes('all')) {
+                            setTaskAssignedTo(u)
+                          } else if (selected) {
+                            setTaskAssignedTo(current.filter(x => x !== u).join(', '))
+                          } else {
+                            setTaskAssignedTo([...current, u].join(', '))
+                          }
+                        }}
+                        className="px-2.5 py-1 rounded-full text-xs font-medium transition-all"
+                        style={{
+                          backgroundColor: selected && taskAssignedTo !== 'all' ? 'var(--accent)' : 'var(--bg-tertiary)',
+                          color: selected && taskAssignedTo !== 'all' ? '#ffffff' : 'var(--text-secondary)',
+                          border: `1px solid ${selected && taskAssignedTo !== 'all' ? 'var(--accent)' : 'var(--border)'}`,
+                        }}
+                      >
+                        @{u}
+                      </button>
+                    )
+                  })}
+                </div>
                 <input
                   type="text"
                   value={taskAssignedTo}
                   onChange={(e) => setTaskAssignedTo(e.target.value)}
-                  placeholder="nick, pedro o @all"
-                  className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                  placeholder="O escribe nombres separados por comas"
+                  className="w-full px-3 py-2 rounded-lg text-xs outline-none"
                   style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
                 />
               </div>

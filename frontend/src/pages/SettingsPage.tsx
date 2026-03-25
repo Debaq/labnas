@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus } from 'lucide-react'
+import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, getThemeNames, type ThemeName } from '../themes/themes'
-import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, checkUpdate, doUpdate, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, type LabBranding, type LabService } from '../api'
+import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, checkUpdate, doUpdate, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, setLastfmKey, type LabBranding, type LabService } from '../api'
 import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig, UserRole, UserPermissions } from '../types'
 
 function formatBytes(bytes: number): string {
@@ -80,6 +80,10 @@ export default function SettingsPage() {
   const [newPw, setNewPw] = useState('')
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [autostart, setAutostart] = useState<AutostartStatus | null>(null)
+
+  // Last.fm
+  const [lastfmKey, setLastfmKeyInput] = useState('')
+  const [lastfmMsg, setLastfmMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
   // Servicios
   const [services, setServices] = useState<LabService[]>([])
@@ -1065,6 +1069,54 @@ export default function SettingsPage() {
             )}
           </div>
         )}
+      </section>}
+
+      {/* Last.fm (admin only) */}
+      {isAdmin && <section>
+        <div className="flex items-center gap-3 mb-4">
+          <Radio size={22} style={{ color: 'var(--accent)' }} />
+          <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+            Last.fm Radio
+          </h2>
+        </div>
+        <div className="rounded-xl p-5 space-y-3" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
+          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+            API key de Last.fm para buscar canciones similares. Obtener en <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: 'var(--accent)' }}>last.fm/api</a>
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={lastfmKey}
+              onChange={(e) => setLastfmKeyInput(e.target.value)}
+              placeholder="API key de Last.fm"
+              className="flex-1 px-3 py-2 rounded-lg text-sm outline-none font-mono"
+              style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+            />
+            <button
+              onClick={async () => {
+                if (!lastfmKey.trim()) return
+                try {
+                  await setLastfmKey(lastfmKey.trim())
+                  setLastfmMsg({ ok: true, text: 'API key guardada' })
+                  setLastfmKeyInput('')
+                } catch {
+                  setLastfmMsg({ ok: false, text: 'Error guardando key' })
+                }
+                setTimeout(() => setLastfmMsg(null), 3000)
+              }}
+              disabled={!lastfmKey.trim()}
+              className="px-4 py-2 rounded-lg text-sm font-medium"
+              style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
+            >
+              Guardar
+            </button>
+          </div>
+          {lastfmMsg && (
+            <p className="text-xs" style={{ color: lastfmMsg.ok ? 'var(--success)' : 'var(--danger)' }}>
+              {lastfmMsg.text}
+            </p>
+          )}
+        </div>
       </section>}
 
       {/* Storage (admin only) */}

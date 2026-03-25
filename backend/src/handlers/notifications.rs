@@ -1269,19 +1269,41 @@ pub async fn task_reminder_loop(state: AppState) {
         let chats = config.notifications.telegram_chats.clone();
 
         let now = chrono::Utc::now();
+        let local_now = chrono::Local::now();
+        let today = local_now.format("%Y-%m-%d").to_string();
         let mut to_remind: Vec<(String, Vec<i64>)> = Vec::new(); // (message, chat_ids)
 
         for task in &mut config.tasks.tasks {
             if task.status == TaskStatus::Completada || task.status == TaskStatus::Rechazada {
                 continue;
             }
-            if !task.requires_confirmation && !task.insistent {
+
+            // Check due date
+            let is_due_today = task
+                .due_date
+                .as_ref()
+                .map(|d| d.as_str() == today.as_str())
+                .unwrap_or(false);
+            let is_overdue = task
+                .due_date
+                .as_ref()
+                .map(|d| d.as_str() < today.as_str())
+                .unwrap_or(false);
+
+            // Skip if no reason to remind
+            if !task.requires_confirmation && !task.insistent && !is_due_today && !is_overdue {
                 continue;
             }
 
-            // Check if enough time passed since last reminder (30 min for insistent, 2h for confirmation)
-            let interval = (task.reminder_minutes as i64) * 60;
-            let should_remind = task.last_reminder
+            // Interval: use task's reminder_minutes for insistent, 720 min (12h) for due date only
+            let interval = if task.insistent || task.requires_confirmation {
+                (task.reminder_minutes as i64) * 60
+            } else {
+                720 * 60 // 12 hours for due date reminders
+            };
+
+            let should_remind = task
+                .last_reminder
                 .map(|lr| (now - lr).num_seconds() >= interval)
                 .unwrap_or(true);
 
@@ -1290,15 +1312,26 @@ pub async fn task_reminder_loop(state: AppState) {
             }
 
             // Find chat_ids for assigned users
+            // @all solo aplica a operadores y admins, no observadores
             let target_ids: Vec<i64> = if task.assigned_to.contains(&"all".to_string()) {
-                chats.iter()
-                    .filter(|c| c.role != UserRole::Pendiente && !task.confirmed_by.contains(&c.name))
+                chats
+                    .iter()
+                    .filter(|c| {
+                        (c.role == UserRole::Admin || c.role == UserRole::Operador)
+                            && !task.confirmed_by.contains(&c.name)
+                    })
                     .map(|c| c.chat_id)
                     .collect()
             } else {
-                chats.iter()
+                chats
+                    .iter()
                     .filter(|c| {
-                        task.assigned_to.iter().any(|a| a.to_lowercase() == c.name.to_lowercase()) && !task.confirmed_by.contains(&c.name)
+                        (task.assigned_to.iter().any(|a| {
+                            a.to_lowercase() == c.name.to_lowercase()
+                        }) || c.linked_web_user.as_ref().map(|u| {
+                            task.assigned_to.iter().any(|a| a.to_lowercase() == u.to_lowercase())
+                        }).unwrap_or(false))
+                            && !task.confirmed_by.contains(&c.name)
                     })
                     .map(|c| c.chat_id)
                     .collect()
@@ -1308,10 +1341,22 @@ pub async fn task_reminder_loop(state: AppState) {
                 continue;
             }
 
+            let urgency = if is_overdue {
+                "🚨 *TAREA VENCIDA*\n\n"
+            } else if is_due_today {
+                "⚠️ *Vence hoy*\n\n"
+            } else {
+                ""
+            };
             let icon = if task.insistent { "🔔" } else { "📋" };
+            let due_info = task
+                .due_date
+                .as_ref()
+                .map(|d| format!("\nVence: {}", d))
+                .unwrap_or_default();
             let msg = format!(
-                "{} *Recordatorio*\n\nTarea: *{}*\nID: `{}`\nPor: {}\n\n`/confirmar {}` o `/rechazar {}`",
-                icon, task.title, task.id, task.created_by, task.id, task.id
+                "{}{} *Recordatorio*\n\nTarea: *{}*\nID: `{}`\nPor: {}{}\n\n`/confirmar {}` o `/rechazar {}`",
+                urgency, icon, task.title, task.id, task.created_by, due_info, task.id, task.id
             );
 
             to_remind.push((msg, target_ids));

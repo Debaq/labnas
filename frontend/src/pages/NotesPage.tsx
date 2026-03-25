@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
-import { Plus, Trash2, Save, FileText, Edit3, Loader2, X } from 'lucide-react'
-import { fetchNotes, createNote, updateNote, deleteNote } from '../api'
+import { Plus, Trash2, Save, FileText, Edit3, Loader2, X, Users, Globe } from 'lucide-react'
+import { fetchNotes, createNote, updateNote, deleteNote, fetchUsernames } from '../api'
 import type { Note } from '../types/notes'
 
 function renderMarkdown(md: string): string {
@@ -30,9 +30,13 @@ export default function NotesPage() {
   const [showNew, setShowNew] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [allUsers, setAllUsers] = useState<string[]>([])
+  const [editSharedWith, setEditSharedWith] = useState<string[]>([])
+  const [editIsPublic, setEditIsPublic] = useState(false)
 
   useEffect(() => {
     loadNotes()
+    fetchUsernames().then(setAllUsers).catch(() => {})
   }, [])
 
   async function loadNotes() {
@@ -65,7 +69,7 @@ export default function NotesPage() {
     if (!selectedNote) return
     setSaving(true)
     try {
-      const updated = await updateNote(selectedNote.id, { title: editTitle, content: editContent })
+      const updated = await updateNote(selectedNote.id, { title: editTitle, content: editContent, shared_with: editSharedWith, is_public: editIsPublic })
       setNotes(notes.map(n => n.id === updated.id ? updated : n))
       setSelectedNote(updated)
       setEditing(false)
@@ -90,6 +94,8 @@ export default function NotesPage() {
     setEditing(true)
     setEditContent(note.content)
     setEditTitle(note.title)
+    setEditSharedWith(note.shared_with || [])
+    setEditIsPublic(note.is_public || false)
     setTimeout(() => textareaRef.current?.focus(), 50)
   }
 
@@ -154,9 +160,13 @@ export default function NotesPage() {
                     <Trash2 size={12} />
                   </button>
                 </div>
-                <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                  {note.updated_by} - {new Date(note.updated_at).toLocaleDateString('es-ES')}
-                </p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+                    {note.updated_by} - {new Date(note.updated_at).toLocaleDateString('es-ES')}
+                  </span>
+                  {note.is_public && <Globe size={9} style={{ color: 'var(--success)' }} />}
+                  {(note.shared_with?.length > 0) && <Users size={9} style={{ color: 'var(--accent)' }} />}
+                </div>
               </div>
             ))
           )}
@@ -255,9 +265,45 @@ export default function NotesPage() {
               )}
             </div>
 
+            {/* Sharing controls (visible in edit mode) */}
+            {editing && (
+              <div className="px-4 py-2 space-y-2" style={{ borderTop: '1px solid var(--border)' }}>
+                <div className="flex items-center gap-2">
+                  <Users size={12} style={{ color: 'var(--text-secondary)' }} />
+                  <span className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>Compartir con:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {allUsers.map(u => {
+                      const sel = editSharedWith.includes(u)
+                      return (
+                        <button key={u} type="button"
+                          onClick={() => setEditSharedWith(sel ? editSharedWith.filter(x => x !== u) : [...editSharedWith, u])}
+                          className="px-2 py-0.5 rounded-full text-[10px] font-medium transition-all"
+                          style={{
+                            backgroundColor: sel ? 'var(--accent)' : 'var(--bg-tertiary)',
+                            color: sel ? '#fff' : 'var(--text-secondary)',
+                            border: `1px solid ${sel ? 'var(--accent)' : 'var(--border)'}`,
+                          }}>
+                          @{u}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={editIsPublic} onChange={e => setEditIsPublic(e.target.checked)} />
+                  <Globe size={12} style={{ color: editIsPublic ? 'var(--success)' : 'var(--text-secondary)' }} />
+                  <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Nota publica (visible para todos)</span>
+                </label>
+              </div>
+            )}
+
             {/* Footer */}
             <div className="px-4 py-2 text-[10px] flex justify-between" style={{ borderTop: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-              <span>Por: {selectedNote.created_by}</span>
+              <span className="flex items-center gap-2">
+                Por: {selectedNote.created_by}
+                {selectedNote.is_public && <span className="px-1.5 py-0.5 rounded text-[9px]" style={{ backgroundColor: 'var(--success)' + '20', color: 'var(--success)' }}>Publica</span>}
+                {(selectedNote.shared_with?.length > 0) && <span className="px-1.5 py-0.5 rounded text-[9px]" style={{ backgroundColor: 'var(--accent)' + '20', color: 'var(--accent)' }}>Compartida</span>}
+              </span>
               <span>Editado: {new Date(selectedNote.updated_at).toLocaleString('es-ES')} por {selectedNote.updated_by}</span>
             </div>
           </>

@@ -254,6 +254,19 @@ pub async fn list_users(
     Json(users)
 }
 
+/// Lista solo los nombres de usuario (accesible para cualquier usuario autenticado)
+pub async fn list_usernames(
+    State(state): State<AppState>,
+) -> Json<Vec<String>> {
+    let config = state.config.lock().await;
+    let names: Vec<String> = config
+        .web_users
+        .iter()
+        .map(|u| u.username.clone())
+        .collect();
+    Json(names)
+}
+
 // --- Set user role (admin) ---
 
 pub async fn set_user_role(

@@ -32,6 +32,8 @@ pub struct LabNasConfig {
     pub mdns_hostname: String,
     #[serde(default)]
     pub services: Vec<LabService>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lastfm_api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

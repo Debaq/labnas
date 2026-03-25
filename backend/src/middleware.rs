@@ -92,6 +92,9 @@ pub async fn permission_check(
         (&Method::POST, p) if p.starts_with("/api/auth/users/") => is_admin,
         (&Method::DELETE, p) if p.starts_with("/api/auth/users/") => is_admin,
 
+        // Admin only: Last.fm key
+        (&Method::POST, "/api/music/lastfm-key") => is_admin,
+
         // Admin only: shutdown + update + mdns
         (&Method::POST, "/api/system/shutdown") => is_admin,
         (&Method::POST, "/api/system/update/do") => is_admin,

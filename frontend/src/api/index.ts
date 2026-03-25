@@ -455,6 +455,48 @@ export async function adminLinkChat(chatId: number, webUsername: string): Promis
 
 // --- Web Users ---
 
+export async function setLastfmKey(key: string): Promise<string> {
+  const res = await api('/api/music/lastfm-key', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key }),
+  })
+  if (!res.ok) throw new Error('Error guardando API key de Last.fm')
+  return res.text()
+}
+
+export async function luckyPlay(artist: string, track: string): Promise<MusicState> {
+  const res = await api('/api/music/lucky', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ artist, track }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Error con suerte')
+  }
+  return res.json()
+}
+
+export async function startRadio(artist: string, track: string): Promise<MusicState> {
+  const res = await api('/api/music/radio', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ artist, track }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || 'Error iniciando radio')
+  }
+  return res.json()
+}
+
+export async function fetchUsernames(): Promise<string[]> {
+  const res = await api('/api/auth/usernames')
+  if (!res.ok) throw new Error('Error al obtener usernames')
+  return res.json()
+}
+
 export async function fetchWebUsers(): Promise<{ username: string; role: import('../types').UserRole; permissions: import('../types').UserPermissions }[]> {
   const res = await api('/api/auth/users')
   if (!res.ok) throw new Error('Error al obtener usuarios')
@@ -722,17 +764,17 @@ export async function fetchNotes(): Promise<import('../types/notes').Note[]> {
   return res.json()
 }
 
-export async function createNote(title: string, content?: string): Promise<import('../types/notes').Note> {
+export async function createNote(title: string, content?: string, shared_with?: string[], is_public?: boolean): Promise<import('../types/notes').Note> {
   const res = await api('/api/notes', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, content: content || '' }),
+    body: JSON.stringify({ title, content: content || '', shared_with: shared_with || [], is_public: is_public || false }),
   })
   if (!res.ok) throw new Error('Error al crear nota')
   return res.json()
 }
 
-export async function updateNote(id: string, data: { title?: string; content?: string }): Promise<import('../types/notes').Note> {
+export async function updateNote(id: string, data: { title?: string; content?: string; shared_with?: string[]; is_public?: boolean }): Promise<import('../types/notes').Note> {
   const res = await api(`/api/notes/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

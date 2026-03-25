@@ -11,6 +11,100 @@ use crate::models::notifications::UserRole;
 use crate::models::tasks::*;
 use crate::state::AppState;
 
+// ---- Notificaciones Telegram para tareas ----
+
+async fn notify_task_assigned(state: &AppState, task: &Task) {
+    let config = state.config.lock().await;
+    let token = match &config.notifications.bot_token {
+        Some(t) => t.clone(),
+        None => return,
+    };
+    let chats = config.notifications.telegram_chats.clone();
+    drop(config);
+
+    // @all solo aplica a operadores y admins, no observadores
+    let target_ids: Vec<i64> = if task.assigned_to.contains(&"all".to_string()) {
+        chats
+            .iter()
+            .filter(|c| c.role == UserRole::Admin || c.role == UserRole::Operador)
+            .map(|c| c.chat_id)
+            .collect()
+    } else {
+        chats
+            .iter()
+            .filter(|c| {
+                task.assigned_to.iter().any(|a| {
+                    a.to_lowercase() == c.name.to_lowercase()
+                        || c.linked_web_user
+                            .as_ref()
+                            .map(|u| u.to_lowercase() == a.to_lowercase())
+                            .unwrap_or(false)
+                })
+            })
+            .map(|c| c.chat_id)
+            .collect()
+    };
+
+    if target_ids.is_empty() {
+        return;
+    }
+
+    let due = task
+        .due_date
+        .as_deref()
+        .unwrap_or("sin fecha limite");
+    let msg = format!(
+        "📋 *Nueva tarea asignada*\n\n*{}*\nPor: {}\nVence: {}\nID: `{}`\n\n`/confirmar {}` o `/rechazar {}`",
+        task.title, task.created_by, due, task.id, task.id, task.id
+    );
+
+    for id in target_ids {
+        let _ = crate::handlers::notifications::send_tg_public(
+            &state.http_client,
+            &token,
+            id,
+            &msg,
+        )
+        .await;
+    }
+}
+
+async fn notify_task_completed(state: &AppState, task: &Task, completed_by: &str) {
+    let config = state.config.lock().await;
+    let token = match &config.notifications.bot_token {
+        Some(t) => t.clone(),
+        None => return,
+    };
+    let chats = config.notifications.telegram_chats.clone();
+    drop(config);
+
+    // Notificar al creador
+    let creator_id: Option<i64> = chats
+        .iter()
+        .find(|c| {
+            c.name.to_lowercase() == task.created_by.to_lowercase()
+                || c.linked_web_user
+                    .as_ref()
+                    .map(|u| u.to_lowercase() == task.created_by.to_lowercase())
+                    .unwrap_or(false)
+        })
+        .map(|c| c.chat_id);
+
+    if let Some(id) = creator_id {
+        let msg = format!(
+            "✅ *Tarea completada*\n\n*{}*\nCompletada por: {}\nID: `{}`",
+            task.title, completed_by, task.id
+        );
+        let _ = crate::handlers::notifications::send_tg_public(
+            &state.http_client,
+            &token,
+            id,
+            &msg,
+        )
+        .await;
+    }
+}
+
 /// Extrae el username de la sesión a partir del header Authorization
 fn extract_username(_state: &AppState, sessions: &std::collections::HashMap<String, crate::state::SessionInfo>, headers: &HeaderMap) -> Option<(String, UserRole)> {
     let token = headers
@@ -200,6 +294,11 @@ pub async fn create_task(
     state
         .log_activity("tarea_creada", &format!("Tarea: {}", req.title), &username)
         .await;
+
+    // Notificar a los asignados por Telegram
+    if !task.assigned_to.is_empty() {
+        notify_task_assigned(&state, &task).await;
+    }
 
     Ok((StatusCode::CREATED, Json(task)))
 }
@@ -427,6 +526,9 @@ pub async fn done_task(
             &username,
         )
         .await;
+
+    // Notificar al creador por Telegram
+    notify_task_completed(&state, &updated, &username).await;
 
     Ok(Json(updated))
 }

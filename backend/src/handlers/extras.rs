@@ -249,12 +249,18 @@ pub struct CreateNoteRequest {
     pub title: String,
     #[serde(default)]
     pub content: String,
+    #[serde(default)]
+    pub shared_with: Vec<String>,
+    #[serde(default)]
+    pub is_public: bool,
 }
 
 #[derive(Deserialize)]
 pub struct UpdateNoteRequest {
     pub title: Option<String>,
     pub content: Option<String>,
+    pub shared_with: Option<Vec<String>>,
+    pub is_public: Option<bool>,
 }
 
 pub async fn list_notes(State(state): State<AppState>) -> Json<Vec<Note>> {
@@ -279,15 +285,50 @@ pub async fn create_note(
         content: req.content,
         created_by: username.clone(),
         updated_by: username.clone(),
+        shared_with: req.shared_with.clone(),
+        is_public: req.is_public,
         created_at: now,
         updated_at: now,
     };
 
     let mut config = state.config.lock().await;
     config.notes.push(note.clone());
+
+    // Notificar a usuarios compartidos por Telegram
+    let token = config.notifications.bot_token.clone();
+    let chats = config.notifications.telegram_chats.clone();
     save_config(&config)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    drop(config);
+
+    if !req.shared_with.is_empty() {
+        if let Some(token) = &token {
+            let msg = format!(
+                "📝 *Nota compartida*\n\n*{}*\nPor: {}",
+                note.title, username
+            );
+            for chat in &chats {
+                let is_target = req.shared_with.iter().any(|u| {
+                    u.to_lowercase() == chat.name.to_lowercase()
+                        || chat
+                            .linked_web_user
+                            .as_ref()
+                            .map(|w| w.to_lowercase() == u.to_lowercase())
+                            .unwrap_or(false)
+                });
+                if is_target {
+                    let _ = crate::handlers::notifications::send_tg_public(
+                        &state.http_client,
+                        token,
+                        chat.chat_id,
+                        &msg,
+                    )
+                    .await;
+                }
+            }
+        }
+    }
 
     state.log_activity("Nota", &note.title, &username).await;
     Ok(Json(note))
@@ -317,13 +358,62 @@ pub async fn update_note(
     if let Some(content) = req.content {
         note.content = content;
     }
-    note.updated_by = username;
+
+    // Detectar nuevos usuarios compartidos para notificar
+    let old_shared: std::collections::HashSet<String> =
+        note.shared_with.iter().map(|s| s.to_lowercase()).collect();
+    let mut new_users: Vec<String> = Vec::new();
+
+    if let Some(shared_with) = req.shared_with {
+        for u in &shared_with {
+            if !old_shared.contains(&u.to_lowercase()) {
+                new_users.push(u.clone());
+            }
+        }
+        note.shared_with = shared_with;
+    }
+    if let Some(is_public) = req.is_public {
+        note.is_public = is_public;
+    }
+    note.updated_by = username.clone();
     note.updated_at = Utc::now();
 
     let updated = note.clone();
+    let token = config.notifications.bot_token.clone();
+    let chats = config.notifications.telegram_chats.clone();
     save_config(&config)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    drop(config);
+
+    // Notificar nuevos compartidos
+    if !new_users.is_empty() {
+        if let Some(token) = &token {
+            let msg = format!(
+                "📝 *Nota compartida*\n\n*{}*\nPor: {}",
+                updated.title, username
+            );
+            for chat in &chats {
+                let is_target = new_users.iter().any(|u| {
+                    u.to_lowercase() == chat.name.to_lowercase()
+                        || chat
+                            .linked_web_user
+                            .as_ref()
+                            .map(|w| w.to_lowercase() == u.to_lowercase())
+                            .unwrap_or(false)
+                });
+                if is_target {
+                    let _ = crate::handlers::notifications::send_tg_public(
+                        &state.http_client,
+                        token,
+                        chat.chat_id,
+                        &msg,
+                    )
+                    .await;
+                }
+            }
+        }
+    }
 
     Ok(Json(updated))
 }

@@ -116,6 +116,23 @@ pub struct SetVideoRequest {
     pub screen: Option<u8>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SetLastfmKeyRequest {
+    pub key: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RadioRequest {
+    pub artist: String,
+    pub track: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LuckyRequest {
+    pub artist: String,
+    pub track: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ScreenInfo {
     pub index: u8,
@@ -987,4 +1004,303 @@ pub async fn recommend(
 
     state.log_activity("musica", &format!("Mix: {} recomendaciones de {} seeds", added, seeds.len()), &username).await;
     Ok(Json(ms.clone()))
+}
+
+/// POST /api/music/lastfm-key - Guardar API key de Last.fm (admin only)
+pub async fn set_lastfm_key(
+    State(state): State<AppState>,
+    Json(req): Json<SetLastfmKeyRequest>,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    if req.key.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "API key vacia".to_string()));
+    }
+
+    let mut config = state.config.lock().await;
+    config.lastfm_api_key = Some(req.key.trim().to_string());
+    crate::config::save_config(&config)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    Ok((StatusCode::OK, "API key de Last.fm guardada".to_string()))
+}
+
+/// POST /api/music/radio - Radio basada en Last.fm (canciones similares)
+pub async fn radio(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<RadioRequest>,
+) -> Result<Json<MusicState>, (StatusCode, String)> {
+    use std::time::Duration;
+
+    // 1. Obtener API key
+    let config = state.config.lock().await;
+    let api_key = config
+        .lastfm_api_key
+        .clone()
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            "API key de Last.fm no configurada. Configurala en Ajustes.".to_string(),
+        ))?;
+    drop(config);
+
+    // 2. Llamar a Last.fm track.getSimilar
+    let url = format!(
+        "https://ws.audioscrobbler.com/2.0/?method=track.getSimilar&artist={}&track={}&api_key={}&format=json&limit=20",
+        urlencoding::encode(&req.artist),
+        urlencoding::encode(&req.track),
+        api_key,
+    );
+
+    let resp = state
+        .http_client
+        .get(&url)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Error Last.fm: {}", e)))?;
+
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Error JSON Last.fm: {}", e)))?;
+
+    let similar = json["similartracks"]["track"]
+        .as_array()
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            "Last.fm no devolvio resultados para esta cancion".to_string(),
+        ))?;
+
+    if similar.is_empty() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            "Last.fm no devolvio canciones similares".to_string(),
+        ));
+    }
+
+    // 3. Buscar cada cancion en YouTube en paralelo
+    let username = {
+        let sessions = state.sessions.lock().await;
+        extract_username(&sessions, &headers)
+    };
+
+    let mut handles = Vec::new();
+    for track in similar {
+        let artist = track["artist"]["name"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        let name = track["name"].as_str().unwrap_or("").to_string();
+        if artist.is_empty() || name.is_empty() {
+            continue;
+        }
+
+        let user = username.clone();
+        handles.push(tokio::spawn(async move {
+            let search_term = format!("ytsearch1:{} {}", artist, name);
+            let output = Command::new("yt-dlp")
+                .args([
+                    "--flat-playlist",
+                    "--dump-json",
+                    "--no-warnings",
+                    "--ignore-errors",
+                    &search_term,
+                ])
+                .output()
+                .await
+                .ok()?;
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if let Ok(entry) = serde_json::from_str::<YtDlpEntry>(line) {
+                    if !entry.id.is_empty() {
+                        let (thumb, found_artist) = extract_track_info(&entry);
+                        return Some(MusicTrack {
+                            id: entry.id,
+                            title: entry.title,
+                            artist: found_artist,
+                            thumbnail: thumb,
+                            duration: entry.duration.unwrap_or(0.0) as u32,
+                            added_by: Some(format!("Radio ({})", user)),
+                        });
+                    }
+                }
+            }
+            None
+        }));
+    }
+
+    let mut tracks: Vec<MusicTrack> = Vec::new();
+    let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for handle in handles {
+        if let Ok(Some(track)) = handle.await {
+            if seen_ids.insert(track.id.clone()) {
+                tracks.push(track);
+            }
+        }
+    }
+
+    if tracks.is_empty() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            "Ninguna cancion similar se encontro en YouTube".to_string(),
+        ));
+    }
+
+    // 4. Reemplazar cola
+    let mut ms = state.music.lock().await;
+    let count = tracks.len();
+    ms.queue = tracks;
+
+    state
+        .log_activity(
+            "musica",
+            &format!(
+                "Radio: {} canciones similares a {} - {}",
+                count, req.artist, req.track
+            ),
+            &username,
+        )
+        .await;
+    Ok(Json(ms.clone()))
+}
+
+/// POST /api/music/lucky - Voy a tener suerte: reproduce una cancion similar al azar
+pub async fn lucky(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<LuckyRequest>,
+) -> Result<Json<MusicState>, (StatusCode, String)> {
+    use std::time::Duration;
+
+    let config = state.config.lock().await;
+    let api_key = config
+        .lastfm_api_key
+        .clone()
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            "API key de Last.fm no configurada. Configurala en Ajustes.".to_string(),
+        ))?;
+    drop(config);
+
+    // Pedir muchas similares para tener variedad
+    let url = format!(
+        "https://ws.audioscrobbler.com/2.0/?method=track.getSimilar&artist={}&track={}&api_key={}&format=json&limit=50",
+        urlencoding::encode(&req.artist),
+        urlencoding::encode(&req.track),
+        api_key,
+    );
+
+    let resp = state
+        .http_client
+        .get(&url)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Error Last.fm: {}", e)))?;
+
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Error JSON Last.fm: {}", e)))?;
+
+    let similar = json["similartracks"]["track"]
+        .as_array()
+        .ok_or((StatusCode::NOT_FOUND, "Sin canciones similares".to_string()))?;
+
+    if similar.is_empty() {
+        return Err((StatusCode::NOT_FOUND, "Sin canciones similares".to_string()));
+    }
+
+    let username = {
+        let sessions = state.sessions.lock().await;
+        extract_username(&sessions, &headers)
+    };
+
+    // Elegir candidatos en orden aleatorio usando timestamp como seed
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as usize;
+    let len = similar.len();
+    // Generar indices pseudo-aleatorios
+    let mut indices: Vec<usize> = (0..len).collect();
+    for i in (1..len).rev() {
+        let j = (seed.wrapping_mul(i).wrapping_add(7)) % (i + 1);
+        indices.swap(i, j);
+    }
+
+    for &idx in indices.iter().take(10) {
+        let candidate = &similar[idx];
+        let artist = candidate["artist"]["name"].as_str().unwrap_or("");
+        let name = candidate["name"].as_str().unwrap_or("");
+        if artist.is_empty() || name.is_empty() {
+            continue;
+        }
+
+        let search_term = format!("ytsearch1:{} {}", artist, name);
+        let output = Command::new("yt-dlp")
+            .args([
+                "--flat-playlist",
+                "--dump-json",
+                "--no-warnings",
+                "--ignore-errors",
+                &search_term,
+            ])
+            .output()
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("yt-dlp: {}", e)))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            if let Ok(entry) = serde_json::from_str::<YtDlpEntry>(line) {
+                if entry.id.is_empty() {
+                    continue;
+                }
+
+                // Encontrada — reproducir ahora
+                kill_player(&state).await;
+                let mut ms = state.music.lock().await;
+                let (thumb, found_artist) = extract_track_info(&entry);
+                let track = MusicTrack {
+                    id: entry.id.clone(),
+                    title: entry.title.clone(),
+                    artist: found_artist,
+                    thumbnail: thumb,
+                    duration: entry.duration.unwrap_or(0.0) as u32,
+                    added_by: Some(format!("Suerte ({})", username)),
+                };
+
+                if let Some(current) = ms.current.take() {
+                    ms.queue.insert(0, current);
+                }
+
+                add_to_history(&mut ms, &track, &username);
+                ms.current = Some(track);
+                ms.started_by = Some(username.clone());
+                ms.paused = false;
+                let mode = ms.mode.clone();
+                drop(ms);
+
+                let stream = start_playback(&state, &entry.id, &mode).await;
+                let mut ms = state.music.lock().await;
+                ms.stream_url = stream;
+
+                state
+                    .log_activity(
+                        "musica",
+                        &format!("Suerte: {} - {}", entry.title, artist),
+                        &username,
+                    )
+                    .await;
+
+                return Ok(Json(ms.clone()));
+            }
+        }
+    }
+
+    Err((
+        StatusCode::NOT_FOUND,
+        "No se encontro ninguna cancion similar en YouTube".to_string(),
+    ))
 }

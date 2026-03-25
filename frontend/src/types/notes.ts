@@ -4,6 +4,8 @@ export interface Note {
   content: string
   created_by: string
   updated_by: string
+  shared_with: string[]
+  is_public: boolean
   created_at: string
   updated_at: string
 }
