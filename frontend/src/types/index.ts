@@ -100,7 +100,7 @@ export interface Printer3DConfig {
   name: string
   ip: string
   port: number
-  printer_type: 'OctoPrint' | 'Moonraker'
+  printer_type: 'OctoPrint' | 'Moonraker' | 'CrealityStock' | 'FlashForge'
   api_key: string | null
   camera_url: string | null
 }
@@ -131,7 +131,7 @@ export interface AddPrinter3DRequest {
   name: string
   ip: string
   port: number
-  printer_type: 'OctoPrint' | 'Moonraker'
+  printer_type: 'OctoPrint' | 'Moonraker' | 'CrealityStock' | 'FlashForge'
   api_key: string | null
   camera_url: string | null
 }
@@ -145,7 +145,7 @@ export interface PrinterFileInfo {
 export interface DetectPrintersResult {
   ip: string
   port: number
-  printer_type: 'OctoPrint' | 'Moonraker'
+  printer_type: 'OctoPrint' | 'Moonraker' | 'CrealityStock' | 'FlashForge'
   name: string | null
 }
 

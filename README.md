@@ -73,16 +73,17 @@ Open `http://localhost:3001` — the first account you create becomes admin.
 - Telegram commands: `/correos`, `/leer UID`, `/correo2tarea UID`
 
 ### 3D Printers
-- OctoPrint and Moonraker (Klipper) integration
+- **4 protocol support**: Moonraker (Klipper), OctoPrint, Creality stock firmware (WebSocket), FlashForge stock firmware (TCP)
+- Unified control for mixed printer fleets — different brands and firmwares in a single dashboard
 - Real-time temperatures with visual bars (hotend + bed)
 - Job control: start, pause, resume, cancel
 - Jog pad for axis movement (0.1, 1, 10, 100mm)
 - Home axes and manual G-code commands
-- File management on printer: list, print, delete
+- File management on printer: list, upload, print, delete
 - Webcam snapshots in web UI and via Telegram (`/camara`)
 - Upload `.gcode` files with drag & drop
 - Auto-monitor: Telegram notification when print finishes or errors
-- Network auto-detection of printers
+- Network auto-detection of printers (all 4 protocols)
 
 ### Tasks & Projects
 - Create tasks with assignments (`@user`, `@all`), due dates, and project grouping
@@ -170,7 +171,7 @@ Open `http://localhost:3001` — the first account you create becomes admin.
 | Music/Video | yt-dlp + mpv (X11 multi-monitor) |
 | Email | IMAP (native), POP3 (custom TLS implementation) |
 | AI | Groq API (Llama 3.3 70B Versatile) |
-| 3D Printers | OctoPrint API, Moonraker API |
+| 3D Printers | Moonraker API, OctoPrint API, Creality WebSocket, FlashForge TCP |
 | Printing | CUPS CLI (lp, lpstat, cancel) |
 | Network | ICMP ping (surge-ping), DNS lookup |
 | mDNS | mdns-sd |

@@ -1,6 +1,6 @@
 [package]
 name = "labnas-backend"
-version = "2.3.7"
+version = "2.4.0"
 edition = "2021"
 
 [dependencies]
@@ -19,6 +19,7 @@ sysinfo = "0.35"
 portable-pty = "0.9"
 futures-util = "0.3"
 reqwest = { version = "0.12", features = ["json", "multipart"] }
+tokio-tungstenite = "0.24"
 bcrypt = "0.17"
 imap = "2.4.1"
 mailparse = "0.16.1"

@@ -91,7 +91,7 @@ export default function Printers3DPage() {
   const [formName, setFormName] = useState('')
   const [formIp, setFormIp] = useState('')
   const [formPort, setFormPort] = useState(5000)
-  const [formType, setFormType] = useState<'OctoPrint' | 'Moonraker'>('OctoPrint')
+  const [formType, setFormType] = useState<'OctoPrint' | 'Moonraker' | 'CrealityStock' | 'FlashForge'>('Moonraker')
   const [formApiKey, setFormApiKey] = useState('')
   const [formCameraUrl, setFormCameraUrl] = useState('')
 
@@ -316,8 +316,8 @@ export default function Printers3DPage() {
   function resetForm() {
     setFormName('')
     setFormIp('')
-    setFormPort(5000)
-    setFormType('OctoPrint')
+    setFormPort(7125)
+    setFormType('Moonraker')
     setFormApiKey('')
     setFormCameraUrl('')
   }
@@ -997,15 +997,22 @@ export default function Printers3DPage() {
                 <select
                   value={formType}
                   onChange={(e) => {
-                    const t = e.target.value as 'OctoPrint' | 'Moonraker'
+                    const t = e.target.value as 'OctoPrint' | 'Moonraker' | 'CrealityStock' | 'FlashForge'
                     setFormType(t)
-                    setFormPort(t === 'Moonraker' ? 7125 : 5000)
+                    setFormPort(
+                      t === 'Moonraker' ? 7125
+                        : t === 'CrealityStock' ? 9999
+                        : t === 'FlashForge' ? 8899
+                        : 5000
+                    )
                   }}
                   className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
                   style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
                 >
+                  <option value="Moonraker">Moonraker (Klipper)</option>
                   <option value="OctoPrint">OctoPrint</option>
-                  <option value="Moonraker">Moonraker</option>
+                  <option value="CrealityStock">Creality (firmware stock)</option>
+                  <option value="FlashForge">FlashForge (firmware stock)</option>
                 </select>
               </div>
               <div>

@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 pub enum Printer3DType {
     OctoPrint,
     Moonraker,
+    CrealityStock,
+    FlashForge,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

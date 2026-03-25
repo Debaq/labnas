@@ -1490,6 +1490,52 @@ async fn handle_printer_control(state: &AppState, user: &str, text: &str, comman
     let client = &state.http_client;
     let base = format!("http://{}:{}", printer.ip, printer.port);
 
+    // Tipos no-HTTP: Creality WebSocket y FlashForge TCP
+    match printer.printer_type {
+        crate::models::printers3d::Printer3DType::CrealityStock => {
+            let params = match command {
+                "pause" => serde_json::json!({"pause": 1}),
+                "cancel" => serde_json::json!({"stop": 1}),
+                _ => return "Comando no soportado en Creality stock.".to_string(),
+            };
+            return match crate::handlers::printers3d::creality_ws_command(
+                &printer.ip,
+                serde_json::json!({"method": "set", "params": params}),
+            )
+            .await
+            {
+                Ok(_) => {
+                    let action = if command == "pause" { "pausada" } else { "cancelada" };
+                    state.log_activity("Impresoras 3D", &format!("Impresion {} en {} (por {})", action, printer.name, user), user).await;
+                    format!("Impresion {} en *{}*", action, printer.name)
+                }
+                Err(e) => format!("Error: {}", e),
+            };
+        }
+        crate::models::printers3d::Printer3DType::FlashForge => {
+            let cmd = match command {
+                "start" => "M24",
+                "pause" => "M25",
+                "cancel" => "M26",
+                _ => return "Comando no soportado en FlashForge.".to_string(),
+            };
+            return match crate::handlers::printers3d::flashforge_command(&printer.ip, cmd).await {
+                Ok(_) => {
+                    let action = match command {
+                        "start" => "iniciada",
+                        "pause" => "pausada",
+                        "cancel" => "cancelada",
+                        _ => "ejecutada",
+                    };
+                    state.log_activity("Impresoras 3D", &format!("Impresion {} en {} (por {})", action, printer.name, user), user).await;
+                    format!("Impresion {} en *{}*", action, printer.name)
+                }
+                Err(e) => format!("Error: {}", e),
+            };
+        }
+        _ => {} // OctoPrint y Moonraker se manejan abajo via HTTP
+    }
+
     let result = match printer.printer_type {
         crate::models::printers3d::Printer3DType::OctoPrint => {
             let octo_body = match command {
@@ -1521,6 +1567,8 @@ async fn handle_printer_control(state: &AppState, user: &str, text: &str, comman
                 .send()
                 .await
         }
+        // CrealityStock y FlashForge ya retornaron arriba
+        _ => return "Error interno.".to_string(),
     };
 
     match result {
@@ -1586,7 +1634,11 @@ async fn send_printer_photo(state: &AppState, token: &str, chat_id: i64, printer
         let base = format!("http://{}:{}", printer.ip, printer.port);
         match printer.printer_type {
             crate::models::printers3d::Printer3DType::OctoPrint => format!("{}/webcam/?action=snapshot", base),
-            crate::models::printers3d::Printer3DType::Moonraker => format!("http://{}:8080/?action=snapshot", printer.ip),
+            crate::models::printers3d::Printer3DType::Moonraker
+            | crate::models::printers3d::Printer3DType::CrealityStock => {
+                format!("http://{}:8080/?action=snapshot", printer.ip)
+            }
+            crate::models::printers3d::Printer3DType::FlashForge => return,
         }
     };
 
@@ -1992,6 +2044,8 @@ async fn build_printers_message(state: &AppState) -> String {
         let ptype = match p.printer_type {
             crate::models::printers3d::Printer3DType::OctoPrint => "OctoPrint",
             crate::models::printers3d::Printer3DType::Moonraker => "Moonraker",
+            crate::models::printers3d::Printer3DType::CrealityStock => "Creality",
+            crate::models::printers3d::Printer3DType::FlashForge => "FlashForge",
         };
         msg.push_str(&format!("\n`{}` - {} ({}:{})", p.name, ptype, p.ip, p.port));
     }
