@@ -200,124 +200,68 @@ export default function MusicPanel() {
         </div>
       </div>
 
-      {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto">
-        {/* Search results */}
-        {searchResults.length > 0 && (
-          <div className="px-3 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>Resultados</span>
-              <button onClick={() => setSearchResults([])} className="p-0.5" style={{ color: 'var(--text-secondary)' }}>
-                <X size={12} />
-              </button>
-            </div>
-            {loadingTrack && (
-              <div className="flex items-center justify-center py-2 gap-1">
-                <Loader2 size={12} className="animate-spin" style={{ color: 'var(--accent)' }} />
-                <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Cargando...</span>
-              </div>
-            )}
-            <div className="space-y-1 max-h-48 overflow-y-auto">
-              {searchResults.map(track => (
-                <div key={track.id}
-                  className="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-all hover:opacity-80"
-                  style={{ backgroundColor: 'var(--bg-tertiary)' }}
-                  onClick={() => !loadingTrack && handlePlay(track.id)}>
-                  <img src={track.thumbnail} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[11px] truncate" style={{ color: 'var(--text-primary)' }}>{track.title}</p>
-                    <p className="text-[10px] truncate" style={{ color: 'var(--text-secondary)' }}>{track.artist} · {formatDuration(track.duration)}</p>
-                  </div>
-                  {musicState.current ? <Plus size={14} style={{ color: 'var(--accent)' }} /> : <Play size={14} style={{ color: 'var(--accent)' }} />}
-                </div>
-              ))}
+      {/* Now Playing + Controls - SIEMPRE VISIBLE arriba del scroll */}
+      {musicState.current ? (
+        <div className="px-3 py-3 space-y-3" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div className="flex items-start gap-3">
+            <img src={musicState.current.thumbnail} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0" style={{ border: '1px solid var(--border)' }} />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium leading-tight" style={{ color: 'var(--text-primary)' }}>{musicState.current.title}</p>
+              <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>{musicState.current.artist}</p>
+              <p className="text-[9px] mt-1" style={{ color: 'var(--text-secondary)', opacity: 0.6 }}>
+                {musicState.current.added_by || musicState.started_by} · {formatDuration(musicState.current.duration)}
+              </p>
             </div>
           </div>
-        )}
 
-        {/* Now Playing */}
-        <div className="px-3 py-3">
-          {musicState.current ? (
-            <div className="space-y-3">
-              <div className="flex items-start gap-3">
-                <img src={musicState.current.thumbnail} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0" style={{ border: '1px solid var(--border)' }} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium leading-tight" style={{ color: 'var(--text-primary)' }}>{musicState.current.title}</p>
-                  <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>{musicState.current.artist}</p>
-                  <p className="text-[9px] mt-1" style={{ color: 'var(--text-secondary)', opacity: 0.6 }}>
-                    {musicState.current.added_by || musicState.started_by} · {formatDuration(musicState.current.duration)}
-                  </p>
-                </div>
-              </div>
+          {/* Controls */}
+          <div className="flex items-center justify-center gap-1">
+            <button onClick={handleShuffle} className="p-1.5 rounded-lg hover:opacity-80"
+              style={{ color: musicState.shuffle ? 'var(--accent)' : 'var(--text-secondary)' }}>
+              <Shuffle size={13} />
+            </button>
+            {musicState.history.length >= 2 && (
+              <button onClick={handlePrevious} className="p-2 rounded-lg hover:opacity-80" style={{ color: 'var(--accent)' }}>
+                <SkipBack size={16} />
+              </button>
+            )}
+            <button onClick={handlePause}
+              className="p-2.5 rounded-full hover:opacity-80"
+              style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
+              {musicState.paused ? <Play size={18} /> : <Pause size={18} />}
+            </button>
+            <button onClick={handleNext} className="p-2 rounded-lg hover:opacity-80" style={{ color: 'var(--accent)' }}>
+              <SkipForward size={16} />
+            </button>
+            <button onClick={handleStop} className="p-2 rounded-lg hover:opacity-80"
+              style={{ color: 'var(--danger)' }}>
+              <Square size={14} />
+            </button>
+            <button onClick={handleRepeat} className="p-1.5 rounded-lg hover:opacity-80"
+              style={{ color: musicState.repeat !== 'off' ? 'var(--accent)' : 'var(--text-secondary)' }}>
+              {musicState.repeat === 'one' ? <Repeat1 size={13} /> : <Repeat size={13} />}
+            </button>
+          </div>
 
-              {/* Controls */}
-              <div className="flex items-center justify-center gap-1">
-                <button onClick={handleShuffle} className="p-1.5 rounded-lg hover:opacity-80"
-                  style={{ color: musicState.shuffle ? 'var(--accent)' : 'var(--text-secondary)' }}>
-                  <Shuffle size={13} />
-                </button>
-                {musicState.history.length >= 2 && (
-                  <button onClick={handlePrevious} className="p-2 rounded-lg hover:opacity-80" style={{ color: 'var(--accent)' }}>
-                    <SkipBack size={16} />
-                  </button>
-                )}
-                <button onClick={handlePause}
-                  className="p-2.5 rounded-full hover:opacity-80"
-                  style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
-                  {musicState.paused ? <Play size={18} /> : <Pause size={18} />}
-                </button>
-                <button onClick={handleNext} className="p-2 rounded-lg hover:opacity-80" style={{ color: 'var(--accent)' }}>
-                  <SkipForward size={16} />
-                </button>
-                <button onClick={handleRepeat} className="p-1.5 rounded-lg hover:opacity-80"
-                  style={{ color: musicState.repeat !== 'off' ? 'var(--accent)' : 'var(--text-secondary)' }}>
-                  {musicState.repeat === 'one' ? <Repeat1 size={13} /> : <Repeat size={13} />}
-                </button>
-              </div>
+          {/* Volume */}
+          <div className="flex items-center gap-2">
+            <Volume2 size={12} style={{ color: 'var(--text-secondary)' }} />
+            <input type="range" min="0" max="100" value={musicState.volume}
+              onChange={e => handleVolume(parseInt(e.target.value))}
+              className="flex-1 h-1 rounded-full appearance-none cursor-pointer"
+              style={{ accentColor: 'var(--accent)', backgroundColor: 'var(--bg-tertiary)' }} />
+            <span className="text-[9px] w-7 text-right" style={{ color: 'var(--text-secondary)' }}>{musicState.volume}%</span>
+          </div>
 
-              {/* Volume */}
-              <div className="flex items-center gap-2">
-                <Volume2 size={12} style={{ color: 'var(--text-secondary)' }} />
-                <input type="range" min="0" max="100" value={musicState.volume}
-                  onChange={e => handleVolume(parseInt(e.target.value))}
-                  className="flex-1 h-1 rounded-full appearance-none cursor-pointer"
-                  style={{ accentColor: 'var(--accent)', backgroundColor: 'var(--bg-tertiary)' }} />
-                <span className="text-[9px] w-7 text-right" style={{ color: 'var(--text-secondary)' }}>{musicState.volume}%</span>
-              </div>
-            </div>
-          ) : (
-            <div className="text-center py-4">
-              <Music size={32} className="mx-auto mb-2" style={{ color: 'var(--text-secondary)', opacity: 0.3 }} />
-              <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Sin musica</p>
-              {musicState.queue.length > 0 && (
-                <button onClick={handleNext}
-                  className="mt-2 flex items-center justify-center gap-1 mx-auto px-3 py-1.5 rounded-lg text-[10px] font-medium hover:opacity-90"
-                  style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
-                  <Play size={12} />
-                  Reproducir cola ({musicState.queue.length})
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Action buttons - siempre visibles */}
-        <div className="px-3 pb-3">
+          {/* Mix + Menu */}
           <div className="flex items-center gap-1.5">
             <button onClick={handleRecommend}
-              disabled={loadingMix || (!musicState.current && (musicState.history?.length ?? 0) === 0)}
+              disabled={loadingMix}
               className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[10px] font-medium hover:opacity-90"
               style={{ backgroundColor: 'var(--success)' + '20', color: 'var(--success)', border: '1px solid var(--success)' + '40' }}>
               {loadingMix ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
               Mix
             </button>
-            {musicState.current && (
-              <button onClick={handleStop}
-                className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-medium hover:opacity-90"
-                style={{ color: 'var(--danger)', border: '1px solid var(--danger)' + '40' }}>
-                <Square size={12} />
-              </button>
-            )}
             <div className="relative">
               <button onClick={handleOpenMenu} className="p-1.5 rounded-lg hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
                 <MoreVertical size={14} />
@@ -365,11 +309,88 @@ export default function MusicPanel() {
             </div>
           </div>
         </div>
+      ) : (
+        <div className="px-3 py-4 text-center" style={{ borderBottom: '1px solid var(--border)' }}>
+          <Music size={28} className="mx-auto mb-2" style={{ color: 'var(--text-secondary)', opacity: 0.3 }} />
+          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Sin musica</p>
+          {musicState.queue.length > 0 && (
+            <button onClick={handleNext}
+              className="mt-2 flex items-center justify-center gap-1 mx-auto px-3 py-1.5 rounded-lg text-[10px] font-medium hover:opacity-90"
+              style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
+              <Play size={12} />
+              Reproducir cola ({musicState.queue.length})
+            </button>
+          )}
+          <div className="flex items-center justify-center gap-1.5 mt-3">
+            <button onClick={handleRecommend}
+              disabled={loadingMix || (musicState.history?.length ?? 0) === 0}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-medium hover:opacity-90"
+              style={{ backgroundColor: 'var(--success)' + '20', color: 'var(--success)', border: '1px solid var(--success)' + '40' }}>
+              {loadingMix ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+              Mix
+            </button>
+            <div className="relative">
+              <button onClick={handleOpenMenu} className="p-1.5 rounded-lg hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+                <MoreVertical size={14} />
+              </button>
+              {showMenu && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-20 rounded-lg p-2 min-w-[190px] space-y-1"
+                    style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+                    <button onClick={() => { handleToggleMode(); setShowMenu(false) }}
+                      className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-[11px] font-medium hover:opacity-80"
+                      style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)' }}>
+                      {musicState.mode === 'nas' ? <Speaker size={12} /> : <Monitor size={12} />}
+                      Modo: {musicState.mode === 'nas' ? 'NAS' : 'PC'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scrollable: resultados + cola */}
+      <div className="flex-1 overflow-y-auto">
+        {/* Search results */}
+        {searchResults.length > 0 && (
+          <div className="px-3 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>Resultados</span>
+              <button onClick={() => setSearchResults([])} className="p-0.5" style={{ color: 'var(--text-secondary)' }}>
+                <X size={12} />
+              </button>
+            </div>
+            {loadingTrack && (
+              <div className="flex items-center justify-center py-2 gap-1">
+                <Loader2 size={12} className="animate-spin" style={{ color: 'var(--accent)' }} />
+                <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Cargando...</span>
+              </div>
+            )}
+            <div className="space-y-1">
+              {searchResults.map(track => (
+                <div key={track.id}
+                  className="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-all hover:opacity-80"
+                  style={{ backgroundColor: 'var(--bg-tertiary)' }}
+                  onClick={() => !loadingTrack && handlePlay(track.id)}>
+                  <img src={track.thumbnail} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] truncate" style={{ color: 'var(--text-primary)' }}>{track.title}</p>
+                    <p className="text-[10px] truncate" style={{ color: 'var(--text-secondary)' }}>{track.artist} · {formatDuration(track.duration)}</p>
+                  </div>
+                  {musicState.current ? <Plus size={14} style={{ color: 'var(--accent)' }} /> : <Play size={14} style={{ color: 'var(--accent)' }} />}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Queue */}
         {musicState.queue.length > 0 && (
-          <div className="px-3 pb-3">
-            <div className="flex items-center gap-1.5 mb-2" style={{ borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
+          <div className="px-3 py-2">
+            <div className="flex items-center gap-1.5 mb-2">
               <ListMusic size={12} style={{ color: 'var(--text-secondary)' }} />
               <span className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>Cola ({musicState.queue.length})</span>
             </div>

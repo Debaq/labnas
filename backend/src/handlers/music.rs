@@ -206,6 +206,25 @@ async fn resume_player(state: &AppState) {
     }
 }
 
+/// Detecta el XAUTHORITY del usuario que tiene la sesión X activa
+fn detect_xauthority() -> Option<String> {
+    // Buscar en /home/*/.Xauthority
+    if let Ok(entries) = std::fs::read_dir("/home") {
+        for entry in entries.flatten() {
+            let xauth = entry.path().join(".Xauthority");
+            if xauth.exists() {
+                return Some(xauth.to_string_lossy().to_string());
+            }
+        }
+    }
+    // Fallback root
+    let root_xauth = std::path::Path::new("/root/.Xauthority");
+    if root_xauth.exists() {
+        return Some("/root/.Xauthority".to_string());
+    }
+    None
+}
+
 /// Lanza mpv en el NAS para reproducir audio/video
 async fn spawn_player(state: &AppState, video_id: &str) {
     kill_player(state).await;
@@ -219,7 +238,6 @@ async fn spawn_player(state: &AppState, video_id: &str) {
     let mut args: Vec<String> = vec!["--really-quiet".to_string()];
 
     if video {
-        // Video con pantalla específica + fullscreen
         if let Some(scr) = screen {
             args.push(format!("--screen={}", scr));
             args.push(format!("--fs-screen={}", scr));
@@ -233,6 +251,10 @@ async fn spawn_player(state: &AppState, video_id: &str) {
 
     let mut cmd = Command::new("mpv");
     cmd.env("DISPLAY", ":0");
+    // Necesario para que mpv acceda al servidor X cuando corre como root/systemd
+    if let Some(xauth) = detect_xauthority() {
+        cmd.env("XAUTHORITY", xauth);
+    }
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     let child = cmd
         .args(&arg_refs)
@@ -646,15 +668,17 @@ pub async fn set_volume(
     // En modo NAS, ajustar volumen del sistema
     if mode == PlaybackMode::Nas {
         let vol_str = format!("{}%", vol);
-        // Intentar pactl primero, luego amixer
-        let _ = Command::new("pactl")
-            .args(["set-sink-volume", "@DEFAULT_SINK@", &vol_str])
-            .output().await
-            .or_else(|_| {
-                std::process::Command::new("amixer")
-                    .args(["sset", "Master", &vol_str])
-                    .output()
-            });
+        // amixer funciona sin sesion de usuario (a diferencia de pactl)
+        let amixer = Command::new("amixer")
+            .args(["sset", "Master", &vol_str])
+            .output().await;
+        // Si amixer falla, intentar pactl con PULSE_RUNTIME_PATH
+        if amixer.is_err() || !amixer.as_ref().unwrap().status.success() {
+            let _ = Command::new("pactl")
+                .env("XDG_RUNTIME_DIR", "/run/user/1000")
+                .args(["set-sink-volume", "@DEFAULT_SINK@", &vol_str])
+                .output().await;
+        }
     }
 
     Json(state.music.lock().await.clone())

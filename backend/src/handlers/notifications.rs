@@ -2217,9 +2217,15 @@ async fn handle_music_volume(state: &AppState, vol_str: &str) -> String {
 
     if mode == crate::handlers::music::PlaybackMode::Nas {
         let vol_str = format!("{}%", vol);
-        let _ = tokio::process::Command::new("pactl")
-            .args(["set-sink-volume", "@DEFAULT_SINK@", &vol_str])
+        let amixer = tokio::process::Command::new("amixer")
+            .args(["sset", "Master", &vol_str])
             .output().await;
+        if amixer.is_err() || !amixer.as_ref().unwrap().status.success() {
+            let _ = tokio::process::Command::new("pactl")
+                .env("XDG_RUNTIME_DIR", "/run/user/1000")
+                .args(["set-sink-volume", "@DEFAULT_SINK@", &vol_str])
+                .output().await;
+        }
     }
 
     format!("Volumen: {}%", vol)
