@@ -258,6 +258,7 @@ export default function MusicPanel() {
       {/* Now Playing */}
       <div className="px-3 py-3 space-y-3" style={{ borderBottom: '1px solid var(--border)' }}>
         {musicState.current ? (
+          <>
           <div className="flex items-start gap-3">
             <img src={musicState.current.thumbnail} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0" style={{ border: '1px solid var(--border)' }} />
             <div className="flex-1 min-w-0">
@@ -268,7 +269,6 @@ export default function MusicPanel() {
               </p>
             </div>
           </div>
-          {/* Progress bar */}
           {musicState.current.duration > 0 && (
             <div className="flex items-center gap-2 mt-1">
               <span className="text-[9px] font-mono w-8 text-right" style={{ color: 'var(--text-secondary)' }}>{formatDuration(elapsed)}</span>
@@ -281,6 +281,7 @@ export default function MusicPanel() {
               <span className="text-[9px] font-mono w-8" style={{ color: 'var(--text-secondary)' }}>{formatDuration(musicState.current.duration)}</span>
             </div>
           )}
+          </>
         ) : (
           <div className="text-center py-1">
             <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
