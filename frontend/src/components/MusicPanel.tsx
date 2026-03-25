@@ -200,9 +200,9 @@ export default function MusicPanel() {
         </div>
       </div>
 
-      {/* Now Playing + Controls - SIEMPRE VISIBLE arriba del scroll */}
-      {musicState.current ? (
-        <div className="px-3 py-3 space-y-3" style={{ borderBottom: '1px solid var(--border)' }}>
+      {/* Now Playing */}
+      <div className="px-3 py-3 space-y-3" style={{ borderBottom: '1px solid var(--border)' }}>
+        {musicState.current ? (
           <div className="flex items-start gap-3">
             <img src={musicState.current.thumbnail} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0" style={{ border: '1px solid var(--border)' }} />
             <div className="flex-1 min-w-0">
@@ -213,144 +213,127 @@ export default function MusicPanel() {
               </p>
             </div>
           </div>
+        ) : (
+          <div className="text-center py-1">
+            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+              {musicState.queue.length > 0
+                ? `${musicState.queue.length} en cola`
+                : 'Sin musica'}
+            </p>
+          </div>
+        )}
 
-          {/* Controls */}
-          <div className="flex items-center justify-center gap-1">
-            <button onClick={handleShuffle} className="p-1.5 rounded-lg hover:opacity-80"
-              style={{ color: musicState.shuffle ? 'var(--accent)' : 'var(--text-secondary)' }}>
-              <Shuffle size={13} />
-            </button>
-            {musicState.history.length >= 2 && (
-              <button onClick={handlePrevious} className="p-2 rounded-lg hover:opacity-80" style={{ color: 'var(--accent)' }}>
-                <SkipBack size={16} />
-              </button>
-            )}
+        {/* Controls - SIEMPRE visibles */}
+        <div className="flex items-center justify-center gap-1">
+          <button onClick={handleShuffle} className="p-1.5 rounded-lg hover:opacity-80"
+            style={{ color: musicState.shuffle ? 'var(--accent)' : 'var(--text-secondary)' }}>
+            <Shuffle size={13} />
+          </button>
+          <button onClick={handlePrevious} className="p-2 rounded-lg hover:opacity-80"
+            style={{ color: 'var(--accent)', opacity: musicState.history.length >= 2 ? 1 : 0.3 }}
+            disabled={musicState.history.length < 2}>
+            <SkipBack size={16} />
+          </button>
+          {musicState.current && !musicState.paused ? (
             <button onClick={handlePause}
               className="p-2.5 rounded-full hover:opacity-80"
               style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
-              {musicState.paused ? <Play size={18} /> : <Pause size={18} />}
+              <Pause size={18} />
             </button>
-            <button onClick={handleNext} className="p-2 rounded-lg hover:opacity-80" style={{ color: 'var(--accent)' }}>
-              <SkipForward size={16} />
-            </button>
-            <button onClick={handleStop} className="p-2 rounded-lg hover:opacity-80"
-              style={{ color: 'var(--danger)' }}>
-              <Square size={14} />
-            </button>
-            <button onClick={handleRepeat} className="p-1.5 rounded-lg hover:opacity-80"
-              style={{ color: musicState.repeat !== 'off' ? 'var(--accent)' : 'var(--text-secondary)' }}>
-              {musicState.repeat === 'one' ? <Repeat1 size={13} /> : <Repeat size={13} />}
-            </button>
-          </div>
-
-          {/* Volume */}
-          <div className="flex items-center gap-2">
-            <Volume2 size={12} style={{ color: 'var(--text-secondary)' }} />
-            <input type="range" min="0" max="100" value={musicState.volume}
-              onChange={e => handleVolume(parseInt(e.target.value))}
-              className="flex-1 h-1 rounded-full appearance-none cursor-pointer"
-              style={{ accentColor: 'var(--accent)', backgroundColor: 'var(--bg-tertiary)' }} />
-            <span className="text-[9px] w-7 text-right" style={{ color: 'var(--text-secondary)' }}>{musicState.volume}%</span>
-          </div>
-
-          {/* Mix + Menu */}
-          <div className="flex items-center gap-1.5">
-            <button onClick={handleRecommend}
-              disabled={loadingMix}
-              className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[10px] font-medium hover:opacity-90"
-              style={{ backgroundColor: 'var(--success)' + '20', color: 'var(--success)', border: '1px solid var(--success)' + '40' }}>
-              {loadingMix ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-              Mix
-            </button>
-            <div className="relative">
-              <button onClick={handleOpenMenu} className="p-1.5 rounded-lg hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
-                <MoreVertical size={14} />
-              </button>
-              {showMenu && (
-                <>
-                  <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
-                  <div className="absolute right-0 bottom-full mb-1 z-20 rounded-lg p-2 min-w-[190px] space-y-1"
-                    style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
-                    <button onClick={() => { handleToggleMode(); setShowMenu(false) }}
-                      className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-[11px] font-medium hover:opacity-80"
-                      style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)' }}>
-                      {musicState.mode === 'nas' ? <Speaker size={12} /> : <Monitor size={12} />}
-                      Modo: {musicState.mode === 'nas' ? 'NAS' : 'PC'}
-                    </button>
-                    {musicState.mode === 'nas' && (
-                      <>
-                        <div className="px-3 py-1">
-                          <span className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>Video en pantalla</span>
-                        </div>
-                        <button onClick={() => { handleToggleVideo(); setShowMenu(false) }}
-                          className="flex items-center gap-2 w-full px-3 py-1.5 rounded-lg text-[11px] font-medium hover:opacity-80"
-                          style={{ backgroundColor: musicState.video ? 'var(--accent)' + '20' : 'var(--bg-tertiary)', color: musicState.video ? 'var(--accent)' : 'var(--text-primary)' }}>
-                          <Tv size={12} />
-                          {musicState.video ? 'Desactivar video' : 'Solo audio'}
-                        </button>
-                        {screens.map(scr => (
-                          <button key={scr.index}
-                            onClick={() => { handleToggleVideo(scr.index); setShowMenu(false) }}
-                            className="flex items-center gap-2 w-full px-3 py-1.5 rounded-lg text-[11px] font-medium hover:opacity-80"
-                            style={{
-                              backgroundColor: musicState.video && musicState.video_screen === scr.index ? 'var(--accent)' + '20' : 'var(--bg-tertiary)',
-                              color: musicState.video && musicState.video_screen === scr.index ? 'var(--accent)' : 'var(--text-primary)',
-                            }}>
-                            <TvMinimalPlay size={12} />
-                            {scr.name}
-                            {musicState.video && musicState.video_screen === scr.index && ' ✓'}
-                          </button>
-                        ))}
-                      </>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="px-3 py-4 text-center" style={{ borderBottom: '1px solid var(--border)' }}>
-          <Music size={28} className="mx-auto mb-2" style={{ color: 'var(--text-secondary)', opacity: 0.3 }} />
-          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Sin musica</p>
-          {musicState.queue.length > 0 && (
-            <button onClick={handleNext}
-              className="mt-2 flex items-center justify-center gap-1 mx-auto px-3 py-1.5 rounded-lg text-[10px] font-medium hover:opacity-90"
+          ) : musicState.current && musicState.paused ? (
+            <button onClick={handlePause}
+              className="p-2.5 rounded-full hover:opacity-80"
               style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
-              <Play size={12} />
-              Reproducir cola ({musicState.queue.length})
+              <Play size={18} />
+            </button>
+          ) : (
+            <button onClick={handleNext}
+              className="p-2.5 rounded-full hover:opacity-80"
+              style={{ backgroundColor: 'var(--accent)', color: '#fff', opacity: musicState.queue.length > 0 ? 1 : 0.3 }}
+              disabled={musicState.queue.length === 0}>
+              <Play size={18} />
             </button>
           )}
-          <div className="flex items-center justify-center gap-1.5 mt-3">
-            <button onClick={handleRecommend}
-              disabled={loadingMix || (musicState.history?.length ?? 0) === 0}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-medium hover:opacity-90"
-              style={{ backgroundColor: 'var(--success)' + '20', color: 'var(--success)', border: '1px solid var(--success)' + '40' }}>
-              {loadingMix ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-              Mix
+          <button onClick={handleNext} className="p-2 rounded-lg hover:opacity-80" style={{ color: 'var(--accent)' }}>
+            <SkipForward size={16} />
+          </button>
+          <button onClick={handleStop} className="p-2 rounded-lg hover:opacity-80"
+            style={{ color: 'var(--danger)', opacity: musicState.current ? 1 : 0.3 }}
+            disabled={!musicState.current}>
+            <Square size={14} />
+          </button>
+          <button onClick={handleRepeat} className="p-1.5 rounded-lg hover:opacity-80"
+            style={{ color: musicState.repeat !== 'off' ? 'var(--accent)' : 'var(--text-secondary)' }}>
+            {musicState.repeat === 'one' ? <Repeat1 size={13} /> : <Repeat size={13} />}
+          </button>
+        </div>
+
+        {/* Volume - SIEMPRE visible */}
+        <div className="flex items-center gap-2">
+          <Volume2 size={12} style={{ color: 'var(--text-secondary)' }} />
+          <input type="range" min="0" max="100" value={musicState.volume}
+            onChange={e => handleVolume(parseInt(e.target.value))}
+            className="flex-1 h-1 rounded-full appearance-none cursor-pointer"
+            style={{ accentColor: 'var(--accent)', backgroundColor: 'var(--bg-tertiary)' }} />
+          <span className="text-[9px] w-7 text-right" style={{ color: 'var(--text-secondary)' }}>{musicState.volume}%</span>
+        </div>
+
+        {/* Mix + Menu - SIEMPRE visibles */}
+        <div className="flex items-center gap-1.5">
+          <button onClick={handleRecommend}
+            disabled={loadingMix || (!musicState.current && (musicState.history?.length ?? 0) === 0)}
+            className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[10px] font-medium hover:opacity-90"
+            style={{ backgroundColor: 'var(--success)' + '20', color: 'var(--success)', border: '1px solid var(--success)' + '40' }}>
+            {loadingMix ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+            Mix
+          </button>
+          <div className="relative">
+            <button onClick={handleOpenMenu} className="p-1.5 rounded-lg hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+              <MoreVertical size={14} />
             </button>
-            <div className="relative">
-              <button onClick={handleOpenMenu} className="p-1.5 rounded-lg hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
-                <MoreVertical size={14} />
-              </button>
-              {showMenu && (
-                <>
-                  <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-20 rounded-lg p-2 min-w-[190px] space-y-1"
-                    style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
-                    <button onClick={() => { handleToggleMode(); setShowMenu(false) }}
-                      className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-[11px] font-medium hover:opacity-80"
-                      style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)' }}>
-                      {musicState.mode === 'nas' ? <Speaker size={12} /> : <Monitor size={12} />}
-                      Modo: {musicState.mode === 'nas' ? 'NAS' : 'PC'}
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+            {showMenu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
+                <div className="absolute right-0 bottom-full mb-1 z-20 rounded-lg p-2 min-w-[190px] space-y-1"
+                  style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+                  <button onClick={() => { handleToggleMode(); setShowMenu(false) }}
+                    className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-[11px] font-medium hover:opacity-80"
+                    style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)' }}>
+                    {musicState.mode === 'nas' ? <Speaker size={12} /> : <Monitor size={12} />}
+                    Modo: {musicState.mode === 'nas' ? 'NAS' : 'PC'}
+                  </button>
+                  {musicState.mode === 'nas' && (
+                    <>
+                      <div className="px-3 py-1">
+                        <span className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>Video en pantalla</span>
+                      </div>
+                      <button onClick={() => { handleToggleVideo(); setShowMenu(false) }}
+                        className="flex items-center gap-2 w-full px-3 py-1.5 rounded-lg text-[11px] font-medium hover:opacity-80"
+                        style={{ backgroundColor: musicState.video ? 'var(--accent)' + '20' : 'var(--bg-tertiary)', color: musicState.video ? 'var(--accent)' : 'var(--text-primary)' }}>
+                        <Tv size={12} />
+                        {musicState.video ? 'Desactivar video' : 'Solo audio'}
+                      </button>
+                      {screens.map(scr => (
+                        <button key={scr.index}
+                          onClick={() => { handleToggleVideo(scr.index); setShowMenu(false) }}
+                          className="flex items-center gap-2 w-full px-3 py-1.5 rounded-lg text-[11px] font-medium hover:opacity-80"
+                          style={{
+                            backgroundColor: musicState.video && musicState.video_screen === scr.index ? 'var(--accent)' + '20' : 'var(--bg-tertiary)',
+                            color: musicState.video && musicState.video_screen === scr.index ? 'var(--accent)' : 'var(--text-primary)',
+                          }}>
+                          <TvMinimalPlay size={12} />
+                          {scr.name}
+                          {musicState.video && musicState.video_screen === scr.index && ' ✓'}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
-      )}
+      </div>
 
       {/* Scrollable: resultados + cola */}
       <div className="flex-1 overflow-y-auto">
