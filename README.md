@@ -53,10 +53,13 @@ Open `http://localhost:3001` — the first account you create becomes admin.
 ### Music & Video Player
 - YouTube search and playback via `yt-dlp` + `mpv`
 - **Dual playback modes**: NAS speakers or browser streaming
+- **Last.fm Radio**: find similar songs, verify on YouTube, build a playlist automatically
+- **Lucky Play**: play a random similar song — surprise mode
 - Full transport controls: play, pause, previous, next, stop
-- Queue management: reorder (drag up/down), play any item, remove
+- Progress bar with elapsed/total time indicator
+- Queue management: reorder, play next, play any item, clear queue, remove
 - Shuffle and repeat modes (off / all / one)
-- Volume control (ALSA/PulseAudio on NAS, Web Audio in browser)
+- Compact volume control with vertical popup slider
 - AI-powered recommendations using YouTube Mix — multi-seed, artist-diversified
 - **Video output**: fullscreen on any connected display with multi-monitor support (X11)
 - Persistent side panel accessible from every page
@@ -75,6 +78,7 @@ Open `http://localhost:3001` — the first account you create becomes admin.
 ### 3D Printers
 - **4 protocol support**: Moonraker (Klipper), OctoPrint, Creality stock firmware (WebSocket), FlashForge stock firmware (TCP)
 - Unified control for mixed printer fleets — different brands and firmwares in a single dashboard
+- Direct link to each printer's web management UI (Fluidd, Mainsail, OctoPrint, Creality)
 - Real-time temperatures with visual bars (hotend + bed)
 - Job control: start, pause, resume, cancel
 - Jog pad for axis movement (0.1, 1, 10, 100mm)
@@ -87,6 +91,10 @@ Open `http://localhost:3001` — the first account you create becomes admin.
 
 ### Tasks & Projects
 - Create tasks with assignments (`@user`, `@all`), due dates, and project grouping
+- Clickable user chips for assignment — lists all system users
+- Telegram notification when task is created (to assigned users) or completed (to creator)
+- Due date alerts: "expires today" and "overdue" reminders on a 12h cycle
+- `@all` targets operators and admins only (not observers); individual `@user` works for any role
 - Confirmation workflow: requires explicit accept/reject
 - Insistent reminders via Telegram (default 8 min, configurable)
 - Project progress tracking with visual bars
@@ -96,9 +104,9 @@ Open `http://localhost:3001` — the first account you create becomes admin.
 ### Network Scanner
 - ICMP-based network scanning with automatic device discovery
 - MAC address and manufacturer detection
-- Known vs unknown device tracking
+- Known vs unknown device tracking with emoji icons (24 device icons)
 - Telegram alerts for new unknown devices
-- Custom device labeling
+- Custom device labeling with editable icons
 - Periodic background scanning (every 5 minutes)
 
 ### Telegram Bot (40+ commands)
@@ -130,6 +138,8 @@ Open `http://localhost:3001` — the first account you create becomes admin.
 ### Notes
 - Markdown editor with live split preview
 - Headers, bold, italic, code blocks, lists, links
+- Share notes with `@user` — recipients get a Telegram notification
+- Public flag: mark a note as visible to all users
 - Collaborative: all users can view and edit
 
 ### Lab Services Dashboard
@@ -140,7 +150,7 @@ Open `http://localhost:3001` — the first account you create becomes admin.
 ### Notifications
 - Full Telegram bot with long polling
 - Daily scheduled reports (system status + activity log) — per-user configurable time
-- Real-time alerts: new network devices, urgent emails, 3D print completion/errors
+- Real-time alerts: new network devices, urgent emails, 3D print completion/errors, task assignments/completions, shared notes
 - Role-based notification filtering
 
 ### System & Administration
@@ -168,7 +178,7 @@ Open `http://localhost:3001` — the first account you create becomes admin.
 | Backend | Rust, Axum 0.8, Tokio |
 | Frontend | React 19, TypeScript 5.9, Vite 8, TailwindCSS 4 |
 | Terminal | portable-pty + xterm.js 6 (WebSocket) |
-| Music/Video | yt-dlp + mpv (X11 multi-monitor) |
+| Music/Video | yt-dlp + mpv (X11 multi-monitor), Last.fm API |
 | Email | IMAP (native), POP3 (custom TLS implementation) |
 | AI | Groq API (Llama 3.3 70B Versatile) |
 | 3D Printers | Moonraker API, OctoPrint API, Creality WebSocket, FlashForge TCP |
@@ -284,6 +294,7 @@ Config is stored at `~/.labnas/config.json` (relative to the binary owner's home
    - Telegram bot token
    - Lab branding (name, logo, colors)
    - 3D printers
+   - Last.fm API key (for Radio & Lucky Play)
    - Email accounts
    - Lab services (port links)
    - mDNS hostname
