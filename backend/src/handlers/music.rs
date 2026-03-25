@@ -206,23 +206,28 @@ async fn resume_player(state: &AppState) {
     }
 }
 
-/// Detecta el XAUTHORITY del usuario que tiene la sesión X activa
-fn detect_xauthority() -> Option<String> {
-    // Buscar en /home/*/.Xauthority
-    if let Ok(entries) = std::fs::read_dir("/home") {
-        for entry in entries.flatten() {
-            let xauth = entry.path().join(".Xauthority");
-            if xauth.exists() {
-                return Some(xauth.to_string_lossy().to_string());
-            }
+/// Detecta el usuario que tiene la sesión X en :0
+fn detect_x_user() -> Option<String> {
+    // Parsear `who` para encontrar el usuario con :0
+    let output = std::process::Command::new("who")
+        .output().ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if line.contains("(:0)") || line.contains(":0") {
+            return line.split_whitespace().next().map(|s| s.to_string());
         }
     }
-    // Fallback root
-    let root_xauth = std::path::Path::new("/root/.Xauthority");
-    if root_xauth.exists() {
-        return Some("/root/.Xauthority".to_string());
-    }
     None
+}
+
+/// Asegura que root tenga acceso al display X del usuario
+pub async fn ensure_x_access() {
+    if let Some(user) = detect_x_user() {
+        // Ejecutar xhost +local:root como el usuario dueño de X
+        let _ = Command::new("su")
+            .args(["-", &user, "-c", "DISPLAY=:0 xhost +local:root"])
+            .output().await;
+    }
 }
 
 /// Lanza mpv en el NAS para reproducir audio/video
@@ -238,6 +243,9 @@ async fn spawn_player(state: &AppState, video_id: &str) {
     let mut args: Vec<String> = vec!["--really-quiet".to_string()];
 
     if video {
+        // Asegurar acceso X antes de abrir ventana
+        ensure_x_access().await;
+
         if let Some(scr) = screen {
             args.push(format!("--screen={}", scr));
             args.push(format!("--fs-screen={}", scr));
@@ -251,9 +259,14 @@ async fn spawn_player(state: &AppState, video_id: &str) {
 
     let mut cmd = Command::new("mpv");
     cmd.env("DISPLAY", ":0");
-    // Necesario para que mpv acceda al servidor X cuando corre como root/systemd
-    if let Some(xauth) = detect_xauthority() {
-        cmd.env("XAUTHORITY", xauth);
+    // XDG_RUNTIME_DIR necesario para PulseAudio/PipeWire audio
+    if let Some(user) = detect_x_user() {
+        // Obtener UID del usuario para XDG_RUNTIME_DIR
+        if let Ok(output) = std::process::Command::new("id").args(["-u", &user]).output() {
+            let uid = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            cmd.env("XDG_RUNTIME_DIR", format!("/run/user/{}", uid));
+        }
+        cmd.env("XAUTHORITY", format!("/home/{}/.Xauthority", user));
     }
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     let child = cmd

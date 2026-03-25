@@ -206,6 +206,8 @@ async fn main() {
     tokio::spawn(handlers::notifications::daily_notification_loop(state.clone()));
     tokio::spawn(handlers::printers3d::printer_monitor_loop(state.clone()));
     tokio::spawn(handlers::system::update_check_loop(state.clone()));
+    // Asegurar acceso X para video/audio
+    tokio::spawn(handlers::music::ensure_x_access());
     // Escaneo de red al inicio + periódico cada 5 min
     tokio::spawn(handlers::network::network_scan_loop(state));
 
