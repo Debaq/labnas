@@ -1006,6 +1006,7 @@ async fn handle_project_command(state: &AppState, creator: &str, text: &str) -> 
         description: String::new(),
         created_by: creator.to_string(),
         members: vec![creator.to_string()],
+        member_tags: std::collections::HashMap::new(),
         created_at: chrono::Utc::now(),
     };
 
@@ -1094,6 +1095,7 @@ async fn handle_task_command(state: &AppState, creator: &str, text: &str) -> Str
         status: TaskStatus::Pendiente,
         created_by: creator.to_string(),
         due_date: None,
+        due_time: None,
         requires_confirmation,
         insistent,
         reminder_minutes,
@@ -2212,7 +2214,6 @@ async fn handle_music_play(state: &AppState, username: &str, query: &str) -> Str
     let title = track.title.clone();
     let artist = track.artist.clone();
     let track_id = track.id.clone();
-    let mode = ms.mode.clone();
 
     crate::handlers::music::add_to_history_pub(&mut ms, &track, username);
     ms.current = Some(track);
@@ -2220,9 +2221,7 @@ async fn handle_music_play(state: &AppState, username: &str, query: &str) -> Str
     ms.paused = false;
     drop(ms);
 
-    let stream = crate::handlers::music::start_playback_pub(state, &track_id, &mode).await;
-    let mut ms = state.music.lock().await;
-    ms.stream_url = stream;
+    crate::handlers::music::spawn_player_pub(state, &track_id).await;
 
     format!("Reproduciendo: *{}* - {}", title, artist)
 }
@@ -2234,7 +2233,6 @@ async fn handle_music_next(state: &AppState) -> String {
     if ms.queue.is_empty() {
         ms.current = None;
         ms.started_by = None;
-        ms.stream_url = None;
         return "Cola vacia. Musica detenida.".to_string();
     }
 
@@ -2243,7 +2241,6 @@ async fn handle_music_next(state: &AppState) -> String {
     let next_by = next_track.added_by.clone().unwrap_or_default();
     let title = next_track.title.clone();
     let artist = next_track.artist.clone();
-    let mode = ms.mode.clone();
     let remaining = ms.queue.len();
 
     crate::handlers::music::add_to_history_pub(&mut ms, &next_track, &next_by);
@@ -2252,9 +2249,7 @@ async fn handle_music_next(state: &AppState) -> String {
     ms.paused = false;
     drop(ms);
 
-    let stream = crate::handlers::music::start_playback_pub(state, &next_id, &mode).await;
-    let mut ms = state.music.lock().await;
-    ms.stream_url = stream;
+    crate::handlers::music::spawn_player_pub(state, &next_id).await;
 
     format!("Siguiente: *{}* - {}\n{} en cola", title, artist, remaining)
 }
@@ -2263,11 +2258,9 @@ async fn handle_music_stop(state: &AppState) -> String {
     crate::handlers::music::kill_player_pub(state).await;
     let mut ms = state.music.lock().await;
     let history = ms.history.clone();
-    let mode = ms.mode.clone();
     let vol = ms.volume;
     *ms = crate::handlers::music::MusicState::default();
     ms.history = history;
-    ms.mode = mode;
     ms.volume = vol;
     "Musica detenida.".to_string()
 }
@@ -2279,15 +2272,12 @@ async fn handle_music_pause(state: &AppState) -> String {
     }
     ms.paused = !ms.paused;
     let paused = ms.paused;
-    let mode = ms.mode.clone();
     drop(ms);
 
-    if mode == crate::handlers::music::PlaybackMode::Nas {
-        if paused {
-            crate::handlers::music::pause_player_pub(state).await;
-        } else {
-            crate::handlers::music::resume_player_pub(state).await;
-        }
+    if paused {
+        crate::handlers::music::pause_player_pub(state).await;
+    } else {
+        crate::handlers::music::resume_player_pub(state).await;
     }
 
     if paused { "Musica pausada.".to_string() } else { "Musica reanudada.".to_string() }
@@ -2360,20 +2350,17 @@ async fn handle_music_volume(state: &AppState, vol_str: &str) -> String {
 
     let mut ms = state.music.lock().await;
     ms.volume = vol;
-    let mode = ms.mode.clone();
     drop(ms);
 
-    if mode == crate::handlers::music::PlaybackMode::Nas {
-        let vol_str = format!("{}%", vol);
-        let amixer = tokio::process::Command::new("amixer")
-            .args(["sset", "Master", &vol_str])
+    let vol_str = format!("{}%", vol);
+    let amixer = tokio::process::Command::new("amixer")
+        .args(["sset", "Master", &vol_str])
+        .output().await;
+    if amixer.is_err() || !amixer.as_ref().unwrap().status.success() {
+        let _ = tokio::process::Command::new("pactl")
+            .env("XDG_RUNTIME_DIR", "/run/user/1000")
+            .args(["set-sink-volume", "@DEFAULT_SINK@", &vol_str])
             .output().await;
-        if amixer.is_err() || !amixer.as_ref().unwrap().status.success() {
-            let _ = tokio::process::Command::new("pactl")
-                .env("XDG_RUNTIME_DIR", "/run/user/1000")
-                .args(["set-sink-volume", "@DEFAULT_SINK@", &vol_str])
-                .output().await;
-        }
     }
 
     format!("Volumen: {}%", vol)

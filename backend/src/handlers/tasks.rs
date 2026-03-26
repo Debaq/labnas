@@ -6,6 +6,8 @@ use axum::{
 use chrono::Utc;
 use serde::Deserialize;
 
+use std::collections::HashMap;
+
 use crate::config::save_config;
 use crate::models::notifications::UserRole;
 use crate::models::tasks::*;
@@ -146,6 +148,7 @@ pub async fn create_project(
         description: req.description,
         created_by: username.clone(),
         members: vec![username.clone()],
+        member_tags: HashMap::new(),
         created_at: Utc::now(),
     };
 
@@ -200,6 +203,63 @@ pub async fn delete_project(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize)]
+pub struct UpdateProjectRequest {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub members: Option<Vec<String>>,
+    pub member_tags: Option<HashMap<String, Vec<String>>>,
+}
+
+pub async fn update_project(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(req): Json<UpdateProjectRequest>,
+) -> Result<Json<Project>, (StatusCode, String)> {
+    let sessions = state.sessions.lock().await;
+    let (username, role) = extract_username(&state, &sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
+    let mut config = state.config.lock().await;
+    let project = config
+        .tasks
+        .projects
+        .iter_mut()
+        .find(|p| p.id == id)
+        .ok_or((StatusCode::NOT_FOUND, "Proyecto no encontrado".to_string()))?;
+
+    if project.created_by != username && role != UserRole::Admin {
+        return Err((StatusCode::FORBIDDEN, "Sin permisos para modificar este proyecto".to_string()));
+    }
+
+    if let Some(name) = req.name {
+        project.name = name;
+    }
+    if let Some(description) = req.description {
+        project.description = description;
+    }
+    if let Some(members) = req.members {
+        project.members = members;
+    }
+    if let Some(member_tags) = req.member_tags {
+        project.member_tags = member_tags;
+    }
+
+    let updated = project.clone();
+    save_config(&config)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    drop(config);
+    state
+        .log_activity("proyecto_actualizado", &format!("Proyecto: {}", updated.name), &username)
+        .await;
+
+    Ok(Json(updated))
+}
+
 // ---- Tareas ----
 
 #[derive(Deserialize)]
@@ -250,6 +310,8 @@ pub struct CreateTaskRequest {
     pub reminder_minutes: u32,
     #[serde(default)]
     pub due_date: Option<String>,
+    #[serde(default)]
+    pub due_time: Option<String>,
 }
 
 fn default_reminder() -> u32 {
@@ -275,6 +337,7 @@ pub async fn create_task(
         status: TaskStatus::Pendiente,
         created_by: username.clone(),
         due_date: req.due_date,
+        due_time: req.due_time,
         requires_confirmation: req.requires_confirmation,
         insistent: req.insistent,
         reminder_minutes: req.reminder_minutes,
@@ -310,6 +373,7 @@ pub struct UpdateTaskRequest {
     pub project_id: Option<Option<String>>,
     pub assigned_to: Option<Vec<String>>,
     pub due_date: Option<Option<String>>,
+    pub due_time: Option<Option<String>>,
     pub requires_confirmation: Option<bool>,
     pub insistent: Option<bool>,
     pub reminder_minutes: Option<u32>,
@@ -366,6 +430,9 @@ pub async fn update_task(
     }
     if let Some(due_date) = req.due_date {
         task.due_date = due_date;
+    }
+    if let Some(due_time) = req.due_time {
+        task.due_time = due_time;
     }
     if let Some(requires_confirmation) = req.requires_confirmation {
         task.requires_confirmation = requires_confirmation;
@@ -426,19 +493,54 @@ pub async fn confirm_task(
     // Quitar de rechazados si estaba
     task.rejected_by.retain(|u| u != &username);
 
+    // Capturar datos antes de soltar el borrow mutable
     let updated = task.clone();
+
+    // Si la tarea tiene fecha y hora, crear evento automaticamente
+    let mut created_event = false;
+    if let (Some(date), Some(time)) = (updated.due_date.clone(), updated.due_time.clone()) {
+        let event = CalendarEvent {
+            id: uuid::Uuid::new_v4().to_string()[..6].to_string(),
+            title: updated.title.clone(),
+            description: format!("Actividad desde tarea ({})", updated.id),
+            date,
+            time,
+            created_by: updated.created_by.clone(),
+            invitees: updated.assigned_to.clone(),
+            accepted: vec![username.clone()],
+            declined: Vec::new(),
+            remind_before_min: 15,
+            reminded: false,
+            recurrence: String::new(),
+            recurrence_end: None,
+            created_at: Utc::now(),
+        };
+        config.tasks.events.push(event);
+        created_event = true;
+    }
     save_config(&config)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
     drop(config);
-    state
-        .log_activity(
-            "tarea_confirmada",
-            &format!("{} confirmo: {}", username, updated.title),
-            &username,
-        )
-        .await;
+
+    if created_event {
+        state
+            .log_activity(
+                "tarea_confirmada_agendada",
+                &format!("{} confirmo y agendo: {}", username, updated.title),
+                &username,
+            )
+            .await;
+    } else {
+        state
+            .log_activity(
+                "tarea_confirmada",
+                &format!("{} confirmo: {}", username, updated.title),
+                &username,
+            )
+            .await;
+    }
 
     Ok(Json(updated))
 }
@@ -569,6 +671,80 @@ pub async fn delete_task(
         .await;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ---- Agendar tarea como evento ----
+
+#[derive(Debug, Deserialize)]
+pub struct ScheduleTaskRequest {
+    #[serde(default)]
+    pub date: Option<String>,
+    #[serde(default)]
+    pub time: Option<String>,
+}
+
+pub async fn schedule_task(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(req): Json<ScheduleTaskRequest>,
+) -> Result<Json<CalendarEvent>, (StatusCode, String)> {
+    let sessions = state.sessions.lock().await;
+    let (username, _role) = extract_username(&state, &sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
+    let mut config = state.config.lock().await;
+    let task = config
+        .tasks
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == id)
+        .ok_or((StatusCode::NOT_FOUND, "Tarea no encontrada".to_string()))?;
+
+    // Usar fecha/hora de la tarea si existen, o los del request
+    let date = req.date.or_else(|| task.due_date.clone())
+        .ok_or((StatusCode::BAD_REQUEST, "Se requiere fecha".to_string()))?;
+    let time = req.time.or_else(|| task.due_time.clone())
+        .ok_or((StatusCode::BAD_REQUEST, "Se requiere hora".to_string()))?;
+
+    // Actualizar la tarea con fecha/hora si no los tenia
+    if task.due_date.is_none() {
+        task.due_date = Some(date.clone());
+    }
+    if task.due_time.is_none() {
+        task.due_time = Some(time.clone());
+    }
+
+    let event = CalendarEvent {
+        id: uuid::Uuid::new_v4().to_string()[..6].to_string(),
+        title: task.title.clone(),
+        description: format!("Actividad desde tarea ({})", task.id),
+        date,
+        time,
+        created_by: task.created_by.clone(),
+        invitees: task.assigned_to.clone(),
+        accepted: vec![username.clone()],
+        declined: Vec::new(),
+        remind_before_min: 15,
+        reminded: false,
+        recurrence: String::new(),
+        recurrence_end: None,
+        created_at: Utc::now(),
+    };
+
+    config.tasks.events.push(event.clone());
+    save_config(&config)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    let title = event.title.clone();
+    drop(config);
+    state
+        .log_activity("tarea_agendada", &format!("Agendada: {}", title), &username)
+        .await;
+
+    Ok(Json(event))
 }
 
 // ---- Eventos / Calendario ----

@@ -622,6 +622,19 @@ export async function createProject(data: { name: string; description?: string }
   return res.json()
 }
 
+export async function updateProject(id: string, data: {
+  name?: string; description?: string; members?: string[];
+  member_tags?: Record<string, string[]>
+}): Promise<Project> {
+  const res = await api(`/api/projects/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Error al actualizar proyecto')
+  return res.json()
+}
+
 export async function deleteProject(id: string): Promise<void> {
   const res = await api(`/api/projects/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar proyecto')
@@ -645,6 +658,7 @@ export async function createTask(data: {
   insistent?: boolean
   reminder_minutes?: number
   due_date?: string | null
+  due_time?: string | null
 }): Promise<Task> {
   const res = await api('/api/tasks', {
     method: 'POST',
@@ -694,6 +708,16 @@ export async function doneTask(id: string): Promise<Task> {
 export async function deleteTask(id: string): Promise<void> {
   const res = await api(`/api/tasks/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar tarea')
+}
+
+export async function scheduleTask(id: string, data: { date?: string; time?: string }): Promise<CalendarEvent> {
+  const res = await api(`/api/tasks/${id}/schedule`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Error al agendar tarea')
+  return res.json()
 }
 
 // --- Calendar Events ---
@@ -913,7 +937,6 @@ export interface MusicTrack {
   artist: string
   thumbnail: string
   duration: number
-  stream_url: string | null
   added_by: string | null
 }
 
@@ -922,8 +945,6 @@ export interface MusicState {
   queue: MusicTrack[]
   started_by: string | null
   history: { id: string; title: string; artist: string; thumbnail: string; played_by: string }[]
-  mode: 'nas' | 'browser'
-  stream_url: string | null
   paused: boolean
   volume: number
   repeat: 'off' | 'all' | 'one'
@@ -986,16 +1007,6 @@ export async function setMusicVolume(volume: number): Promise<MusicState> {
     body: JSON.stringify({ volume }),
   })
   if (!res.ok) throw new Error('Error ajustando volumen')
-  return res.json()
-}
-
-export async function setMusicMode(mode: 'nas' | 'browser'): Promise<MusicState> {
-  const res = await api('/api/music/mode', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode }),
-  })
-  if (!res.ok) throw new Error('Error cambiando modo')
   return res.json()
 }
 

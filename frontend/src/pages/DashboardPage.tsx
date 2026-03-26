@@ -1,9 +1,9 @@
 import { useEffect, useState, useMemo } from 'react'
 import type { ReactNode } from 'react'
-import { HardDrive, Wifi, Activity, Database, Box, ExternalLink } from 'lucide-react'
-import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus, getServices, type LabService } from '../api'
+import { HardDrive, Wifi, Activity, Database, Box, ExternalLink, ClipboardList, Calendar, Clock, Users, FolderOpen } from 'lucide-react'
+import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus, getServices, fetchTasks, fetchEvents, fetchProjects, type LabService } from '../api'
 import { useAuth } from '../auth/AuthContext'
-import type { DiskInfo, SystemInfo, NetworkHost, Printer3DConfig, Printer3DStatus } from '../types'
+import type { DiskInfo, SystemInfo, NetworkHost, Printer3DConfig, Printer3DStatus, Task, CalendarEvent, Project } from '../types'
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -75,23 +75,32 @@ export default function DashboardPage() {
   const [printerStatuses, setPrinterStatuses] = useState<Printer3DStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [services, setServices] = useState<LabService[]>([])
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [events, setEvents] = useState<CalendarEvent[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
 
   async function loadData(initial = false) {
     if (initial) setLoading(true)
     try {
-      const [disksData, hostsData, healthData, sysInfoData, printers3dData, servicesData] = await Promise.allSettled([
+      const [disksData, hostsData, healthData, sysInfoData, printers3dData, servicesData, tasksData, eventsData, projectsData] = await Promise.allSettled([
         fetchDisks(),
         fetchHosts(),
         fetchHealth(),
         fetchSystemInfo(),
         fetchPrinters3D(),
         getServices(),
+        fetchTasks(),
+        fetchEvents(),
+        fetchProjects(),
       ])
       if (disksData.status === 'fulfilled') setDisks(disksData.value)
       if (hostsData.status === 'fulfilled') setHosts(hostsData.value)
       if (healthData.status === 'fulfilled') setHealth(healthData.value)
       if (sysInfoData.status === 'fulfilled') setSystemInfo(sysInfoData.value)
       if (servicesData.status === 'fulfilled') setServices(servicesData.value)
+      if (tasksData.status === 'fulfilled') setTasks(tasksData.value)
+      if (eventsData.status === 'fulfilled') setEvents(eventsData.value)
+      if (projectsData.status === 'fulfilled') setProjects(projectsData.value)
       if (printers3dData.status === 'fulfilled') {
         setPrinters3d(printers3dData.value)
         const statusResults = await Promise.allSettled(
@@ -118,6 +127,24 @@ export default function DashboardPage() {
   const activeHosts = hosts.filter((h) => h.is_alive).length
   const totalSpace = disks.reduce((acc, d) => acc + d.total_space, 0)
   const availableSpace = disks.reduce((acc, d) => acc + d.available_space, 0)
+
+  // Tareas pendientes/en progreso, ordenadas: las con fecha primero
+  const pendingTasks = tasks
+    .filter((t) => t.status === 'pendiente' || t.status === 'enprogreso')
+    .sort((a, b) => {
+      if (a.due_date && !b.due_date) return -1
+      if (!a.due_date && b.due_date) return 1
+      if (a.due_date && b.due_date) return a.due_date.localeCompare(b.due_date)
+      return 0
+    })
+    .slice(0, 5)
+
+  // Eventos futuros, ordenados por fecha/hora
+  const now = new Date().toISOString().slice(0, 16).replace('T', ' ')
+  const upcomingEvents = events
+    .filter((e) => `${e.date} ${e.time}` >= now)
+    .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))
+    .slice(0, 5)
 
   return (
     <div className="space-y-8">
@@ -281,6 +308,136 @@ export default function DashboardPage() {
               </span>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Tareas pendientes y Eventos proximos */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Tareas pendientes */}
+        <div
+          className="rounded-xl p-6 transition-all duration-200 hover:shadow-lg"
+          style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
+        >
+          <div className="flex items-center gap-3 mb-4">
+            <ClipboardList size={22} style={{ color: 'var(--accent)' }} />
+            <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+              Tareas Pendientes
+            </h2>
+            <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}>
+              {tasks.filter((t) => t.status === 'pendiente' || t.status === 'enprogreso').length}
+            </span>
+          </div>
+          {pendingTasks.length === 0 ? (
+            <p className="text-sm py-4 text-center" style={{ color: 'var(--text-secondary)' }}>
+              Sin tareas pendientes
+            </p>
+          ) : (
+            <div className="space-y-2.5">
+              {pendingTasks.map((task) => {
+                const projectName = task.project_id
+                  ? projects.find((p) => p.id === task.project_id)?.name
+                  : null
+                return (
+                  <div
+                    key={task.id}
+                    className="flex items-start gap-3 p-3 rounded-lg"
+                    style={{ backgroundColor: 'var(--bg-tertiary)' }}
+                  >
+                    <div
+                      className="w-2 h-2 rounded-full mt-1.5 shrink-0"
+                      style={{
+                        backgroundColor: task.status === 'enprogreso' ? 'var(--accent)' : 'var(--warning)',
+                      }}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                        {task.title}
+                      </p>
+                      <div className="flex items-center gap-3 mt-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                        {projectName && (
+                          <span className="flex items-center gap-1">
+                            <FolderOpen size={10} />
+                            {projectName}
+                          </span>
+                        )}
+                        {task.assigned_to.length > 0 && (
+                          <span className="flex items-center gap-1">
+                            <Users size={10} />
+                            {task.assigned_to.join(', ')}
+                          </span>
+                        )}
+                        {task.due_date && (
+                          <span className="flex items-center gap-1">
+                            <Clock size={10} />
+                            {task.due_date}{task.due_time ? ` ${task.due_time}` : ''}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Proximos eventos */}
+        <div
+          className="rounded-xl p-6 transition-all duration-200 hover:shadow-lg"
+          style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
+        >
+          <div className="flex items-center gap-3 mb-4">
+            <Calendar size={22} style={{ color: 'var(--accent)' }} />
+            <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+              Proximos Eventos
+            </h2>
+            <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}>
+              {upcomingEvents.length}
+            </span>
+          </div>
+          {upcomingEvents.length === 0 ? (
+            <p className="text-sm py-4 text-center" style={{ color: 'var(--text-secondary)' }}>
+              Sin eventos proximos
+            </p>
+          ) : (
+            <div className="space-y-2.5">
+              {upcomingEvents.map((ev) => (
+                <div
+                  key={ev.id}
+                  className="flex items-start gap-3 p-3 rounded-lg"
+                  style={{ backgroundColor: 'var(--bg-tertiary)' }}
+                >
+                  <div
+                    className="p-1.5 rounded-lg shrink-0"
+                    style={{ backgroundColor: 'var(--accent-alpha)' }}
+                  >
+                    <Calendar size={14} style={{ color: 'var(--accent)' }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                      {ev.title}
+                    </p>
+                    <div className="flex items-center gap-3 mt-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                      <span className="font-mono" style={{ color: 'var(--accent)' }}>
+                        {ev.date} {ev.time}
+                      </span>
+                      {ev.invitees.length > 0 && (
+                        <span className="flex items-center gap-1">
+                          <Users size={10} />
+                          {ev.invitees.join(', ')}
+                        </span>
+                      )}
+                      {ev.recurrence && ev.recurrence !== 'none' && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px]" style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}>
+                          {ev.recurrence === 'daily' ? 'Diario' : ev.recurrence === 'weekly' ? 'Semanal' : 'Mensual'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

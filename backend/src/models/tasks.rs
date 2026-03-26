@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -28,6 +29,8 @@ pub struct Task {
     pub created_by: String,
     pub due_date: Option<String>, // "2026-03-20"
     #[serde(default)]
+    pub due_time: Option<String>, // "14:30"
+    #[serde(default)]
     pub requires_confirmation: bool,
     #[serde(default)]
     pub insistent: bool,
@@ -55,6 +58,9 @@ pub struct Project {
     pub created_by: String,
     #[serde(default)]
     pub members: Vec<String>,
+    /// Tags por miembro: { "nick": ["backend", "devops"], "ana": ["frontend"] }
+    #[serde(default)]
+    pub member_tags: HashMap<String, Vec<String>>,
     pub created_at: DateTime<Utc>,
 }
 

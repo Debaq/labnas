@@ -13,6 +13,8 @@ import {
   ShieldCheck,
   Calendar,
   Users,
+  Tag,
+  UserPlus,
 } from 'lucide-react'
 import {
   fetchProjects,
@@ -30,6 +32,8 @@ import {
   acceptEvent,
   declineEvent,
   fetchUsernames,
+  scheduleTask,
+  updateProject,
 } from '../api'
 import type { Task, Project, TaskStatus, CalendarEvent } from '../types'
 import { useAuth } from '../auth/AuthContext'
@@ -73,7 +77,21 @@ export default function TasksPage() {
   const [taskRequiresConfirmation, setTaskRequiresConfirmation] = useState(false)
   const [taskInsistent, setTaskInsistent] = useState(false)
   const [taskReminderMinutes, setTaskReminderMinutes] = useState(8)
+  const [taskDueTime, setTaskDueTime] = useState('')
   const [allUsers, setAllUsers] = useState<string[]>([])
+
+  // Panel de miembros/tags del proyecto
+  const [showMembers, setShowMembers] = useState(false)
+  const [newMember, setNewMember] = useState('')
+  const [newTagUser, setNewTagUser] = useState('')
+  const [newTagValue, setNewTagValue] = useState('')
+
+  // Modal de agendar tarea (cuando falta fecha/hora al confirmar)
+  const [showScheduleModal, setShowScheduleModal] = useState(false)
+  const [scheduleTaskId, setScheduleTaskId] = useState('')
+  const [scheduleDate, setScheduleDate] = useState('')
+  const [scheduleTime, setScheduleTime] = useState('')
+  const [scheduleMissing, setScheduleMissing] = useState<'date' | 'time' | 'both'>('both')
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -136,6 +154,7 @@ export default function TasksPage() {
     setTaskProjectId(selectedProject || '')
     setTaskAssignedTo('')
     setTaskDueDate('')
+    setTaskDueTime('')
     setTaskRequiresConfirmation(false)
     setTaskInsistent(false)
     setTaskReminderMinutes(8)
@@ -157,6 +176,7 @@ export default function TasksPage() {
         insistent: taskInsistent,
         reminder_minutes: taskReminderMinutes,
         due_date: taskDueDate || null,
+        due_time: taskDueTime || null,
       })
       setShowTaskModal(false)
       loadData()
@@ -165,7 +185,86 @@ export default function TasksPage() {
 
   async function handleConfirm(id: string) {
     try {
+      const task = tasks.find((t) => t.id === id)
+      const hasDate = !!task?.due_date
+      const hasTime = !!task?.due_time
+
       await confirmTask(id, user?.username || 'web')
+
+      // Si tiene fecha y hora, el backend ya creo el evento
+      if (hasDate && hasTime) {
+        loadData()
+        return
+      }
+
+      // Si falta fecha, hora o ambos, abrir modal para completar
+      setScheduleTaskId(id)
+      setScheduleDate(task?.due_date || '')
+      setScheduleTime(task?.due_time || '')
+      setScheduleMissing(!hasDate && !hasTime ? 'both' : !hasDate ? 'date' : 'time')
+      setShowScheduleModal(true)
+      loadData()
+    } catch { /* silenciar */ }
+  }
+
+  async function handleAddMember(projectId: string) {
+    if (!newMember.trim()) return
+    const project = projects.find((p) => p.id === projectId)
+    if (!project) return
+    const members = [...project.members, newMember.trim()]
+    try {
+      await updateProject(projectId, { members })
+      setNewMember('')
+      loadData()
+    } catch { /* silenciar */ }
+  }
+
+  async function handleRemoveMember(projectId: string, member: string) {
+    const project = projects.find((p) => p.id === projectId)
+    if (!project) return
+    const members = project.members.filter((m) => m !== member)
+    const memberTags = { ...project.member_tags }
+    delete memberTags[member]
+    try {
+      await updateProject(projectId, { members, member_tags: memberTags })
+      loadData()
+    } catch { /* silenciar */ }
+  }
+
+  async function handleAddTag(projectId: string, username: string) {
+    if (!newTagValue.trim()) return
+    const project = projects.find((p) => p.id === projectId)
+    if (!project) return
+    const memberTags = { ...project.member_tags }
+    const tags = memberTags[username] || []
+    if (!tags.includes(newTagValue.trim())) {
+      memberTags[username] = [...tags, newTagValue.trim()]
+    }
+    try {
+      await updateProject(projectId, { member_tags: memberTags })
+      setNewTagValue('')
+      setNewTagUser('')
+      loadData()
+    } catch { /* silenciar */ }
+  }
+
+  async function handleRemoveTag(projectId: string, username: string, tag: string) {
+    const project = projects.find((p) => p.id === projectId)
+    if (!project) return
+    const memberTags = { ...project.member_tags }
+    memberTags[username] = (memberTags[username] || []).filter((t) => t !== tag)
+    if (memberTags[username].length === 0) delete memberTags[username]
+    try {
+      await updateProject(projectId, { member_tags: memberTags })
+      loadData()
+    } catch { /* silenciar */ }
+  }
+
+  async function handleScheduleConfirm() {
+    if (!scheduleDate || !scheduleTime) return
+    try {
+      await scheduleTask(scheduleTaskId, { date: scheduleDate, time: scheduleTime })
+      setShowScheduleModal(false)
       loadData()
     } catch { /* silenciar */ }
   }
@@ -544,6 +643,100 @@ export default function TasksPage() {
             </div>
           )}
         </div>
+
+        {/* Panel de miembros y tags */}
+        {selectedProject && (() => {
+          const project = projects.find((p) => p.id === selectedProject)
+          if (!project) return null
+          return (
+            <div style={{ borderTop: '1px solid var(--border)' }}>
+              <button
+                onClick={() => setShowMembers(!showMembers)}
+                className="w-full px-4 py-2.5 flex items-center gap-2 text-xs font-medium"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                <Users size={14} />
+                Miembros ({project.members.length})
+                <span className="ml-auto text-[10px]">{showMembers ? '▲' : '▼'}</span>
+              </button>
+              {showMembers && (
+                <div className="px-3 pb-3 space-y-2">
+                  {project.members.map((member) => (
+                    <div key={member} className="p-2 rounded-lg" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>@{member}</span>
+                        {member !== project.created_by && (
+                          <button
+                            onClick={() => handleRemoveMember(project.id, member)}
+                            className="p-0.5 rounded hover:opacity-80"
+                            style={{ color: 'var(--danger)' }}
+                          ><X size={12} /></button>
+                        )}
+                      </div>
+                      {/* Tags del miembro */}
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {(project.member_tags?.[member] || []).map((tag) => (
+                          <span
+                            key={tag}
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium cursor-pointer hover:opacity-70"
+                            style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}
+                            onClick={() => handleRemoveTag(project.id, member, tag)}
+                            title="Click para quitar"
+                          >
+                            <Tag size={8} />
+                            {tag}
+                            <X size={8} />
+                          </span>
+                        ))}
+                        {newTagUser === member ? (
+                          <input
+                            type="text"
+                            value={newTagValue}
+                            onChange={(e) => setNewTagValue(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleAddTag(project.id, member); if (e.key === 'Escape') { setNewTagUser(''); setNewTagValue('') } }}
+                            onBlur={() => { if (!newTagValue) setNewTagUser('') }}
+                            placeholder="tag..."
+                            className="px-1.5 py-0.5 rounded text-[10px] outline-none w-16"
+                            style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                            autoFocus
+                          />
+                        ) : (
+                          <button
+                            onClick={() => { setNewTagUser(member); setNewTagValue('') }}
+                            className="inline-flex items-center px-1 py-0.5 rounded text-[10px] hover:opacity-80"
+                            style={{ color: 'var(--text-secondary)', border: '1px dashed var(--border)' }}
+                          >
+                            <Plus size={8} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {/* Agregar miembro */}
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={newMember}
+                      onChange={(e) => setNewMember(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleAddMember(project.id)}
+                      placeholder="Agregar miembro..."
+                      className="flex-1 px-2 py-1 rounded-lg text-xs outline-none"
+                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                    />
+                    <button
+                      onClick={() => handleAddMember(project.id)}
+                      disabled={!newMember.trim()}
+                      className="p-1 rounded-lg"
+                      style={{ color: 'var(--accent)' }}
+                    >
+                      <UserPlus size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })()}
       </div>
 
       {/* Panel principal de tareas */}
@@ -737,16 +930,28 @@ export default function TasksPage() {
                 />
               </div>
 
-              {/* Fecha limite */}
-              <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Fecha limite (opcional)</label>
-                <input
-                  type="date"
-                  value={taskDueDate}
-                  onChange={(e) => setTaskDueDate(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-                  style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
-                />
+              {/* Fecha y hora limite */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Fecha (opcional)</label>
+                  <input
+                    type="date"
+                    value={taskDueDate}
+                    onChange={(e) => setTaskDueDate(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                    style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Hora (opcional)</label>
+                  <input
+                    type="time"
+                    value={taskDueTime}
+                    onChange={(e) => setTaskDueTime(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                    style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                  />
+                </div>
               </div>
 
               {/* Checkboxes */}
@@ -811,6 +1016,61 @@ export default function TasksPage() {
         </div>
       )}
     </div>
+      )}
+
+      {/* Modal de agendar tarea */}
+      {showScheduleModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="rounded-xl p-6 w-full max-w-sm mx-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>Agendar Tarea</h3>
+              <button onClick={() => setShowScheduleModal(false)} style={{ color: 'var(--text-secondary)' }}><X size={18} /></button>
+            </div>
+            <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>
+              Completa {scheduleMissing === 'both' ? 'la fecha y hora' : scheduleMissing === 'date' ? 'la fecha' : 'la hora'} para crear la actividad en el calendario.
+            </p>
+            <div className="space-y-3">
+              {(scheduleMissing === 'both' || scheduleMissing === 'date') && (
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Fecha</label>
+                  <input
+                    type="date"
+                    value={scheduleDate}
+                    onChange={(e) => setScheduleDate(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                    style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                    autoFocus
+                  />
+                </div>
+              )}
+              {(scheduleMissing === 'both' || scheduleMissing === 'time') && (
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Hora</label>
+                  <input
+                    type="time"
+                    value={scheduleTime}
+                    onChange={(e) => setScheduleTime(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                    style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                  />
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-3 mt-5">
+              <button
+                onClick={() => setShowScheduleModal(false)}
+                className="px-4 py-2 rounded-lg text-sm font-medium"
+                style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+              >Cancelar</button>
+              <button
+                onClick={handleScheduleConfirm}
+                disabled={!scheduleDate || !scheduleTime}
+                className="px-4 py-2 rounded-lg text-sm font-medium"
+                style={{ backgroundColor: 'var(--accent)', color: '#ffffff', opacity: scheduleDate && scheduleTime ? 1 : 0.5 }}
+              >Agendar</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
@@ -887,7 +1147,7 @@ function TaskCard({
             {task.due_date && (
               <span className="flex items-center gap-1">
                 <Calendar size={12} />
-                {task.due_date}
+                {task.due_date}{task.due_time ? ` ${task.due_time}` : ''}
               </span>
             )}
             <span>

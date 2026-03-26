@@ -195,6 +195,7 @@ export interface Task {
   status: TaskStatus
   created_by: string
   due_date: string | null
+  due_time: string | null
   requires_confirmation: boolean
   insistent: boolean
   reminder_minutes: number
@@ -225,5 +226,6 @@ export interface Project {
   description: string
   created_by: string
   members: string[]
+  member_tags: Record<string, string[]>
   created_at: string
 }

@@ -30,27 +30,12 @@ pub struct HistoryEntry {
     pub played_by: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum PlaybackMode {
-    #[serde(rename = "nas")]
-    Nas,
-    #[serde(rename = "browser")]
-    Browser,
-}
-
-impl Default for PlaybackMode {
-    fn default() -> Self { Self::Nas }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MusicState {
     pub current: Option<MusicTrack>,
     pub queue: Vec<MusicTrack>,
     pub started_by: Option<String>,
     pub history: Vec<HistoryEntry>,
-    pub mode: PlaybackMode,
-    /// stream_url solo se llena en modo browser
-    pub stream_url: Option<String>,
     #[serde(default)]
     pub paused: bool,
     #[serde(default = "default_volume")]
@@ -104,11 +89,6 @@ pub struct PlayRequest {
 #[derive(Debug, Deserialize)]
 pub struct QueueRemoveRequest {
     pub index: usize,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SetModeRequest {
-    pub mode: PlaybackMode,
 }
 
 #[derive(Debug, Deserialize)]
@@ -312,38 +292,12 @@ async fn spawn_player(state: &AppState, video_id: &str) {
     }
 }
 
-/// Obtiene la URL de audio directa para modo browser
-async fn get_stream_url(video_id: &str) -> Option<String> {
-    let url = format!("https://www.youtube.com/watch?v={}", video_id);
-    let output = Command::new("yt-dlp")
-        .args(["-f", "bestaudio", "-g", "--no-warnings", "--no-playlist", &url])
-        .output()
-        .await
-        .ok()?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    stdout.lines().next().map(|s| s.to_string())
-}
-
-/// Inicia reproducción según el modo
-async fn start_playback(state: &AppState, video_id: &str, mode: &PlaybackMode) -> Option<String> {
-    match mode {
-        PlaybackMode::Nas => {
-            spawn_player(state, video_id).await;
-            None
-        }
-        PlaybackMode::Browser => {
-            kill_player(state).await;
-            get_stream_url(video_id).await
-        }
-    }
-}
-
 // Wrappers publicos para uso desde notifications
 pub fn add_to_history_pub(ms: &mut MusicState, track: &MusicTrack, played_by: &str) {
     add_to_history(ms, track, played_by);
 }
-pub async fn start_playback_pub(state: &AppState, video_id: &str, mode: &PlaybackMode) -> Option<String> {
-    start_playback(state, video_id, mode).await
+pub async fn spawn_player_pub(state: &AppState, video_id: &str) {
+    spawn_player(state, video_id).await;
 }
 pub async fn kill_player_pub(state: &AppState) {
     kill_player(state).await;
@@ -460,7 +414,6 @@ pub async fn play(
     // Nada reproduciéndose → reproducir ahora
     let mut track = fetch_track_info(&req.id).await?;
     track.added_by = Some(username.clone());
-    let mode = ms.mode.clone();
 
     add_to_history(&mut ms, &track, &username);
     ms.current = Some(track.clone());
@@ -470,14 +423,11 @@ pub async fn play(
     ms.paused = false;
     drop(ms);
 
-    let stream = start_playback(&state, &req.id, &mode).await;
-
-    let mut ms = state.music.lock().await;
-    ms.stream_url = stream;
+    spawn_player(&state, &req.id).await;
 
     state.log_activity("musica", &format!("Reproduciendo: {}", track.title), &username).await;
 
-    Ok(Json(ms.clone()))
+    Ok(Json(state.music.lock().await.clone()))
 }
 
 /// POST /api/music/next - Siguiente canción (respeta repeat mode)
@@ -497,12 +447,11 @@ async fn advance_queue(state: &AppState) {
     if ms.repeat == RepeatMode::One {
         if let Some(ref track) = ms.current {
             let track_id = track.id.clone();
-            let mode = ms.mode.clone();
             ms.paused = false;
+            ms.playback_started_at = Some(now_epoch_secs());
+            ms.elapsed = 0;
             drop(ms);
-            let stream = start_playback(state, &track_id, &mode).await;
-            let mut ms = state.music.lock().await;
-            ms.stream_url = stream;
+            spawn_player(state, &track_id).await;
             return;
         }
     }
@@ -517,7 +466,6 @@ async fn advance_queue(state: &AppState) {
     if ms.queue.is_empty() {
         ms.current = None;
         ms.started_by = None;
-        ms.stream_url = None;
         ms.paused = false;
         return;
     }
@@ -525,7 +473,6 @@ async fn advance_queue(state: &AppState) {
     let next_track = ms.queue.remove(0);
     let next_id = next_track.id.clone();
     let next_by = next_track.added_by.clone().unwrap_or_default();
-    let mode = ms.mode.clone();
 
     add_to_history(&mut ms, &next_track, &next_by);
     ms.current = Some(next_track);
@@ -535,9 +482,7 @@ async fn advance_queue(state: &AppState) {
     ms.paused = false;
     drop(ms);
 
-    let stream = start_playback(state, &next_id, &mode).await;
-    let mut ms = state.music.lock().await;
-    ms.stream_url = stream;
+    spawn_player(state, &next_id).await;
 }
 
 /// POST /api/music/queue/clear - Vaciar la cola completa
@@ -565,26 +510,21 @@ pub async fn queue_remove(
 pub async fn current(
     State(state): State<AppState>,
 ) -> Json<MusicState> {
-    let mode = state.music.lock().await.mode.clone();
-
-    // Verificar si mpv terminó (modo NAS)
+    // Verificar si mpv terminó (doble check, el monitor loop también lo hace)
     let mut player_finished = false;
-    if mode == PlaybackMode::Nas {
+    {
         let mut proc = state.music_process.lock().await;
         let finished = if let Some(ref mut child) = *proc {
             matches!(child.try_wait(), Ok(Some(_)))
         } else {
-            // No hay proceso pero hay current → se murió
             state.music.lock().await.current.is_some()
         };
         if finished {
             *proc = None;
             player_finished = true;
         }
-        drop(proc);
     }
 
-    // Auto-next si terminó la canción actual
     if player_finished {
         advance_queue(&state).await;
     }
@@ -613,10 +553,8 @@ pub async fn stop(
     kill_player(&state).await;
     let mut ms = state.music.lock().await;
     let history = ms.history.clone();
-    let mode = ms.mode.clone();
     *ms = MusicState::default();
     ms.history = history;
-    ms.mode = mode;
     Json(ms.clone())
 }
 
@@ -631,15 +569,12 @@ pub async fn pause(
 
     ms.paused = !ms.paused;
     let paused = ms.paused;
-    let mode = ms.mode.clone();
     drop(ms);
 
-    if mode == PlaybackMode::Nas {
-        if paused {
-            pause_player(&state).await;
-        } else {
-            resume_player(&state).await;
-        }
+    if paused {
+        pause_player(&state).await;
+    } else {
+        resume_player(&state).await;
     }
 
     Json(state.music.lock().await.clone())
@@ -680,7 +615,6 @@ pub async fn previous(
         added_by: Some(prev.played_by.clone()),
     };
 
-    let mode = ms.mode.clone();
     add_to_history(&mut ms, &track, &prev.played_by);
     ms.current = Some(track);
     ms.playback_started_at = Some(now_epoch_secs());
@@ -689,35 +623,9 @@ pub async fn previous(
     ms.paused = false;
     drop(ms);
 
-    let stream = start_playback(&state, &prev.id, &mode).await;
+    spawn_player(&state, &prev.id).await;
 
-    let mut ms = state.music.lock().await;
-    ms.stream_url = stream;
-    Ok(Json(ms.clone()))
-}
-
-/// POST /api/music/mode - Cambiar modo de reproducción
-pub async fn set_mode(
-    State(state): State<AppState>,
-    Json(req): Json<SetModeRequest>,
-) -> Json<MusicState> {
-    // Si hay algo reproduciéndose, reiniciar con el nuevo modo
-    let mut ms = state.music.lock().await;
-    let old_mode = ms.mode.clone();
-    ms.mode = req.mode.clone();
-
-    if let Some(ref track) = ms.current {
-        if old_mode != req.mode {
-            let track_id = track.id.clone();
-            drop(ms);
-            let stream = start_playback(&state, &track_id, &req.mode).await;
-            let mut ms = state.music.lock().await;
-            ms.stream_url = stream;
-            return Json(ms.clone());
-        }
-    }
-
-    Json(ms.clone())
+    Ok(Json(state.music.lock().await.clone()))
 }
 
 /// POST /api/music/volume - Ajustar volumen (0-100)
@@ -728,23 +636,18 @@ pub async fn set_volume(
     let vol = req.volume.min(100);
     let mut ms = state.music.lock().await;
     ms.volume = vol;
-    let mode = ms.mode.clone();
     drop(ms);
 
-    // En modo NAS, ajustar volumen del sistema
-    if mode == PlaybackMode::Nas {
-        let vol_str = format!("{}%", vol);
-        // amixer funciona sin sesion de usuario (a diferencia de pactl)
-        let amixer = Command::new("amixer")
-            .args(["sset", "Master", &vol_str])
+    // Ajustar volumen del sistema
+    let vol_str = format!("{}%", vol);
+    let amixer = Command::new("amixer")
+        .args(["sset", "Master", &vol_str])
+        .output().await;
+    if amixer.is_err() || !amixer.as_ref().unwrap().status.success() {
+        let _ = Command::new("pactl")
+            .env("XDG_RUNTIME_DIR", "/run/user/1000")
+            .args(["set-sink-volume", "@DEFAULT_SINK@", &vol_str])
             .output().await;
-        // Si amixer falla, intentar pactl con PULSE_RUNTIME_PATH
-        if amixer.is_err() || !amixer.as_ref().unwrap().status.success() {
-            let _ = Command::new("pactl")
-                .env("XDG_RUNTIME_DIR", "/run/user/1000")
-                .args(["set-sink-volume", "@DEFAULT_SINK@", &vol_str])
-                .output().await;
-        }
     }
 
     Json(state.music.lock().await.clone())
@@ -765,7 +668,6 @@ pub async fn queue_play(
     let track = ms.queue.remove(index);
     let track_id = track.id.clone();
     let played_by = track.added_by.clone().unwrap_or_default();
-    let mode = ms.mode.clone();
 
     // Devolver la canción actual a la cola al frente (si existe)
     if let Some(current) = ms.current.take() {
@@ -780,10 +682,8 @@ pub async fn queue_play(
     ms.paused = false;
     drop(ms);
 
-    let stream = start_playback(&state, &track_id, &mode).await;
-    let mut ms = state.music.lock().await;
-    ms.stream_url = stream;
-    Ok(Json(ms.clone()))
+    spawn_player(&state, &track_id).await;
+    Ok(Json(state.music.lock().await.clone()))
 }
 
 /// POST /api/music/queue/move - Mover un item de la cola
@@ -858,7 +758,7 @@ pub async fn set_video(
 
     // Si hay algo reproduciéndose, reiniciar mpv con la nueva config
     if let Some(ref track) = ms.current {
-        if ms.mode == PlaybackMode::Nas && !ms.paused {
+        if !ms.paused {
             let track_id = track.id.clone();
             drop(ms);
             kill_player(&state).await;
@@ -1473,12 +1373,9 @@ pub async fn lucky(
                 ms.elapsed = 0;
                 ms.started_by = Some(username.clone());
                 ms.paused = false;
-                let mode = ms.mode.clone();
                 drop(ms);
 
-                let stream = start_playback(&state, &entry.id, &mode).await;
-                let mut ms = state.music.lock().await;
-                ms.stream_url = stream;
+                spawn_player(&state, &entry.id).await;
 
                 state
                     .log_activity(
@@ -1488,7 +1385,7 @@ pub async fn lucky(
                     )
                     .await;
 
-                return Ok(Json(ms.clone()));
+                return Ok(Json(state.music.lock().await.clone()));
             }
         }
     }
@@ -1497,4 +1394,36 @@ pub async fn lucky(
         StatusCode::NOT_FOUND,
         "No se encontro ninguna cancion similar en YouTube".to_string(),
     ))
+}
+
+/// Background loop que monitorea si mpv terminó y avanza la cola automáticamente
+pub async fn music_monitor_loop(state: AppState) {
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+        let has_current = state.music.lock().await.current.is_some();
+        let is_paused = state.music.lock().await.paused;
+
+        if !has_current || is_paused {
+            continue;
+        }
+
+        let mut player_finished = false;
+        {
+            let mut proc = state.music_process.lock().await;
+            let finished = if let Some(ref mut child) = *proc {
+                matches!(child.try_wait(), Ok(Some(_)))
+            } else {
+                true
+            };
+            if finished {
+                *proc = None;
+                player_finished = true;
+            }
+        }
+
+        if player_finished {
+            advance_queue(&state).await;
+        }
+    }
 }

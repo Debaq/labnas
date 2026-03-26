@@ -118,7 +118,6 @@ async fn main() {
         .route("/api/music/radio", post(handlers::music::radio))
         .route("/api/music/lucky", post(handlers::music::lucky))
         .route("/api/music/lastfm-key", post(handlers::music::set_lastfm_key))
-        .route("/api/music/mode", post(handlers::music::set_mode))
         .route("/api/music/volume", post(handlers::music::set_volume))
         .route("/api/music/queue/play/{index}", post(handlers::music::queue_play))
         .route("/api/music/queue/move", post(handlers::music::queue_move))
@@ -165,6 +164,7 @@ async fn main() {
         // Tasks & Projects
         .route("/api/projects", get(handlers::tasks::list_projects))
         .route("/api/projects", post(handlers::tasks::create_project))
+        .route("/api/projects/{id}", put(handlers::tasks::update_project))
         .route("/api/projects/{id}", delete(handlers::tasks::delete_project))
         .route("/api/tasks", get(handlers::tasks::list_tasks))
         .route("/api/tasks", post(handlers::tasks::create_task))
@@ -173,6 +173,7 @@ async fn main() {
         .route("/api/tasks/{id}/confirm", post(handlers::tasks::confirm_task))
         .route("/api/tasks/{id}/reject", post(handlers::tasks::reject_task))
         .route("/api/tasks/{id}/done", post(handlers::tasks::done_task))
+        .route("/api/tasks/{id}/schedule", post(handlers::tasks::schedule_task))
         // Calendar Events
         .route("/api/events", get(handlers::tasks::list_events))
         .route("/api/events", post(handlers::tasks::create_event))
@@ -215,6 +216,8 @@ async fn main() {
     tokio::spawn(handlers::system::update_check_loop(state.clone()));
     // Asegurar acceso X para video/audio
     tokio::spawn(handlers::music::ensure_x_access());
+    // Monitor de reproducción: avanza la cola automáticamente cuando mpv termina
+    tokio::spawn(handlers::music::music_monitor_loop(state.clone()));
     // Escaneo de red al inicio + periódico cada 5 min
     tokio::spawn(handlers::network::network_scan_loop(state));
 
