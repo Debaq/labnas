@@ -288,6 +288,15 @@ pub async fn set_user_role(
     }
     let new_role = user.role.clone();
     let new_perms = user.permissions.clone();
+    let linked_tg = user.linked_telegram;
+
+    // Sincronizar rol al Telegram vinculado
+    if let Some(tg_id) = linked_tg {
+        if let Some(chat) = config.notifications.telegram_chats.iter_mut().find(|c| c.chat_id == tg_id) {
+            chat.role = new_role.clone();
+            chat.permissions = new_perms.clone();
+        }
+    }
 
     save_config(&config)
         .await

@@ -109,10 +109,32 @@ pub async fn set_chat_role(
     if let Some(perms) = req.permissions {
         chat.permissions = perms;
     }
+    let new_role = chat.role.clone();
+    let new_perms = chat.permissions.clone();
+    let linked_user = chat.linked_web_user.clone();
+
+    // Sincronizar rol al usuario web vinculado
+    if let Some(ref username) = linked_user {
+        if let Some(web_user) = config.web_users.iter_mut().find(|u| &u.username == username) {
+            web_user.role = new_role.clone();
+            web_user.permissions = new_perms.clone();
+        }
+    }
 
     save_config(&config)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    // Sincronizar sesiones web activas
+    if let Some(username) = linked_user {
+        let mut sessions = state.sessions.lock().await;
+        for session in sessions.values_mut() {
+            if session.username == username {
+                session.role = new_role.clone();
+                session.permissions = new_perms.clone();
+            }
+        }
+    }
 
     Ok(StatusCode::OK)
 }
