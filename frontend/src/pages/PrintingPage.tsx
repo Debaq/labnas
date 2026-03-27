@@ -33,7 +33,7 @@ export default function PrintingPage() {
   const [showModal, setShowModal] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [selectedPrinter, setSelectedPrinter] = useState('')
-  const [copies, setCopies] = useState(1)
+  const [copies, setCopies] = useState<number | string>(1)
   const [pages, setPages] = useState('')
 
   // Dynamic printer options
@@ -119,7 +119,7 @@ export default function PrintingPage() {
       }
 
       await printFileUpload(selectedFile, selectedPrinter, {
-        copies,
+        copies: Number(copies) || 1,
         pages: pages || undefined,
         options: changedOptions,
       })
@@ -427,7 +427,8 @@ export default function PrintingPage() {
                     min={1}
                     max={100}
                     value={copies}
-                    onChange={(e) => setCopies(parseInt(e.target.value) || 1)}
+                    onChange={(e) => setCopies(e.target.value === '' ? '' : parseInt(e.target.value) || '')}
+                    onBlur={() => setCopies(prev => { const n = Number(prev); return (!n || n < 1) ? 1 : Math.min(n, 100) })}
                     className="w-full px-3 py-2 rounded-lg text-sm outline-none"
                     style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
                   />

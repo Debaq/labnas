@@ -5,8 +5,11 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
+use tokio::io::AsyncWriteExt;
 
 use crate::state::AppState;
+
+const MPV_SOCKET: &str = "/tmp/labnas-mpv-socket";
 
 // --- Types ---
 
@@ -28,6 +31,8 @@ pub struct HistoryEntry {
     pub artist: String,
     pub thumbnail: String,
     pub played_by: String,
+    #[serde(default)]
+    pub duration: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -248,10 +253,18 @@ async fn spawn_player(state: &AppState, video_id: &str) {
     let ms = state.music.lock().await;
     let video = ms.video;
     let screen = ms.video_screen;
+    let volume = ms.volume;
     drop(ms);
 
+    // Limpiar socket anterior
+    let _ = std::fs::remove_file(MPV_SOCKET);
+
     let url = format!("https://www.youtube.com/watch?v={}", video_id);
-    let mut args: Vec<String> = vec!["--really-quiet".to_string()];
+    let mut args: Vec<String> = vec![
+        "--really-quiet".to_string(),
+        format!("--volume={}", volume),
+        format!("--input-ipc-server={}", MPV_SOCKET),
+    ];
 
     if video {
         // Asegurar acceso X antes de abrir ventana
@@ -316,6 +329,7 @@ fn add_to_history(ms: &mut MusicState, track: &MusicTrack, played_by: &str) {
         artist: track.artist.clone(),
         thumbnail: track.thumbnail.clone(),
         played_by: played_by.to_string(),
+        duration: track.duration,
     });
     if ms.history.len() > MAX_HISTORY {
         ms.history.remove(0);
@@ -401,19 +415,21 @@ pub async fn play(
         extract_username(&sessions, &headers)
     };
 
-    let mut ms = state.music.lock().await;
+    let has_current = state.music.lock().await.current.is_some();
 
-    if ms.current.is_some() {
+    // Obtener info del track SIN mantener el lock (yt-dlp puede tardar segundos)
+    let mut track = fetch_track_info(&req.id).await?;
+    track.added_by = Some(username.clone());
+
+    if has_current {
         // Ya hay algo → agregar a la cola
-        let mut track = fetch_track_info(&req.id).await?;
-        track.added_by = Some(username);
+        let mut ms = state.music.lock().await;
         ms.queue.push(track);
         return Ok(Json(ms.clone()));
     }
 
     // Nada reproduciéndose → reproducir ahora
-    let mut track = fetch_track_info(&req.id).await?;
-    track.added_by = Some(username.clone());
+    let mut ms = state.music.lock().await;
 
     add_to_history(&mut ms, &track, &username);
     ms.current = Some(track.clone());
@@ -510,18 +526,16 @@ pub async fn queue_remove(
 pub async fn current(
     State(state): State<AppState>,
 ) -> Json<MusicState> {
-    // Verificar si mpv terminó (doble check, el monitor loop también lo hace)
+    // Verificar si mpv terminó (solo si hay proceso activo, no si falta el proceso)
+    // El monitor loop se encarga del caso sin proceso para evitar race conditions con spawn_player
     let mut player_finished = false;
     {
         let mut proc = state.music_process.lock().await;
-        let finished = if let Some(ref mut child) = *proc {
-            matches!(child.try_wait(), Ok(Some(_)))
-        } else {
-            state.music.lock().await.current.is_some()
-        };
-        if finished {
-            *proc = None;
-            player_finished = true;
+        if let Some(ref mut child) = *proc {
+            if matches!(child.try_wait(), Ok(Some(_))) {
+                *proc = None;
+                player_finished = true;
+            }
         }
     }
 
@@ -553,8 +567,18 @@ pub async fn stop(
     kill_player(&state).await;
     let mut ms = state.music.lock().await;
     let history = ms.history.clone();
+    let volume = ms.volume;
+    let repeat = ms.repeat.clone();
+    let shuffle = ms.shuffle;
+    let video = ms.video;
+    let video_screen = ms.video_screen;
     *ms = MusicState::default();
     ms.history = history;
+    ms.volume = volume;
+    ms.repeat = repeat;
+    ms.shuffle = shuffle;
+    ms.video = video;
+    ms.video_screen = video_screen;
     Json(ms.clone())
 }
 
@@ -569,6 +593,16 @@ pub async fn pause(
 
     ms.paused = !ms.paused;
     let paused = ms.paused;
+
+    if paused {
+        // Guardar elapsed actual antes de pausar
+        if let Some(started) = ms.playback_started_at {
+            ms.elapsed = (now_epoch_secs() - started) as u32;
+        }
+    } else {
+        // Al despausar, ajustar playback_started_at para que elapsed siga correcto
+        ms.playback_started_at = Some(now_epoch_secs() - ms.elapsed as u64);
+    }
     drop(ms);
 
     if paused {
@@ -611,7 +645,7 @@ pub async fn previous(
         title: prev.title,
         artist: prev.artist,
         thumbnail: prev.thumbnail,
-        duration: 0,
+        duration: prev.duration,
         added_by: Some(prev.played_by.clone()),
     };
 
@@ -638,16 +672,10 @@ pub async fn set_volume(
     ms.volume = vol;
     drop(ms);
 
-    // Ajustar volumen del sistema
-    let vol_str = format!("{}%", vol);
-    let amixer = Command::new("amixer")
-        .args(["sset", "Master", &vol_str])
-        .output().await;
-    if amixer.is_err() || !amixer.as_ref().unwrap().status.success() {
-        let _ = Command::new("pactl")
-            .env("XDG_RUNTIME_DIR", "/run/user/1000")
-            .args(["set-sink-volume", "@DEFAULT_SINK@", &vol_str])
-            .output().await;
+    // Ajustar volumen de mpv via IPC socket
+    if let Ok(mut sock) = tokio::net::UnixStream::connect(MPV_SOCKET).await {
+        let cmd = format!("{{ \"command\": [\"set_property\", \"volume\", {}] }}\n", vol);
+        let _ = sock.write_all(cmd.as_bytes()).await;
     }
 
     Json(state.music.lock().await.clone())
@@ -761,7 +789,7 @@ pub async fn set_video(
         if !ms.paused {
             let track_id = track.id.clone();
             drop(ms);
-            kill_player(&state).await;
+            // spawn_player ya hace kill_player internamente
             spawn_player(&state, &track_id).await;
             return Json(state.music.lock().await.clone());
         }
@@ -1401,8 +1429,10 @@ pub async fn music_monitor_loop(state: AppState) {
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
-        let has_current = state.music.lock().await.current.is_some();
-        let is_paused = state.music.lock().await.paused;
+        let (has_current, is_paused, started_at) = {
+            let ms = state.music.lock().await;
+            (ms.current.is_some(), ms.paused, ms.playback_started_at)
+        };
 
         if !has_current || is_paused {
             continue;
@@ -1411,14 +1441,19 @@ pub async fn music_monitor_loop(state: AppState) {
         let mut player_finished = false;
         {
             let mut proc = state.music_process.lock().await;
-            let finished = if let Some(ref mut child) = *proc {
-                matches!(child.try_wait(), Ok(Some(_)))
+            if let Some(ref mut child) = *proc {
+                if matches!(child.try_wait(), Ok(Some(_))) {
+                    *proc = None;
+                    player_finished = true;
+                }
             } else {
-                true
-            };
-            if finished {
-                *proc = None;
-                player_finished = true;
+                // No hay proceso pero si hay current: solo tratar como terminado
+                // si pasaron mas de 10s desde el inicio (evita race con spawn_player)
+                if let Some(started) = started_at {
+                    if now_epoch_secs() - started > 10 {
+                        player_finished = true;
+                    }
+                }
             }
         }
 

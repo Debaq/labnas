@@ -100,7 +100,7 @@ export default function FilesPage() {
   const [cupsPrinters, setCupsPrinters] = useState<CupsPrinter[]>([])
   const [printModal, setPrintModal] = useState<{ path: string; name: string } | null>(null)
   const [printPrinter, setPrintPrinter] = useState('')
-  const [printCopies, setPrintCopies] = useState(1)
+  const [printCopies, setPrintCopies] = useState<number | string>(1)
   const [printPages, setPrintPages] = useState('')
   const [printingFile, setPrintingFile] = useState(false)
   const [shareUrl, setShareUrl] = useState<string | null>(null)
@@ -323,7 +323,7 @@ export default function FilesPage() {
       await printFilePath({
         path: printModal.path,
         printer: printPrinter,
-        copies: printCopies,
+        copies: Number(printCopies) || 1,
         pages: printPages || undefined,
         options: changedOptions,
       })
@@ -739,7 +739,8 @@ export default function FilesPage() {
                     min={1}
                     max={100}
                     value={printCopies}
-                    onChange={(e) => setPrintCopies(parseInt(e.target.value) || 1)}
+                    onChange={(e) => setPrintCopies(e.target.value === '' ? '' : parseInt(e.target.value) || '')}
+                    onBlur={() => setPrintCopies(prev => { const n = Number(prev); return (!n || n < 1) ? 1 : Math.min(n, 100) })}
                     className="w-full px-3 py-2 rounded-lg text-sm outline-none"
                     style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
                   />

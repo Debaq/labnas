@@ -397,7 +397,10 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
 
     let role = chat.role.clone();
     let chat_name = chat.name.clone();
-    let has_terminal = chat.role == UserRole::Admin || chat.permissions.terminal;
+    let is_admin = chat.role == UserRole::Admin;
+    let is_operator = chat.role == UserRole::Operador;
+    let has_terminal = is_admin || chat.permissions.terminal;
+    let has_printer3d = is_admin || is_operator;
     drop(config);
 
     let response = match text {
@@ -483,9 +486,18 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
             return; // ya envió la foto directamente
         }
         s if s.starts_with("/temp") => handle_printer_temps(state).await,
-        s if s.starts_with("/imprimir ") => handle_printer_control(state, &chat_name, s, "start").await,
-        s if s.starts_with("/pausar") => handle_printer_control(state, &chat_name, s, "pause").await,
-        s if s.starts_with("/cancelar3d") => handle_printer_control(state, &chat_name, s, "cancel").await,
+        s if s.starts_with("/imprimir ") => {
+            if !has_printer3d { "Sin permisos. Se requiere rol Operador o Admin.".to_string() }
+            else { handle_printer_control(state, &chat_name, s, "start").await }
+        }
+        s if s.starts_with("/pausar") => {
+            if !has_printer3d { "Sin permisos. Se requiere rol Operador o Admin.".to_string() }
+            else { handle_printer_control(state, &chat_name, s, "pause").await }
+        }
+        s if s.starts_with("/cancelar3d") => {
+            if !has_printer3d { "Sin permisos. Se requiere rol Operador o Admin.".to_string() }
+            else { handle_printer_control(state, &chat_name, s, "cancel").await }
+        }
         s if s.starts_with("/impresoras") => build_printers_message(state).await,
         s if s.starts_with("/mirol") => {
             let emoji = match role {
@@ -502,7 +514,7 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
             };
             format!("{} Tu rol: *{}*", emoji, role_name)
         }
-        s if s.starts_with("/ayuda") | s.starts_with("/help") => build_help_message(&role),
+        s if s.starts_with("/ayuda") | s.starts_with("/help") => build_help_message(&role, has_terminal, has_printer3d),
         _ => {
             // Check if user has active terminal session - pipe input
             if has_terminal {
@@ -687,7 +699,7 @@ async fn handle_cmd(state: &AppState, chat_id: i64, user: &str, text: &str) -> S
 
 async fn collect_output(
     mut rx: tokio::sync::mpsc::Receiver<String>,
-    child: tokio::process::Child,
+    mut child: tokio::process::Child,
     stdin: tokio::process::ChildStdin,
     state: &AppState,
     chat_id: i64,
@@ -697,18 +709,22 @@ async fn collect_output(
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
 
     loop {
-        let timeout = tokio::time::timeout_at(deadline, rx.recv()).await;
+        // Si el proceso ya termino, usar un timeout corto para drenar output restante
+        let wait_until = if child.try_wait().map(|s| s.is_some()).unwrap_or(false) {
+            std::cmp::min(deadline, tokio::time::Instant::now() + Duration::from_millis(100))
+        } else {
+            deadline
+        };
+        let timeout = tokio::time::timeout_at(wait_until, rx.recv()).await;
         match timeout {
             Ok(Some(line)) => lines.push(line),
-            _ => break,
+            Ok(None) => break,  // Canal cerrado, proceso termino
+            Err(_) => break,    // Timeout
         }
     }
 
     // Check if process is still running
     let mut terms = state.tg_terminals.lock().await;
-
-    // Try to check if child exited
-    let mut child = child;
     let still_alive = child.try_wait().map(|s| s.is_none()).unwrap_or(false);
 
     let mut msg = format!("$ `{}`\n", cmd);
@@ -1801,20 +1817,26 @@ async fn send_printer_photo(state: &AppState, token: &str, chat_id: i64, printer
         .await;
 }
 
-fn build_help_message(role: &UserRole) -> String {
+fn build_help_message(role: &UserRole, has_terminal: bool, has_printer3d: bool) -> String {
     let mut msg = String::from("*LabNAS - Comandos*\n\n");
     msg.push_str("*Sistema*\n");
     msg.push_str("/estado /discos /ram /cpu\n");
     msg.push_str("/uptime /red /impresoras\n");
     msg.push_str("/actividad /horario /mirol\n");
     msg.push_str("/vincular CODIGO - Vincular con web\n");
-    msg.push_str("/cmd COMANDO - Ejecutar en terminal\n\n");
+    if has_terminal {
+        msg.push_str("/cmd COMANDO - Ejecutar en terminal\n");
+    }
+    msg.push('\n');
     msg.push_str("*Impresoras 3D*\n");
     msg.push_str("/temp - Temperaturas\n");
     msg.push_str("/camara - Foto de la impresora\n");
-    msg.push_str("/imprimir NOMBRE - Iniciar impresion\n");
-    msg.push_str("/pausar NOMBRE - Pausar\n");
-    msg.push_str("/cancelar3d NOMBRE - Cancelar\n\n");
+    if has_printer3d {
+        msg.push_str("/imprimir NOMBRE - Iniciar impresion\n");
+        msg.push_str("/pausar NOMBRE - Pausar\n");
+        msg.push_str("/cancelar3d NOMBRE - Cancelar\n");
+    }
+    msg.push('\n');
     msg.push_str("*Correo*\n");
     msg.push_str("/correos - Resumen de bandeja\n");
     msg.push_str("/leer UID - Detalle de un correo\n");

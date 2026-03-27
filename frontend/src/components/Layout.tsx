@@ -5,6 +5,7 @@ import { useTheme } from '../themes/ThemeContext'
 import { useAuth } from '../auth/AuthContext'
 import { shutdownServer, getBranding, fetchHealth, checkUpdate } from '../api'
 import MusicPanel from './MusicPanel'
+import PersistentTerminal from './PersistentTerminal'
 
 const pageTitles: Record<string, string> = {
   '/dashboard': 'Dashboard',
@@ -326,8 +327,11 @@ export default function Layout() {
         )}
 
         {/* Content */}
-        <main className="flex-1 overflow-auto p-8" style={{ backgroundColor: 'var(--bg-primary)' }}>
-          <Outlet />
+        <main className="flex-1 overflow-auto relative" style={{ backgroundColor: 'var(--bg-primary)' }}>
+          <div className={location.pathname === '/terminal' ? 'hidden' : 'p-8 h-full overflow-auto'}>
+            <Outlet />
+          </div>
+          {can('terminal') && <PersistentTerminal />}
         </main>
       </div>
 

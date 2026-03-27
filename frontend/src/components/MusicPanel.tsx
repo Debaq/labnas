@@ -92,15 +92,12 @@ export default function MusicPanel() {
     try { setMusicState(safeMusicState(await playMusic(id))) } catch {} finally { setLoadingTrack(false) }
   }
 
-  async function handlePause() {
-    setMusicState(safeMusicState(await pauseMusic()))
-  }
-
+  async function handlePause() { try { setMusicState(safeMusicState(await pauseMusic())) } catch {} }
   async function handlePrevious() { try { setMusicState(safeMusicState(await previousMusic())) } catch {} }
-  async function handleNext() { setMusicState(safeMusicState(await nextMusic())) }
-  async function handleStop() { setMusicState(safeMusicState(await stopMusic())) }
-  async function handleShuffle() { setMusicState(safeMusicState(await toggleShuffle())) }
-  async function handleRepeat() { setMusicState(safeMusicState(await toggleRepeat())) }
+  async function handleNext() { try { setMusicState(safeMusicState(await nextMusic())) } catch {} }
+  async function handleStop() { try { setMusicState(safeMusicState(await stopMusic())) } catch {} }
+  async function handleShuffle() { try { setMusicState(safeMusicState(await toggleShuffle())) } catch {} }
+  async function handleRepeat() { try { setMusicState(safeMusicState(await toggleRepeat())) } catch {} }
   async function handlePlayFromQueue(i: number) { setMusicState(safeMusicState(await playFromQueue(i))) }
   async function handleMoveInQueue(from: number, to: number) { setMusicState(safeMusicState(await moveInQueue(from, to))) }
   async function handleRemoveFromQueue(i: number) { setMusicState(safeMusicState(await removeFromQueue(i))) }
@@ -126,7 +123,13 @@ export default function MusicPanel() {
   }
   async function handleRecommend() {
     setLoadingMix(true)
-    try { setMusicState(safeMusicState(await recommendMusic())) } catch {} finally { setLoadingMix(false) }
+    setRadioError(null)
+    try {
+      setMusicState(safeMusicState(await recommendMusic()))
+    } catch (e: any) {
+      setRadioError(e.message || 'Error generando mix')
+      setTimeout(() => setRadioError(null), 5000)
+    } finally { setLoadingMix(false) }
   }
 
   async function handleRadio(artist: string, track: string) {
