@@ -41,6 +41,14 @@ export default function PrintingPage() {
   const [optionValues, setOptionValues] = useState<Record<string, string>>({})
   const [optionsLoading, setOptionsLoading] = useState(false)
 
+  // Standard print options
+  const [orientation, setOrientation] = useState('')
+  const [pageSet, setPageSet] = useState('')
+  const [numberUp, setNumberUp] = useState('1')
+  const [collate, setCollate] = useState(true)
+  const [outputOrder, setOutputOrder] = useState('')
+  const [fitToPage, setFitToPage] = useState(false)
+
   // Drag & drop
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -92,6 +100,12 @@ export default function PrintingPage() {
     setSelectedFile(file)
     setCopies(1)
     setPages('')
+    setOrientation('')
+    setPageSet('')
+    setNumberUp('1')
+    setCollate(true)
+    setOutputOrder('')
+    setFitToPage(false)
     setShowModal(true)
     if (selectedPrinter) {
       loadPrinterOptions(selectedPrinter)
@@ -117,6 +131,13 @@ export default function PrintingPage() {
           changedOptions[opt.key] = current
         }
       }
+      // Standard options
+      if (orientation) changedOptions['orientation-requested'] = orientation
+      if (pageSet) changedOptions['page-set'] = pageSet
+      if (numberUp !== '1') changedOptions['number-up'] = numberUp
+      if (Number(copies) > 1 && !collate) changedOptions['collate'] = 'false'
+      if (outputOrder) changedOptions['outputorder'] = outputOrder
+      if (fitToPage) changedOptions['fit-to-page'] = 'true'
 
       await printFileUpload(selectedFile, selectedPrinter, {
         copies: Number(copies) || 1,
@@ -183,6 +204,9 @@ export default function PrintingPage() {
     if (state === 'disabled') return 'Deshabilitada'
     return state
   }
+
+  const standardOptionKeys = ['orientation-requested', 'page-set', 'number-up', 'collate', 'outputorder', 'fit-to-page']
+  const filteredPrinterOptions = printerOptions.filter(opt => !standardOptionKeys.includes(opt.key))
 
   return (
     <div className="space-y-6">
@@ -446,13 +470,101 @@ export default function PrintingPage() {
                 </div>
               </div>
 
+              {/* Standard print options */}
+              <div>
+                <div className="flex items-center gap-2 mb-3 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+                  <Settings2 size={14} style={{ color: 'var(--accent)' }} />
+                  <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+                    Opciones de pagina
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Orientacion</label>
+                    <select
+                      value={orientation}
+                      onChange={(e) => setOrientation(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
+                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                    >
+                      <option value="">Automatica</option>
+                      <option value="3">Vertical (retrato)</option>
+                      <option value="4">Horizontal (paisaje)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Conjunto de paginas</label>
+                    <select
+                      value={pageSet}
+                      onChange={(e) => setPageSet(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
+                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                    >
+                      <option value="">Todas</option>
+                      <option value="odd">Solo impares</option>
+                      <option value="even">Solo pares</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Paginas por hoja</label>
+                    <select
+                      value={numberUp}
+                      onChange={(e) => setNumberUp(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
+                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                    >
+                      <option value="1">1</option>
+                      <option value="2">2</option>
+                      <option value="4">4</option>
+                      <option value="6">6</option>
+                      <option value="9">9</option>
+                      <option value="16">16</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Orden de paginas</label>
+                    <select
+                      value={outputOrder}
+                      onChange={(e) => setOutputOrder(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
+                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                    >
+                      <option value="">Normal</option>
+                      <option value="reverse">Inverso (ultima primero)</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="flex items-center gap-6 mt-3">
+                  {Number(copies) > 1 && (
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={collate}
+                        onChange={(e) => setCollate(e.target.checked)}
+                        style={{ accentColor: 'var(--accent)' }}
+                      />
+                      <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Intercalar copias</span>
+                    </label>
+                  )}
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={fitToPage}
+                      onChange={(e) => setFitToPage(e.target.checked)}
+                      style={{ accentColor: 'var(--accent)' }}
+                    />
+                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Ajustar a pagina</span>
+                  </label>
+                </div>
+              </div>
+
               {/* Dynamic printer options */}
               {optionsLoading ? (
                 <div className="flex items-center justify-center py-4">
                   <Loader2 size={18} className="animate-spin" style={{ color: 'var(--accent)' }} />
                   <span className="text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>Cargando opciones...</span>
                 </div>
-              ) : printerOptions.length > 0 && (
+              ) : filteredPrinterOptions.length > 0 && (
                 <div>
                   <div className="flex items-center gap-2 mb-3 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
                     <Settings2 size={14} style={{ color: 'var(--accent)' }} />
@@ -461,7 +573,7 @@ export default function PrintingPage() {
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    {printerOptions.map((opt) => (
+                    {filteredPrinterOptions.map((opt) => (
                       <div key={opt.key}>
                         <label className="block text-xs font-medium mb-1 truncate" title={opt.display_name} style={{ color: 'var(--text-secondary)' }}>
                           {opt.display_name}

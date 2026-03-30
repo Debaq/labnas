@@ -365,6 +365,9 @@ async fn run_lp_command(
         }
     }
 
+    // Boolean CUPS options (passed as -o key, not -o key=value)
+    const BOOLEAN_LP_OPTIONS: &[&str] = &["fit-to-page"];
+
     // All printer-specific options
     for (key, value) in options {
         // Validate key and value: only safe characters
@@ -372,9 +375,16 @@ async fn run_lp_command(
             s.chars()
                 .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
         };
-        if safe(key) && safe(value) {
-            args.push("-o".to_string());
-            args.push(format!("{}={}", key, value));
+        if safe(key) {
+            if BOOLEAN_LP_OPTIONS.contains(&key.as_str()) {
+                if value == "true" {
+                    args.push("-o".to_string());
+                    args.push(key.clone());
+                }
+            } else if safe(value) {
+                args.push("-o".to_string());
+                args.push(format!("{}={}", key, value));
+            }
         }
     }
 
