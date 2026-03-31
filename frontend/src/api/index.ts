@@ -766,7 +766,7 @@ export async function fetchEvents(): Promise<CalendarEvent[]> {
 export async function createEvent(data: {
   title: string; date: string; time: string;
   description?: string; invitees?: string[]; remind_before_min?: number;
-  recurrence?: string; recurrence_end?: string | null
+  recurrence?: string; recurrence_end?: string | null; category?: string
 }): Promise<CalendarEvent> {
   const res = await api('/api/events', {
     method: 'POST',
@@ -800,6 +800,29 @@ export async function declineEvent(id: string, user: string): Promise<CalendarEv
   })
   if (!res.ok) throw new Error('Error al rechazar evento')
   return res.json()
+}
+
+// --- Event Categories ---
+
+export async function fetchCategories(): Promise<import('../types').EventCategory[]> {
+  const res = await api('/api/events/categories')
+  if (!res.ok) throw new Error('Error al obtener categorias')
+  return res.json()
+}
+
+export async function createCategory(name: string, color: string): Promise<import('../types').EventCategory> {
+  const res = await api('/api/events/categories', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, color }),
+  })
+  if (!res.ok) throw new Error('Error al crear categoria')
+  return res.json()
+}
+
+export async function deleteCategory(id: string): Promise<void> {
+  const res = await api(`/api/events/categories/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar categoria')
 }
 
 // --- File Sharing ---

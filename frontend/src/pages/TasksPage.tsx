@@ -36,8 +36,11 @@ import {
   fetchUsernames,
   scheduleTask,
   updateProject,
+  fetchCategories,
+  createCategory,
+  deleteCategory,
 } from '../api'
-import type { Task, Project, TaskStatus, CalendarEvent } from '../types'
+import type { Task, Project, TaskStatus, CalendarEvent, EventCategory } from '../types'
 import { useAuth } from '../auth/AuthContext'
 
 const STATUS_CONFIG: Record<TaskStatus, { label: string; color: string; alpha: string }> = {
@@ -74,6 +77,11 @@ export default function TasksPage() {
   const [calendarMonth, setCalendarMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1) })
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
   const [calendarView, setCalendarView] = useState<'month' | 'week'>('month')
+  const [categories, setCategories] = useState<EventCategory[]>([])
+  const [eventCategory, setEventCategory] = useState('')
+  const [showCategoryManager, setShowCategoryManager] = useState(false)
+  const [newCatName, setNewCatName] = useState('')
+  const [newCatColor, setNewCatColor] = useState('#7aa2f7')
 
   // Formulario de nueva tarea
   const [taskTitle, setTaskTitle] = useState('')
@@ -102,11 +110,12 @@ export default function TasksPage() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [p, t, e, u] = await Promise.all([fetchProjects(), fetchTasks(), fetchEvents(), fetchUsernames().catch(() => [] as string[])])
+      const [p, t, e, u, cats] = await Promise.all([fetchProjects(), fetchTasks(), fetchEvents(), fetchUsernames().catch(() => [] as string[]), fetchCategories().catch(() => [] as EventCategory[])])
       setProjects(p)
       setTasks(t)
       setEvents(e)
       setAllUsers(u)
+      setCategories(cats)
     } catch {
       // silenciar
     } finally {
@@ -386,6 +395,10 @@ export default function TasksPage() {
           }
         }
 
+        // Category color helper
+        const catMap = new Map(categories.map(c => [c.id, c]))
+        const getCatColor = (ev: CalendarEvent) => ev.category ? catMap.get(ev.category)?.color : undefined
+
         const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
         const dayNames = ['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom']
 
@@ -416,7 +429,7 @@ export default function TasksPage() {
               onClick={() => {
                 setShowEventModal(true); setEventTitle(''); setEventTime('')
                 setEventDate(selectedDay || todayStr)
-                setEventInvitees([]); setInviteeSearch(''); setEventRemind(15); setEventRecurrence(''); setEventRecurrenceEnd('')
+                setEventInvitees([]); setInviteeSearch(''); setEventRemind(15); setEventRecurrence(''); setEventRecurrenceEnd(''); setEventCategory('')
               }}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
               style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
@@ -472,11 +485,21 @@ export default function TasksPage() {
                       </div>
                       {/* Event dots */}
                       <div className="space-y-0.5">
-                        {dayEvents.slice(0, 3).map(ev => (
-                          <div key={ev.id} className="text-[9px] leading-tight truncate px-1 py-0.5 rounded" style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}>
-                            {ev.time.slice(0, 5)} {ev.title}
-                          </div>
-                        ))}
+                        {dayEvents.slice(0, 3).map(ev => {
+                          const catColor = getCatColor(ev)
+                          return (
+                            <div key={ev.id} className="text-[9px] leading-tight truncate py-0.5 rounded"
+                              style={{
+                                backgroundColor: catColor ? catColor + '20' : 'var(--accent-alpha)',
+                                color: catColor || 'var(--accent)',
+                                borderLeft: `3px solid ${catColor || 'var(--accent)'}`,
+                                paddingLeft: '4px',
+                                paddingRight: '4px',
+                              }}>
+                              {ev.time.slice(0, 5)} {ev.title}
+                            </div>
+                          )
+                        })}
                         {dayTasks.slice(0, Math.max(0, 3 - dayEvents.length)).map(t => (
                           <div key={t.id} className="text-[9px] leading-tight truncate px-1 py-0.5 rounded" style={{ backgroundColor: 'var(--warning)' + '20', color: 'var(--warning)' }}>
                             {t.due_time ? t.due_time.slice(0, 5) + ' ' : ''}{t.title}
@@ -514,8 +537,10 @@ export default function TasksPage() {
 
                   {selectedEvents.map(ev => {
                     const isPast = `${ev.date} ${ev.time}` < new Date().toISOString().slice(0, 16).replace('T', ' ')
+                    const catColor = getCatColor(ev)
+                    const cat = ev.category ? catMap.get(ev.category) : undefined
                     return (
-                      <div key={ev.id} className="rounded-xl p-4" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)', opacity: isPast ? 0.5 : 1 }}>
+                      <div key={ev.id} className="rounded-xl p-4" style={{ backgroundColor: 'var(--card-bg)', borderLeft: `4px solid ${catColor || 'var(--accent)'}`, borderTop: '1px solid var(--card-border)', borderRight: '1px solid var(--card-border)', borderBottom: '1px solid var(--card-border)', opacity: isPast ? 0.5 : 1 }}>
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
@@ -524,6 +549,11 @@ export default function TasksPage() {
                             </div>
                             <p className="text-[10px] mt-1" style={{ color: 'var(--text-secondary)' }}>
                               {ev.created_by}
+                              {cat && (
+                                <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-medium" style={{ backgroundColor: cat.color + '20', color: cat.color }}>
+                                  {cat.name}
+                                </span>
+                              )}
                               {ev.recurrence && ev.recurrence !== 'none' && (
                                 <span className="ml-1.5 px-1 py-0.5 rounded text-[9px]" style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}>
                                   {ev.recurrence === 'daily' ? 'Diario' : ev.recurrence === 'weekly' ? 'Semanal' : 'Mensual'}
@@ -659,6 +689,68 @@ export default function TasksPage() {
                       </div>
                     )}
                   </div>
+                  {/* Categoria */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>Categoria</label>
+                      <button type="button" onClick={() => setShowCategoryManager(!showCategoryManager)}
+                        className="text-[10px]" style={{ color: 'var(--accent)' }}>
+                        {showCategoryManager ? 'Cerrar' : 'Gestionar'}
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button type="button" onClick={() => setEventCategory('')}
+                        className="px-2.5 py-1 rounded-full text-xs font-medium transition-all"
+                        style={{
+                          backgroundColor: !eventCategory ? 'var(--text-secondary)' : 'var(--bg-tertiary)',
+                          color: !eventCategory ? '#fff' : 'var(--text-secondary)',
+                        }}>
+                        Sin categoria
+                      </button>
+                      {categories.map(cat => (
+                        <button type="button" key={cat.id} onClick={() => setEventCategory(cat.id)}
+                          className="px-2.5 py-1 rounded-full text-xs font-medium transition-all"
+                          style={{
+                            backgroundColor: eventCategory === cat.id ? cat.color : cat.color + '20',
+                            color: eventCategory === cat.id ? '#fff' : cat.color,
+                            border: eventCategory === cat.id ? `2px solid ${cat.color}` : '2px solid transparent',
+                          }}>
+                          {cat.name}
+                        </button>
+                      ))}
+                    </div>
+                    {/* Category manager inline */}
+                    {showCategoryManager && (
+                      <div className="mt-2 p-3 rounded-lg space-y-2" style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
+                        <div className="flex gap-2">
+                          <input value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="Nueva categoria"
+                            className="flex-1 px-2 py-1 rounded-lg text-xs outline-none"
+                            style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+                          <input type="color" value={newCatColor} onChange={e => setNewCatColor(e.target.value)}
+                            className="w-8 h-7 rounded cursor-pointer" style={{ border: '1px solid var(--border)' }} />
+                          <button type="button" onClick={async () => {
+                            if (!newCatName.trim()) return
+                            await createCategory(newCatName, newCatColor)
+                            setNewCatName(''); await loadData()
+                          }} className="px-2 py-1 rounded-lg text-xs font-medium"
+                            style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
+                            <Plus size={12} />
+                          </button>
+                        </div>
+                        {categories.map(cat => (
+                          <div key={cat.id} className="flex items-center justify-between text-xs py-1">
+                            <div className="flex items-center gap-2">
+                              <span className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.color }} />
+                              <span style={{ color: 'var(--text-primary)' }}>{cat.name}</span>
+                            </div>
+                            <button type="button" onClick={async () => { await deleteCategory(cat.id); await loadData() }}
+                              style={{ color: 'var(--danger)' }}><Trash2 size={12} /></button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Avisar (min antes)</label>
@@ -693,7 +785,7 @@ export default function TasksPage() {
                   <button
                     onClick={async () => {
                       if (!eventTitle.trim() || !eventDate || !eventTime) return
-                      await createEvent({ title: eventTitle, date: eventDate, time: eventTime, invitees: eventInvitees, remind_before_min: eventRemind, recurrence: eventRecurrence || undefined, recurrence_end: eventRecurrenceEnd || null })
+                      await createEvent({ title: eventTitle, date: eventDate, time: eventTime, invitees: eventInvitees, remind_before_min: eventRemind, recurrence: eventRecurrence || undefined, recurrence_end: eventRecurrenceEnd || null, category: eventCategory || undefined })
                       setShowEventModal(false)
                       await loadData()
                     }}

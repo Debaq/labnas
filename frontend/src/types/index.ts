@@ -239,6 +239,13 @@ export interface CalendarEvent {
   recurrence: string
   recurrence_end: string | null
   created_at: string
+  category: string | null
+}
+
+export interface EventCategory {
+  id: string
+  name: string
+  color: string
 }
 
 export interface Project {

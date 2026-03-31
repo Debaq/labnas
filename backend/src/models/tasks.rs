@@ -90,10 +90,19 @@ pub struct CalendarEvent {
     #[serde(default)]
     pub recurrence_end: Option<String>,
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub category: Option<String>, // ID de EventCategory
 }
 
 fn default_event_reminder() -> u32 {
     15
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventCategory {
+    pub id: String,
+    pub name: String,
+    pub color: String, // hex color
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -104,4 +113,6 @@ pub struct TasksConfig {
     pub tasks: Vec<Task>,
     #[serde(default)]
     pub events: Vec<CalendarEvent>,
+    #[serde(default)]
+    pub event_categories: Vec<EventCategory>,
 }

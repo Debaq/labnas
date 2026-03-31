@@ -918,6 +918,7 @@ async fn handle_event_command(state: &AppState, creator: &str, text: &str) -> St
         recurrence: String::new(),
         recurrence_end: None,
         created_at: chrono::Utc::now(),
+        category: None,
     };
     let id = event.id.clone();
 

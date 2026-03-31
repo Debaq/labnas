@@ -185,6 +185,9 @@ async fn main() {
         .route("/api/events/{id}", delete(handlers::tasks::delete_event))
         .route("/api/events/{id}/accept", post(handlers::tasks::accept_event))
         .route("/api/events/{id}/decline", post(handlers::tasks::decline_event))
+        .route("/api/events/categories", get(handlers::tasks::list_categories))
+        .route("/api/events/categories", post(handlers::tasks::create_category))
+        .route("/api/events/categories/{id}", delete(handlers::tasks::delete_category))
         // File sharing
         .route("/api/shares", get(handlers::extras::list_shares))
         .route("/api/shares", post(handlers::extras::create_share))

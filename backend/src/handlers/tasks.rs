@@ -514,6 +514,7 @@ pub async fn confirm_task(
             recurrence: String::new(),
             recurrence_end: None,
             created_at: Utc::now(),
+            category: None,
         };
         config.tasks.events.push(event);
         created_event = true;
@@ -731,6 +732,7 @@ pub async fn schedule_task(
         recurrence: String::new(),
         recurrence_end: None,
         created_at: Utc::now(),
+        category: None,
     };
 
     config.tasks.events.push(event.clone());
@@ -764,6 +766,8 @@ pub struct CreateEventRequest {
     pub recurrence: String,
     #[serde(default)]
     pub recurrence_end: Option<String>,
+    #[serde(default)]
+    pub category: Option<String>,
 }
 
 fn default_event_rem() -> u32 { 15 }
@@ -801,6 +805,7 @@ pub async fn create_event(
         recurrence: req.recurrence,
         recurrence_end: req.recurrence_end,
         created_at: Utc::now(),
+        category: req.category,
     };
     let mut config = state.config.lock().await;
     config.tasks.events.push(event.clone());
@@ -890,4 +895,56 @@ pub async fn decline_event(
     let result = event.clone();
     save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(result))
+}
+
+// ── Event Categories ──
+
+use crate::models::tasks::EventCategory;
+
+pub async fn list_categories(State(state): State<AppState>) -> Json<Vec<EventCategory>> {
+    let config = state.config.lock().await;
+    Json(config.tasks.event_categories.clone())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateCategoryRequest {
+    pub name: String,
+    pub color: String,
+}
+
+pub async fn create_category(
+    State(state): State<AppState>,
+    Json(req): Json<CreateCategoryRequest>,
+) -> Result<Json<EventCategory>, (StatusCode, String)> {
+    if req.name.trim().is_empty() || req.color.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Nombre y color requeridos".to_string()));
+    }
+    let cat = EventCategory {
+        id: uuid::Uuid::new_v4().to_string()[..6].to_string(),
+        name: req.name.trim().to_string(),
+        color: req.color.trim().to_string(),
+    };
+    let mut config = state.config.lock().await;
+    config.tasks.event_categories.push(cat.clone());
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(cat))
+}
+
+pub async fn delete_category(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let mut config = state.config.lock().await;
+    let before = config.tasks.event_categories.len();
+    config.tasks.event_categories.retain(|c| c.id != id);
+    if config.tasks.event_categories.len() == before {
+        return Err((StatusCode::NOT_FOUND, "Categoria no encontrada".to_string()));
+    }
+    for event in &mut config.tasks.events {
+        if event.category.as_deref() == Some(&id) {
+            event.category = None;
+        }
+    }
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(StatusCode::NO_CONTENT)
 }

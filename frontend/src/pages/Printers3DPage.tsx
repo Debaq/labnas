@@ -27,7 +27,6 @@ import {
   Flame,
   ArrowUp,
   ArrowDown,
-  ArrowLeft,
   ArrowRight,
   ExternalLink,
   Calculator,
@@ -800,8 +799,8 @@ export default function Printers3DPage() {
             const isPaused = job && job.state.toLowerCase().includes('paus')
 
             return (
+              <>
               <div
-                key={printer.id}
                 className="rounded-xl transition-all duration-200"
                 style={{
                   backgroundColor: 'var(--card-bg)',
@@ -1324,17 +1323,16 @@ export default function Printers3DPage() {
                   </div>
                 )}
               </div>
-            </div>
 
             {/* Cost Calculator */}
             <div className="mt-6">
               <CostCalculator />
             </div>
-          </div>
+          </>
         )
       })()}
-      </div> {/* end right panel */}
-    </div> {/* end flex layout */}
+      </div>
+    </div>
 
       {/* Add Modal */}
       {showAddModal && (
