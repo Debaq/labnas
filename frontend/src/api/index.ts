@@ -346,6 +346,12 @@ export async function checkUpdate(): Promise<{ current_version: string; latest_v
   return res.json()
 }
 
+export async function forceCheckUpdate(): Promise<{ current_version: string; latest_version: string | null; update_available: boolean }> {
+  const res = await api('/api/system/update/force-check', { method: 'POST' })
+  if (!res.ok) throw new Error('Error verificando actualizacion')
+  return res.json()
+}
+
 export async function doUpdate(): Promise<string> {
   const res = await api('/api/system/update/do', { method: 'POST' })
   return res.text()

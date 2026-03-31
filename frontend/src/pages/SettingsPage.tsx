@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine, Pencil, Music, HelpCircle, X } from 'lucide-react'
+import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine, Pencil, Music, HelpCircle, X, RefreshCw } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, getThemeNames, type ThemeName } from '../themes/themes'
-import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, doUpdate, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, updateService, setLastfmKey, fetchHealth, getMpvArgs, setMpvArgs as saveMpvArgs, type LabBranding, type LabService } from '../api'
+import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, forceCheckUpdate, doUpdate, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, updateService, setLastfmKey, fetchHealth, getMpvArgs, setMpvArgs as saveMpvArgs, type LabBranding, type LabService } from '../api'
 import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig, UserRole, UserPermissions } from '../types'
 
 function formatBytes(bytes: number): string {
@@ -73,6 +73,7 @@ export default function SettingsPage() {
   const [linkCode, setLinkCode] = useState<string | null>(null)
   const [updateInfo, setUpdateInfo] = useState<{ current_version: string; latest_version: string | null; update_available: boolean } | null>(null)
   const [updating, setUpdating] = useState(false)
+  const [checking, setChecking] = useState(false)
   const [mdns, setMdnsState] = useState<{ enabled: boolean; hostname: string; url: string } | null>(null)
   const [mdnsHostname, setMdnsHostname] = useState('')
   const [branding, setBrandingState] = useState<LabBranding | null>(null)
@@ -1431,6 +1432,19 @@ export default function SettingsPage() {
                   {updateInfo.latest_version} disponible
                 </span>
               )}
+              <button
+                onClick={async () => {
+                  setChecking(true)
+                  try { setUpdateInfo(await forceCheckUpdate()) } catch {} finally { setChecking(false) }
+                }}
+                disabled={checking}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all hover:opacity-80"
+                style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                title="Buscar actualizaciones"
+              >
+                {checking ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                {checking ? 'Buscando...' : 'Buscar'}
+              </button>
             </div>
           </div>
           {isAdmin && updateInfo?.update_available && (

@@ -254,6 +254,19 @@ pub async fn check_update(
     })
 }
 
+/// POST /api/system/update/force-check - Forzar verificacion ignorando cache
+pub async fn force_check_update(
+    State(state): State<AppState>,
+) -> Json<UpdateStatus> {
+    // Limpiar cache
+    {
+        let mut cache = state.update_cache.lock().await;
+        cache.checked_at = None;
+    }
+    // Reusar check_update que ahora no tendra cache
+    check_update(State(state)).await
+}
+
 pub async fn do_update(
     State(state): State<AppState>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {

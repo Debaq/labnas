@@ -91,6 +91,7 @@ async fn main() {
         .route("/api/system/shutdown", post(handlers::system::shutdown_handler))
         .route("/api/system/autostart", get(handlers::system::autostart_status))
         .route("/api/system/update/check", get(handlers::system::check_update))
+        .route("/api/system/update/force-check", post(handlers::system::force_check_update))
         .route("/api/system/update/do", post(handlers::system::do_update))
         .route("/api/system/branding", get(handlers::system::get_branding))
         .route("/api/system/branding", post(handlers::system::set_branding))
