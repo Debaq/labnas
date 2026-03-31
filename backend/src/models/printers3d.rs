@@ -18,6 +18,12 @@ pub struct Printer3DConfig {
     pub api_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera_url: Option<String>,
+    /// Consumo electrico en watts
+    #[serde(default)]
+    pub power_watts: Option<f64>,
+    /// Costo electricidad $/kWh
+    #[serde(default)]
+    pub electricity_cost_kwh: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]

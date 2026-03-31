@@ -17,6 +17,9 @@ import {
   UserPlus,
   ChevronLeft,
   ChevronRight,
+  Pencil,
+  MapPin,
+  BellOff,
 } from 'lucide-react'
 import {
   fetchProjects,
@@ -39,6 +42,8 @@ import {
   fetchCategories,
   createCategory,
   deleteCategory,
+  updateEvent,
+  updateCategory,
 } from '../api'
 import type { Task, Project, TaskStatus, CalendarEvent, EventCategory } from '../types'
 import { useAuth } from '../auth/AuthContext'
@@ -71,9 +76,14 @@ export default function TasksPage() {
   const [eventTime, setEventTime] = useState('')
   const [eventInvitees, setEventInvitees] = useState<string[]>([])
   const [inviteeSearch, setInviteeSearch] = useState('')
+  const [eventEndTime, setEventEndTime] = useState('')
+  const [eventDescription, setEventDescription] = useState('')
+  const [eventLocation, setEventLocation] = useState('')
   const [eventRemind, setEventRemind] = useState(15)
+  const [eventNotifyTg, setEventNotifyTg] = useState(true)
   const [eventRecurrence, setEventRecurrence] = useState('')
   const [eventRecurrenceEnd, setEventRecurrenceEnd] = useState('')
+  const [editingEventId, setEditingEventId] = useState<string | null>(null)
   const [calendarMonth, setCalendarMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1) })
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
   const [calendarView, setCalendarView] = useState<'month' | 'week'>('month')
@@ -429,7 +439,8 @@ export default function TasksPage() {
               onClick={() => {
                 setShowEventModal(true); setEventTitle(''); setEventTime('')
                 setEventDate(selectedDay || todayStr)
-                setEventInvitees([]); setInviteeSearch(''); setEventRemind(15); setEventRecurrence(''); setEventRecurrenceEnd(''); setEventCategory('')
+                setEventInvitees([]); setInviteeSearch(''); setEventEndTime(''); setEventDescription(''); setEventLocation('')
+                setEventRemind(15); setEventNotifyTg(true); setEventRecurrence(''); setEventRecurrenceEnd(''); setEventCategory(''); setEditingEventId(null)
               }}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
               style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
@@ -544,9 +555,18 @@ export default function TasksPage() {
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
-                              <span className="text-xs font-bold font-mono" style={{ color: 'var(--accent)' }}>{ev.time.slice(0, 5)}</span>
+                              <span className="text-xs font-bold font-mono" style={{ color: catColor || 'var(--accent)' }}>
+                                {ev.time.slice(0, 5)}{ev.end_time ? ` - ${ev.end_time.slice(0, 5)}` : ''}
+                              </span>
                               <h4 className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{ev.title}</h4>
+                              {ev.notify_telegram === false && <BellOff size={10} style={{ color: 'var(--text-secondary)', opacity: 0.5 }} title="Sin aviso Telegram" />}
                             </div>
+                            {ev.description && <p className="text-[10px] mt-1" style={{ color: 'var(--text-primary)', opacity: 0.8 }}>{ev.description}</p>}
+                            {ev.location && (
+                              <p className="text-[10px] mt-0.5 flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>
+                                <MapPin size={9} /> {ev.location}
+                              </p>
+                            )}
                             <p className="text-[10px] mt-1" style={{ color: 'var(--text-secondary)' }}>
                               {ev.created_by}
                               {cat && (
@@ -579,6 +599,13 @@ export default function TasksPage() {
                                   className="p-1 rounded-lg" style={{ color: 'var(--danger)' }} title="Rechazar"><XCircle size={14} /></button>
                               </>
                             )}
+                            <button onClick={() => {
+                              setEditingEventId(ev.id); setEventTitle(ev.title); setEventDate(ev.date); setEventTime(ev.time)
+                              setEventEndTime(ev.end_time || ''); setEventDescription(ev.description || ''); setEventLocation(ev.location || '')
+                              setEventInvitees(ev.invitees); setEventRemind(ev.remind_before_min); setEventNotifyTg(ev.notify_telegram ?? true)
+                              setEventRecurrence(ev.recurrence || ''); setEventRecurrenceEnd(ev.recurrence_end || ''); setEventCategory(ev.category || '')
+                              setInviteeSearch(''); setShowEventModal(true)
+                            }} className="p-1 rounded-lg hover:opacity-80" style={{ color: 'var(--text-secondary)' }}><Pencil size={12} /></button>
                             <button onClick={async () => { await deleteEvent(ev.id); await loadData() }}
                               className="p-1 rounded-lg hover:opacity-80" style={{ color: 'var(--danger)' }}><Trash2 size={12} /></button>
                           </div>
@@ -612,7 +639,7 @@ export default function TasksPage() {
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
               <div className="rounded-xl p-6 w-full max-w-md mx-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Nuevo Evento</h3>
+                  <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{editingEventId ? 'Editar Evento' : 'Nuevo Evento'}</h3>
                   <button onClick={() => setShowEventModal(false)} style={{ color: 'var(--text-secondary)' }}><X size={20} /></button>
                 </div>
                 <div className="space-y-3">
@@ -622,7 +649,13 @@ export default function TasksPage() {
                       className="w-full px-3 py-2 rounded-lg text-sm outline-none"
                       style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Descripcion</label>
+                    <textarea value={eventDescription} onChange={e => setEventDescription(e.target.value)} placeholder="Detalles del evento (opcional)"
+                      rows={2} className="w-full px-3 py-2 rounded-lg text-sm outline-none resize-none"
+                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Fecha</label>
                       <input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)}
@@ -630,11 +663,23 @@ export default function TasksPage() {
                         style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Hora</label>
+                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Inicio</label>
                       <input type="time" value={eventTime} onChange={e => setEventTime(e.target.value)}
                         className="w-full px-3 py-2 rounded-lg text-sm outline-none"
                         style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
                     </div>
+                    <div>
+                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Fin</label>
+                      <input type="time" value={eventEndTime} onChange={e => setEventEndTime(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                        style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Lugar</label>
+                    <input value={eventLocation} onChange={e => setEventLocation(e.target.value)} placeholder="Sala de reuniones, Lab 3, etc."
+                      className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
                   </div>
                   <div>
                     <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Invitados</label>
@@ -738,11 +783,14 @@ export default function TasksPage() {
                           </button>
                         </div>
                         {categories.map(cat => (
-                          <div key={cat.id} className="flex items-center justify-between text-xs py-1">
-                            <div className="flex items-center gap-2">
-                              <span className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.color }} />
-                              <span style={{ color: 'var(--text-primary)' }}>{cat.name}</span>
-                            </div>
+                          <div key={cat.id} className="flex items-center gap-2 text-xs py-1">
+                            <input type="color" defaultValue={cat.color}
+                              onBlur={async (e) => { if (e.target.value !== cat.color) { await updateCategory(cat.id, cat.name, e.target.value); await loadData() } }}
+                              className="w-5 h-5 rounded cursor-pointer border-0" />
+                            <input type="text" defaultValue={cat.name}
+                              onBlur={async (e) => { if (e.target.value.trim() && e.target.value !== cat.name) { await updateCategory(cat.id, e.target.value, cat.color); await loadData() } }}
+                              className="flex-1 px-1 py-0.5 rounded text-xs outline-none"
+                              style={{ backgroundColor: 'transparent', color: 'var(--text-primary)' }} />
                             <button type="button" onClick={async () => { await deleteCategory(cat.id); await loadData() }}
                               style={{ color: 'var(--danger)' }}><Trash2 size={12} /></button>
                           </div>
@@ -778,6 +826,11 @@ export default function TasksPage() {
                         style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
                     </div>
                   )}
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={eventNotifyTg} onChange={e => setEventNotifyTg(e.target.checked)}
+                      style={{ accentColor: 'var(--accent)' }} />
+                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Avisar por Telegram</span>
+                  </label>
                 </div>
                 <div className="flex justify-end gap-3 mt-5">
                   <button onClick={() => setShowEventModal(false)} className="px-4 py-2 rounded-lg text-sm font-medium"
@@ -785,14 +838,25 @@ export default function TasksPage() {
                   <button
                     onClick={async () => {
                       if (!eventTitle.trim() || !eventDate || !eventTime) return
-                      await createEvent({ title: eventTitle, date: eventDate, time: eventTime, invitees: eventInvitees, remind_before_min: eventRemind, recurrence: eventRecurrence || undefined, recurrence_end: eventRecurrenceEnd || null, category: eventCategory || undefined })
+                      const data = {
+                        title: eventTitle, date: eventDate, time: eventTime, end_time: eventEndTime || undefined,
+                        description: eventDescription, location: eventLocation || undefined, invitees: eventInvitees,
+                        remind_before_min: eventRemind, notify_telegram: eventNotifyTg,
+                        recurrence: eventRecurrence || undefined, recurrence_end: eventRecurrenceEnd || null,
+                        category: eventCategory || undefined,
+                      }
+                      if (editingEventId) {
+                        await updateEvent(editingEventId, data)
+                      } else {
+                        await createEvent(data)
+                      }
                       setShowEventModal(false)
                       await loadData()
                     }}
                     disabled={!eventTitle.trim() || !eventDate || !eventTime}
                     className="px-4 py-2 rounded-lg text-sm font-medium"
                     style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
-                  >Crear</button>
+                  >{editingEventId ? 'Guardar' : 'Crear'}</button>
                 </div>
               </div>
             </div>

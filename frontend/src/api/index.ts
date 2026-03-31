@@ -411,6 +411,16 @@ export async function deleteService(port: number): Promise<void> {
   if (!res.ok) throw new Error('Error al eliminar servicio')
 }
 
+export async function updateService(port: number, data: LabService): Promise<LabService> {
+  const res = await api(`/api/system/services/${port}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Error al actualizar servicio')
+  return res.json()
+}
+
 // --- mDNS ---
 
 export async function getMdnsStatus(): Promise<{ enabled: boolean; hostname: string; url: string }> {
@@ -763,10 +773,20 @@ export async function fetchEvents(): Promise<CalendarEvent[]> {
   return res.json()
 }
 
+export async function updateEvent(id: string, data: Record<string, unknown>): Promise<CalendarEvent> {
+  const res = await api(`/api/events/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Error al actualizar evento')
+  return res.json()
+}
+
 export async function createEvent(data: {
-  title: string; date: string; time: string;
-  description?: string; invitees?: string[]; remind_before_min?: number;
-  recurrence?: string; recurrence_end?: string | null; category?: string
+  title: string; date: string; time: string; end_time?: string;
+  description?: string; location?: string; invitees?: string[]; remind_before_min?: number;
+  notify_telegram?: boolean; recurrence?: string; recurrence_end?: string | null; category?: string
 }): Promise<CalendarEvent> {
   const res = await api('/api/events', {
     method: 'POST',
@@ -820,9 +840,84 @@ export async function createCategory(name: string, color: string): Promise<impor
   return res.json()
 }
 
+export async function updateCategory(id: string, name: string, color: string): Promise<import('../types').EventCategory> {
+  const res = await api(`/api/events/categories/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, color }),
+  })
+  if (!res.ok) throw new Error('Error al actualizar categoria')
+  return res.json()
+}
+
 export async function deleteCategory(id: string): Promise<void> {
   const res = await api(`/api/events/categories/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar categoria')
+}
+
+// --- Inventory ---
+
+export async function fetchInventoryCategories(): Promise<import('../types').InventoryCategory[]> {
+  const res = await api('/api/inventory/categories')
+  if (!res.ok) throw new Error('Error al obtener categorias')
+  return res.json()
+}
+
+export async function createInventoryCategory(data: { name: string; icon?: string; description?: string }): Promise<import('../types').InventoryCategory> {
+  const res = await api('/api/inventory/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+  if (!res.ok) throw new Error('Error al crear categoria')
+  return res.json()
+}
+
+export async function updateInventoryCategory(id: string, data: { name: string; icon?: string; description?: string }): Promise<import('../types').InventoryCategory> {
+  const res = await api(`/api/inventory/categories/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+  if (!res.ok) throw new Error('Error al actualizar categoria')
+  return res.json()
+}
+
+export async function deleteInventoryCategory(id: string): Promise<void> {
+  const res = await api(`/api/inventory/categories/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar categoria')
+}
+
+export async function fetchInventoryItems(): Promise<import('../types').InventoryItem[]> {
+  const res = await api('/api/inventory/items')
+  if (!res.ok) throw new Error('Error al obtener items')
+  return res.json()
+}
+
+export async function createInventoryItem(data: Partial<import('../types').InventoryItem>): Promise<import('../types').InventoryItem> {
+  const res = await api('/api/inventory/items', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+  if (!res.ok) throw new Error('Error al crear item')
+  return res.json()
+}
+
+export async function updateInventoryItem(id: string, data: Partial<import('../types').InventoryItem>): Promise<import('../types').InventoryItem> {
+  const res = await api(`/api/inventory/items/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+  if (!res.ok) throw new Error('Error al actualizar item')
+  return res.json()
+}
+
+export async function deleteInventoryItem(id: string): Promise<void> {
+  const res = await api(`/api/inventory/items/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar item')
+}
+
+export async function fetchPrintHistory(): Promise<import('../types').PrintHistoryEntry[]> {
+  const res = await api('/api/inventory/print-history')
+  if (!res.ok) throw new Error('Error al obtener historial')
+  return res.json()
+}
+
+export async function addPrintHistory(data: Partial<import('../types').PrintHistoryEntry>): Promise<import('../types').PrintHistoryEntry> {
+  const res = await api('/api/inventory/print-history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+  if (!res.ok) throw new Error('Error al registrar impresion')
+  return res.json()
+}
+
+export async function deletePrintHistory(id: string): Promise<void> {
+  const res = await api(`/api/inventory/print-history/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar entrada')
 }
 
 // --- File Sharing ---

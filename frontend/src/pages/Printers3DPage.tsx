@@ -86,6 +86,41 @@ function CostCalculator() {
   // Material
   const [materialWeight, setMaterialWeight] = useState<number | string>('')
   const [materialPriceKg, setMaterialPriceKg] = useState<number | string>('')
+  const [materialDensity, setMaterialDensity] = useState<number | string>('')
+  const [stlVolume, setStlVolume] = useState<number | null>(null)
+  const [stlFileName, setStlFileName] = useState('')
+
+  // Parse binary STL and calculate volume in cm³
+  function parseSTL(buffer: ArrayBuffer): number {
+    const view = new DataView(buffer)
+    const numTriangles = view.getUint32(80, true)
+    let volume = 0
+    for (let i = 0; i < numTriangles; i++) {
+      const offset = 84 + i * 50 + 12 // skip header + normal
+      const x1 = view.getFloat32(offset, true), y1 = view.getFloat32(offset + 4, true), z1 = view.getFloat32(offset + 8, true)
+      const x2 = view.getFloat32(offset + 12, true), y2 = view.getFloat32(offset + 16, true), z2 = view.getFloat32(offset + 20, true)
+      const x3 = view.getFloat32(offset + 24, true), y3 = view.getFloat32(offset + 28, true), z3 = view.getFloat32(offset + 32, true)
+      // Signed volume of tetrahedron with origin
+      volume += (x1 * (y2 * z3 - y3 * z2) - y1 * (x2 * z3 - x3 * z2) + z1 * (x2 * y3 - x3 * y2)) / 6
+    }
+    return Math.abs(volume) / 1000 // mm³ to cm³
+  }
+
+  function handleSTLFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const vol = parseSTL(reader.result as ArrayBuffer)
+      setStlVolume(vol)
+      setStlFileName(file.name)
+      // Auto-calculate weight if density is set
+      const d = Number(materialDensity)
+      if (d > 0) setMaterialWeight(Math.round(vol * d))
+    }
+    reader.readAsArrayBuffer(file)
+    e.target.value = ''
+  }
 
   // Electricidad
   const [printHours, setPrintHours] = useState<number | string>('')
@@ -220,9 +255,27 @@ function CostCalculator() {
           {/* Material */}
           <div>
             <SectionHeader title="Material" />
-            <div className="grid grid-cols-2 gap-3">
-              <NumField label="Peso del material" value={materialWeight} onChange={setMaterialWeight} unit="g" hint="Peso que indica el slicer" />
-              <NumField label="Precio del filamento" value={materialPriceKg} onChange={setMaterialPriceKg} unit="$/kg" />
+            {/* STL auto-weight */}
+            <div className="flex items-center gap-2 mb-2">
+              <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer"
+                style={{ color: 'var(--accent)', border: '1px dashed var(--border)' }}>
+                <Upload size={12} /> Cargar STL para estimar peso
+                <input type="file" accept=".stl" className="hidden" onChange={handleSTLFile} />
+              </label>
+              {stlVolume !== null && (
+                <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+                  {stlFileName}: {stlVolume.toFixed(2)} cm3
+                  {Number(materialDensity) > 0 && ` = ${(stlVolume * Number(materialDensity)).toFixed(0)}g`}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <NumField label="Peso del material" value={materialWeight} onChange={setMaterialWeight} unit="g" hint="Del slicer o STL" />
+              <NumField label="Precio filamento" value={materialPriceKg} onChange={setMaterialPriceKg} unit="$/kg" />
+              <NumField label="Densidad" value={materialDensity} onChange={(v) => {
+                setMaterialDensity(v)
+                if (stlVolume && Number(v) > 0) setMaterialWeight(Math.round(stlVolume * Number(v)))
+              }} unit="g/cm3" hint="PLA=1.24 ABS=1.04" />
             </div>
           </div>
 

@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine } from 'lucide-react'
+import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine, Pencil } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, getThemeNames, type ThemeName } from '../themes/themes'
-import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, doUpdate, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, setLastfmKey, type LabBranding, type LabService } from '../api'
+import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, doUpdate, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, updateService, setLastfmKey, type LabBranding, type LabService } from '../api'
 import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig, UserRole, UserPermissions } from '../types'
 
 function formatBytes(bytes: number): string {
@@ -94,6 +94,7 @@ export default function SettingsPage() {
   const [svcPort, setSvcPort] = useState('')
   const [svcDesc, setSvcDesc] = useState('')
   const [svcIcon, setSvcIcon] = useState('')
+  const [editingSvcPort, setEditingSvcPort] = useState<number | null>(null)
 
   // Telegram
   const [notifConfig, setNotifConfig] = useState<NotificationConfig | null>(null)
@@ -269,7 +270,7 @@ export default function SettingsPage() {
               <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Servicios del Lab</h2>
             </div>
             <button
-              onClick={() => setShowAddService(true)}
+              onClick={() => { setShowAddService(true); setEditingSvcPort(null); setSvcName(''); setSvcPort(''); setSvcDesc(''); setSvcIcon('') }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-90"
               style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
             >
@@ -311,16 +312,21 @@ export default function SettingsPage() {
                   onClick={async () => {
                     if (!svcName || !svcPort) return
                     try {
-                      const updated = await addService({ name: svcName, port: parseInt(svcPort), description: svcDesc, icon: svcIcon })
-                      setServices(updated)
-                      setSvcName(''); setSvcPort(''); setSvcDesc(''); setSvcIcon('')
+                      if (editingSvcPort !== null) {
+                        await updateService(editingSvcPort, { name: svcName, port: parseInt(svcPort), description: svcDesc, icon: svcIcon })
+                        setServices(await getServices())
+                      } else {
+                        const updated = await addService({ name: svcName, port: parseInt(svcPort), description: svcDesc, icon: svcIcon })
+                        setServices(updated)
+                      }
+                      setSvcName(''); setSvcPort(''); setSvcDesc(''); setSvcIcon(''); setEditingSvcPort(null)
                       setShowAddService(false)
                     } catch (e: any) { alert(e.message) }
                   }}
                   disabled={!svcName || !svcPort}
                   className="px-4 py-2 rounded-lg text-sm font-medium"
                   style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
-                  Agregar
+                  {editingSvcPort !== null ? 'Guardar' : 'Agregar'}
                 </button>
                 <button onClick={() => setShowAddService(false)}
                   className="px-4 py-2 rounded-lg text-sm font-medium"
@@ -373,6 +379,14 @@ export default function SettingsPage() {
                         >
                           <ExternalLink size={14} />
                         </a>
+                        <button onClick={() => {
+                          setSvcName(svc.name); setSvcPort(String(svc.port)); setSvcDesc(svc.description); setSvcIcon(svc.icon)
+                          setEditingSvcPort(svc.port); setShowAddService(true)
+                        }}
+                          className="p-1.5 rounded-lg transition-all hover:opacity-80" style={{ color: 'var(--text-secondary)' }}
+                          title="Editar">
+                          <Pencil size={14} />
+                        </button>
                         <button onClick={async () => {
                           try {
                             await deleteService(svc.port)

@@ -915,6 +915,9 @@ async fn handle_event_command(state: &AppState, creator: &str, text: &str) -> St
         declined: Vec::new(),
         remind_before_min: 15,
         reminded: false,
+        end_time: None,
+        location: None,
+        notify_telegram: true,
         recurrence: String::new(),
         recurrence_end: None,
         created_at: chrono::Utc::now(),
@@ -1442,7 +1445,7 @@ pub async fn task_reminder_loop(state: AppState) {
             + local_now.format("%M").to_string().parse::<u32>().unwrap_or(0);
 
         for event in &mut config.tasks.events {
-            if event.reminded || event.date != today {
+            if event.reminded || event.date != today || !event.notify_telegram {
                 continue;
             }
             // Parse event time

@@ -203,6 +203,59 @@ export interface PrinterStatsResponse {
   estimated_cost: number
 }
 
+// --- Inventory ---
+
+export interface InventoryCategory {
+  id: string
+  name: string
+  icon: string
+  description: string
+}
+
+export type ItemStatus = 'activo' | 'mantenimiento' | 'retirado' | 'agotado'
+
+export interface InventoryItem {
+  id: string
+  category_id: string
+  name: string
+  description: string
+  quantity: number
+  unit: string
+  cost: number
+  supplier: string
+  supplier_url: string
+  location: string
+  serial_number: string
+  purchase_date: string
+  status: ItemStatus
+  notes: string
+  brand: string
+  model_name: string
+  material_type: string | null
+  filament_diameter: number | null
+  filament_weight: number | null
+  filament_remaining: number | null
+  filament_color: string | null
+  filament_density: number | null
+  custom_fields: Record<string, string>
+  created_at: string
+}
+
+export interface PrintHistoryEntry {
+  id: string
+  printer_id: string
+  file_name: string
+  filament_id: string | null
+  weight_grams: number
+  print_time_minutes: number
+  material_cost: number
+  electricity_cost: number
+  total_cost: number
+  success: boolean
+  notes: string
+  created_at: string
+}
+
 // --- Tasks & Projects ---
 
 export type TaskStatus = 'pendiente' | 'enprogreso' | 'completada' | 'rechazada'
@@ -231,11 +284,14 @@ export interface CalendarEvent {
   description: string
   date: string
   time: string
+  end_time: string | null
+  location: string | null
   created_by: string
   invitees: string[]
   accepted: string[]
   declined: string[]
   remind_before_min: number
+  notify_telegram: boolean
   recurrence: string
   recurrence_end: string | null
   created_at: string

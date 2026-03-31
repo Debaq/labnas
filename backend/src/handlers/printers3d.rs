@@ -343,6 +343,8 @@ pub async fn add_printer(
         printer_type: req.printer_type,
         api_key: req.api_key,
         camera_url: req.camera_url,
+        power_watts: None,
+        electricity_cost_kwh: None,
     };
 
     let mut config = state.config.lock().await;

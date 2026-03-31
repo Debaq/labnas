@@ -71,7 +71,11 @@ pub struct CalendarEvent {
     #[serde(default)]
     pub description: String,
     pub date: String,      // "2026-03-20"
-    pub time: String,      // "14:30"
+    pub time: String,      // "14:30" (hora inicio)
+    #[serde(default)]
+    pub end_time: Option<String>, // "15:30" (hora fin)
+    #[serde(default)]
+    pub location: Option<String>,
     pub created_by: String,
     #[serde(default)]
     pub invitees: Vec<String>, // usernames or "all"
@@ -83,6 +87,8 @@ pub struct CalendarEvent {
     pub remind_before_min: u32, // avisar N min antes
     #[serde(default)]
     pub reminded: bool,
+    #[serde(default = "default_notify_telegram")]
+    pub notify_telegram: bool,
     /// Recurrencia: "none", "daily", "weekly", "monthly"
     #[serde(default)]
     pub recurrence: String,
@@ -92,6 +98,10 @@ pub struct CalendarEvent {
     pub created_at: DateTime<Utc>,
     #[serde(default)]
     pub category: Option<String>, // ID de EventCategory
+}
+
+fn default_notify_telegram() -> bool {
+    true
 }
 
 fn default_event_reminder() -> u32 {

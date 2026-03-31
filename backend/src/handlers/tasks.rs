@@ -505,12 +505,15 @@ pub async fn confirm_task(
             description: format!("Actividad desde tarea ({})", updated.id),
             date,
             time,
+            end_time: None,
+            location: None,
             created_by: updated.created_by.clone(),
             invitees: updated.assigned_to.clone(),
             accepted: vec![username.clone()],
             declined: Vec::new(),
             remind_before_min: 15,
             reminded: false,
+            notify_telegram: true,
             recurrence: String::new(),
             recurrence_end: None,
             created_at: Utc::now(),
@@ -723,12 +726,15 @@ pub async fn schedule_task(
         description: format!("Actividad desde tarea ({})", task.id),
         date,
         time,
+        end_time: None,
+        location: None,
         created_by: task.created_by.clone(),
         invitees: task.assigned_to.clone(),
         accepted: vec![username.clone()],
         declined: Vec::new(),
         remind_before_min: 15,
         reminded: false,
+        notify_telegram: true,
         recurrence: String::new(),
         recurrence_end: None,
         created_at: Utc::now(),
@@ -757,17 +763,41 @@ pub struct CreateEventRequest {
     pub date: String,
     pub time: String,
     #[serde(default)]
+    pub end_time: Option<String>,
+    #[serde(default)]
     pub description: String,
+    #[serde(default)]
+    pub location: Option<String>,
     #[serde(default)]
     pub invitees: Vec<String>,
     #[serde(default = "default_event_rem")]
     pub remind_before_min: u32,
+    #[serde(default = "default_notify_tg")]
+    pub notify_telegram: bool,
     #[serde(default)]
     pub recurrence: String,
     #[serde(default)]
     pub recurrence_end: Option<String>,
     #[serde(default)]
     pub category: Option<String>,
+}
+
+fn default_notify_tg() -> bool { true }
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateEventRequest {
+    pub title: Option<String>,
+    pub date: Option<String>,
+    pub time: Option<String>,
+    pub end_time: Option<Option<String>>,
+    pub description: Option<String>,
+    pub location: Option<Option<String>>,
+    pub invitees: Option<Vec<String>>,
+    pub remind_before_min: Option<u32>,
+    pub notify_telegram: Option<bool>,
+    pub recurrence: Option<String>,
+    pub recurrence_end: Option<Option<String>>,
+    pub category: Option<Option<String>>,
 }
 
 fn default_event_rem() -> u32 { 15 }
@@ -796,12 +826,15 @@ pub async fn create_event(
         description: req.description,
         date: req.date,
         time: req.time,
+        end_time: req.end_time,
+        location: req.location,
         created_by: username.clone(),
         invitees: req.invitees,
         accepted: Vec::new(),
         declined: Vec::new(),
         remind_before_min: req.remind_before_min,
         reminded: false,
+        notify_telegram: req.notify_telegram,
         recurrence: req.recurrence,
         recurrence_end: req.recurrence_end,
         created_at: Utc::now(),
@@ -813,6 +846,39 @@ pub async fn create_event(
     drop(config);
     state.log_activity("evento", &event.title, &username).await;
     Ok(Json(event))
+}
+
+pub async fn update_event(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(req): Json<UpdateEventRequest>,
+) -> Result<Json<CalendarEvent>, (StatusCode, String)> {
+    let sessions = state.sessions.lock().await;
+    let (_username, _role) = extract_username(&state, &sessions, &headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    drop(sessions);
+
+    let mut config = state.config.lock().await;
+    let event = config.tasks.events.iter_mut().find(|e| e.id == id)
+        .ok_or((StatusCode::NOT_FOUND, "Evento no encontrado".to_string()))?;
+
+    if let Some(title) = req.title { event.title = title; }
+    if let Some(date) = req.date { event.date = date; }
+    if let Some(time) = req.time { event.time = time; }
+    if let Some(end_time) = req.end_time { event.end_time = end_time; }
+    if let Some(description) = req.description { event.description = description; }
+    if let Some(location) = req.location { event.location = location; }
+    if let Some(invitees) = req.invitees { event.invitees = invitees; }
+    if let Some(remind) = req.remind_before_min { event.remind_before_min = remind; }
+    if let Some(notify) = req.notify_telegram { event.notify_telegram = notify; }
+    if let Some(recurrence) = req.recurrence { event.recurrence = recurrence; }
+    if let Some(recurrence_end) = req.recurrence_end { event.recurrence_end = recurrence_end; }
+    if let Some(category) = req.category { event.category = category; }
+
+    let result = event.clone();
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(result))
 }
 
 pub async fn delete_event(
@@ -928,6 +994,21 @@ pub async fn create_category(
     config.tasks.event_categories.push(cat.clone());
     save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(cat))
+}
+
+pub async fn update_category(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<CreateCategoryRequest>,
+) -> Result<Json<EventCategory>, (StatusCode, String)> {
+    let mut config = state.config.lock().await;
+    let cat = config.tasks.event_categories.iter_mut().find(|c| c.id == id)
+        .ok_or((StatusCode::NOT_FOUND, "Categoria no encontrada".to_string()))?;
+    if !req.name.trim().is_empty() { cat.name = req.name.trim().to_string(); }
+    if !req.color.trim().is_empty() { cat.color = req.color.trim().to_string(); }
+    let result = cat.clone();
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(result))
 }
 
 pub async fn delete_category(

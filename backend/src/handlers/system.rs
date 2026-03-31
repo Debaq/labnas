@@ -533,6 +533,24 @@ pub async fn add_service(
     Ok(Json(config.services.clone()))
 }
 
+pub async fn update_service(
+    State(state): State<AppState>,
+    Path(port): Path<u16>,
+    Json(req): Json<crate::config::LabService>,
+) -> Result<Json<crate::config::LabService>, (StatusCode, String)> {
+    let mut config = state.config.lock().await;
+    let svc = config.services.iter_mut().find(|s| s.port == port)
+        .ok_or((StatusCode::NOT_FOUND, "Servicio no encontrado".to_string()))?;
+    svc.name = req.name;
+    svc.port = req.port;
+    svc.description = req.description;
+    svc.icon = req.icon;
+    let result = svc.clone();
+    crate::config::save_config(&config).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(result))
+}
+
 pub async fn delete_service(
     State(state): State<AppState>,
     Path(port): Path<u16>,

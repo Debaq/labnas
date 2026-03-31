@@ -4,6 +4,7 @@ use crate::models::network::KnownDevice;
 use crate::models::notes::Note;
 use crate::models::notifications::NotificationConfig;
 use crate::models::printers3d::Printer3DConfig;
+use crate::models::inventory::InventoryConfig;
 use crate::models::printing::CupsPrinterConfig;
 use crate::models::tasks::TasksConfig;
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,8 @@ pub struct LabNasConfig {
     pub lastfm_api_key: Option<String>,
     #[serde(default)]
     pub cups_printers: Vec<CupsPrinterConfig>,
+    #[serde(default)]
+    pub inventory: InventoryConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,13 +145,37 @@ pub async fn load_config() -> LabNasConfig {
     println!("[LabNAS] Config: {}", path.display());
     match tokio::fs::read_to_string(&path).await {
         Ok(contents) => {
-            let config: LabNasConfig = serde_json::from_str(&contents).unwrap_or_default();
+            let mut config: LabNasConfig = serde_json::from_str(&contents).unwrap_or_default();
             println!("[LabNAS] Config cargada ({} impresoras 3D, {} chats Telegram, {} dispositivos conocidos, {} usuarios web)",
                 config.printers3d.len(),
                 config.notifications.telegram_chats.len(),
                 config.known_devices.len(),
                 config.web_users.len(),
             );
+            // Migrar permisos: operadores/admins deben tener terminal=true
+            let mut migrated = false;
+            for chat in &mut config.notifications.telegram_chats {
+                let should_have_terminal = matches!(chat.role, crate::models::notifications::UserRole::Admin | crate::models::notifications::UserRole::Operador);
+                if should_have_terminal && !chat.permissions.terminal {
+                    chat.permissions.terminal = true;
+                    chat.permissions.impresion = true;
+                    chat.permissions.archivos_escritura = true;
+                    migrated = true;
+                }
+            }
+            for user in &mut config.web_users {
+                let should_have_terminal = matches!(user.role, crate::models::notifications::UserRole::Admin | crate::models::notifications::UserRole::Operador);
+                if should_have_terminal && !user.permissions.terminal {
+                    user.permissions.terminal = true;
+                    user.permissions.impresion = true;
+                    user.permissions.archivos_escritura = true;
+                    migrated = true;
+                }
+            }
+            if migrated {
+                println!("[LabNAS] Migrados permisos de operadores/admins");
+                let _ = save_config(&config).await;
+            }
             config
         }
         Err(_) => {
