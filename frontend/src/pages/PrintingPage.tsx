@@ -208,6 +208,17 @@ export default function PrintingPage() {
 
   async function handlePrint() {
     if (!selectedFile || !selectedPrinter) return
+    // Verificar limite de tamaño desde el servidor
+    try {
+      const health = await fetch('/api/health').then(r => r.json()).catch(() => ({ upload_limit_mb: 50 }))
+      const limitMb = health.upload_limit_mb || 50
+      const limitBytes = limitMb * 1024 * 1024
+      if (selectedFile.size > limitBytes) {
+        alert(`El archivo es demasiado grande (${(selectedFile.size / 1024 / 1024).toFixed(1)} MB). El limite configurado es ${limitMb} MB.`)
+        return
+      }
+    } catch {}
+
     setPrinting(true)
     try {
       // Only send options that differ from defaults

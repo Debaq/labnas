@@ -23,6 +23,7 @@ async fn main() {
     let config = load_config().await;
     let mdns_enabled = config.mdns_enabled;
     let mdns_hostname = if config.mdns_hostname.is_empty() { "labnas".to_string() } else { config.mdns_hostname.clone() };
+    let upload_limit_mb = config.upload_limit_mb;
     let shutdown = Arc::new(Notify::new());
 
     let state = AppState {
@@ -92,6 +93,7 @@ async fn main() {
         .route("/api/system/autostart", get(handlers::system::autostart_status))
         .route("/api/system/update/check", get(handlers::system::check_update))
         .route("/api/system/update/force-check", post(handlers::system::force_check_update))
+        .route("/api/system/upload-limit", post(handlers::system::set_upload_limit))
         .route("/api/system/update/do", post(handlers::system::do_update))
         .route("/api/system/branding", get(handlers::system::get_branding))
         .route("/api/system/branding", post(handlers::system::set_branding))
@@ -247,6 +249,7 @@ async fn main() {
         .route("/api/email/filters", get(handlers::email::list_filters))
         .route("/api/email/filters", post(handlers::email::add_filter))
         .route("/api/email/filters/{pattern}", delete(handlers::email::delete_filter))
+        .layer(axum::extract::DefaultBodyLimit::max(upload_limit_mb as usize * 1024 * 1024))
         .layer(axum_mw::from_fn_with_state(state.clone(), middleware::permission_check))
         .layer(cors)
         .with_state(state.clone());

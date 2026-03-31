@@ -40,6 +40,9 @@ pub struct LabNasConfig {
     pub lastfm_api_key: Option<String>,
     #[serde(default = "default_mpv_args")]
     pub mpv_extra_args: Vec<String>,
+    /// Limite de subida en MB (default 50)
+    #[serde(default = "default_upload_limit_mb")]
+    pub upload_limit_mb: u32,
     #[serde(default)]
     pub cups_printers: Vec<CupsPrinterConfig>,
     #[serde(default)]
@@ -62,6 +65,10 @@ pub struct LabService {
 
 fn default_mpv_args() -> Vec<String> {
     vec!["--af=lavfi=[loudnorm=I=-14:TP=-1:LRA=11]".to_string()]
+}
+
+fn default_upload_limit_mb() -> u32 {
+    50
 }
 
 fn default_mdns_hostname() -> String {

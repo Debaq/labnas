@@ -6,6 +6,7 @@ pub struct HealthResponse {
     pub version: String,
     pub uptime: String,
     pub ip: Option<String>,
+    pub upload_limit_mb: u32,
 }
 
 #[derive(Debug, Serialize)]

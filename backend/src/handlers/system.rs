@@ -43,12 +43,14 @@ pub async fn health_handler(State(state): State<AppState>) -> Json<HealthRespons
     let uptime_str = format!("{}h {}m {}s", hours, mins, secs % 60);
 
     let ip = local_ip_address::local_ip().ok().map(|ip| ip.to_string());
+    let upload_limit_mb = state.config.lock().await.upload_limit_mb;
 
     Json(HealthResponse {
         status: "ok".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         uptime: uptime_str,
         ip,
+        upload_limit_mb,
     })
 }
 
@@ -255,6 +257,21 @@ pub async fn check_update(
 }
 
 /// POST /api/system/update/force-check - Forzar verificacion ignorando cache
+/// POST /api/system/upload-limit
+pub async fn set_upload_limit(
+    State(state): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let limit = req["limit_mb"].as_u64().unwrap_or(50) as u32;
+    if limit == 0 || limit > 500 {
+        return Err((StatusCode::BAD_REQUEST, "Limite debe ser entre 1 y 500 MB".to_string()));
+    }
+    let mut config = state.config.lock().await;
+    config.upload_limit_mb = limit;
+    crate::config::save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(StatusCode::OK)
+}
+
 pub async fn force_check_update(
     State(state): State<AppState>,
 ) -> Json<UpdateStatus> {

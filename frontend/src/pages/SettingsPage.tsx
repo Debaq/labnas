@@ -1482,6 +1482,32 @@ export default function SettingsPage() {
               </div>
             </>
           )}
+          <div className="flex items-center justify-between">
+            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Limite de subida</span>
+            <div className="flex items-center gap-2">
+              <input type="number" min={1} max={500}
+                defaultValue={updateInfo ? undefined : 50}
+                value={undefined}
+                ref={(el) => {
+                  if (el && !el.dataset.init) {
+                    fetchHealth().then(h => { el.value = String(h.upload_limit_mb || 50); el.dataset.init = '1' }).catch(() => {})
+                  }
+                }}
+                onBlur={async (e) => {
+                  const val = parseInt(e.target.value) || 50
+                  try {
+                    await fetch('/api/system/upload-limit', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', ...(() => { try { const t = JSON.parse(localStorage.getItem('labnas_auth') || '{}').token; return t ? { Authorization: `Bearer ${t}` } : {} } catch { return {} } })() },
+                      body: JSON.stringify({ limit_mb: val }),
+                    })
+                  } catch {}
+                }}
+                className="w-16 px-2 py-1 rounded-lg text-sm text-right outline-none"
+                style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+              <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>MB</span>
+            </div>
+          </div>
           <div
             className="pt-3"
             style={{ borderTop: '1px solid var(--border)' }}
