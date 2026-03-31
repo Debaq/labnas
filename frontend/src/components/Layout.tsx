@@ -20,6 +20,7 @@ const pageTitles: Record<string, string> = {
   '/inventory': 'Inventario',
   '/portfolio': 'Portafolio Academico',
   '/settings': 'Configuracion',
+  '/playlists': 'Editor de Playlist',
 }
 
 export default function Layout() {
@@ -27,7 +28,7 @@ export default function Layout() {
   const { user, logout, can, isAdmin } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
-  const pageTitle = pageTitles[location.pathname] || 'LabNAS'
+  const pageTitle = pageTitles[location.pathname] || pageTitles['/' + location.pathname.split('/')[1]] || 'LabNAS'
   const [shuttingDown, setShuttingDown] = useState(false)
   const [newVersion, setNewVersion] = useState<string | null>(null)
   const [labName, setLabName] = useState('LabNAS')

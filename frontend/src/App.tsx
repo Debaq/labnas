@@ -16,6 +16,7 @@ import NotesPage from './pages/NotesPage'
 import EmailPage from './pages/EmailPage'
 import InventoryPage from './pages/InventoryPage'
 import PortfolioPage from './pages/PortfolioPage'
+import PlaylistEditorPage from './pages/PlaylistEditorPage'
 import { Loader2 } from 'lucide-react'
 
 function LoadingScreen() {
@@ -62,6 +63,7 @@ function AppRoutes() {
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/portfolio" element={<PortfolioPage />} />
         <Route path="/terminal" element={<TerminalPage />} />
+        <Route path="/playlists/:id" element={<PlaylistEditorPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
     </Routes>

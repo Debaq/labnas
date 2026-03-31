@@ -1,16 +1,17 @@
 import { useEffect, useState, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Music, Search, Play, Pause, Square, Loader2, X, SkipForward, SkipBack,
   Trash2, ListMusic, Plus, Sparkles, MoreVertical, Volume2,
   Shuffle, Repeat, Repeat1, ChevronUp, ChevronDown, ChevronRight, Tv, TvMinimalPlay,
-  ArrowUpToLine, Radio, Dices,
+  ArrowUpToLine, Radio, Dices, Pencil,
 } from 'lucide-react'
 import {
   searchMusic, playMusic, getCurrentMusic, stopMusic, pauseMusic, previousMusic,
   nextMusic, removeFromQueue, playFromQueue, moveInQueue, toggleShuffle, toggleRepeat,
   recommendMusic, setMusicVolume, setMusicVideo, getScreens, startRadio, luckyPlay, clearQueue,
-  fetchPlaylists, createPlaylist, updatePlaylist, deletePlaylist, addTrackToPlaylist,
-  removeTrackFromPlaylist, moveTrackInPlaylist, loadPlaylist, saveQueueAsPlaylist,
+  fetchPlaylists, createPlaylist, deletePlaylist, addTrackToPlaylist,
+  loadPlaylist, saveQueueAsPlaylist,
   type MusicTrack, type MusicState, type ScreenInfo, type Playlist,
 } from '../api'
 
@@ -30,6 +31,7 @@ function formatDuration(secs: number) {
 }
 
 export default function MusicPanel() {
+  const navigate = useNavigate()
   const [open, setOpen] = useState(() => localStorage.getItem('labnas-music-panel') !== 'closed')
   const [musicState, setMusicState] = useState<MusicState>({
     current: null, queue: [], started_by: null, history: [],
@@ -50,15 +52,9 @@ export default function MusicPanel() {
   // Playlists
   const [panelTab, setPanelTab] = useState<'queue' | 'playlists'>('queue')
   const [playlists, setPlaylists] = useState<Playlist[]>([])
-  const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null)
   const [showNewPlaylist, setShowNewPlaylist] = useState(false)
   const [newPlName, setNewPlName] = useState('')
   const [newPlDesc, setNewPlDesc] = useState('')
-  const [editingPlaylist, setEditingPlaylist] = useState<string | null>(null)
-  const [editPlName, setEditPlName] = useState('')
-  const [plSearchQuery, setPlSearchQuery] = useState('')
-  const [plSearchResults, setPlSearchResults] = useState<MusicTrack[]>([])
-  const [plSearching, setPlSearching] = useState(false)
   const [localVolume, setLocalVolume] = useState(80)
   const volumeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -245,9 +241,29 @@ export default function MusicPanel() {
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium leading-tight" style={{ color: 'var(--text-primary)' }}>{musicState.current.title}</p>
               <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>{musicState.current.artist}</p>
-              <p className="text-[9px] mt-1" style={{ color: 'var(--text-secondary)', opacity: 0.6 }}>
-                {musicState.current.added_by || musicState.started_by}
-              </p>
+              <div className="flex items-center gap-1 mt-1">
+                <p className="text-[9px]" style={{ color: 'var(--text-secondary)', opacity: 0.6 }}>
+                  {musicState.current.added_by || musicState.started_by}
+                </p>
+                {playlists.length > 0 && (
+                  <select className="text-[9px] px-1 py-0.5 rounded cursor-pointer"
+                    style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--accent)', border: '1px solid var(--border)' }}
+                    value=""
+                    onChange={async (e) => {
+                      if (!e.target.value || !musicState.current) return
+                      await addTrackToPlaylist(e.target.value, {
+                        id: musicState.current.id, title: musicState.current.title,
+                        artist: musicState.current.artist, thumbnail: musicState.current.thumbnail,
+                        duration: musicState.current.duration,
+                      })
+                      setPlaylists(await fetchPlaylists())
+                      e.target.value = ''
+                    }}>
+                    <option value="">+ Lista</option>
+                    {playlists.map(pl => <option key={pl.id} value={pl.id}>{pl.name}</option>)}
+                  </select>
+                )}
+              </div>
             </div>
           </div>
           {musicState.current.duration > 0 && (
@@ -505,119 +521,6 @@ export default function MusicPanel() {
         {/* PLAYLISTS TAB */}
         {panelTab === 'playlists' && (
           <div className="px-3 py-2">
-            {/* Selected playlist detail */}
-            {selectedPlaylist ? (
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <button onClick={() => setSelectedPlaylist(null)} className="p-0.5" style={{ color: 'var(--text-secondary)' }}>
-                    <ChevronRight size={12} className="rotate-180" />
-                  </button>
-                  {editingPlaylist === selectedPlaylist.id ? (
-                    <input value={editPlName} onChange={e => setEditPlName(e.target.value)}
-                      onBlur={async () => {
-                        if (editPlName.trim() && editPlName !== selectedPlaylist.name) {
-                          const updated = await updatePlaylist(selectedPlaylist.id, { name: editPlName })
-                          setSelectedPlaylist(updated)
-                          setPlaylists(await fetchPlaylists())
-                        }
-                        setEditingPlaylist(null)
-                      }}
-                      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                      autoFocus className="flex-1 text-xs font-semibold px-1 py-0.5 rounded outline-none"
-                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
-                  ) : (
-                    <span className="flex-1 text-xs font-semibold cursor-pointer" style={{ color: 'var(--text-primary)' }}
-                      onClick={() => { setEditingPlaylist(selectedPlaylist.id); setEditPlName(selectedPlaylist.name) }}>
-                      {selectedPlaylist.name}
-                    </span>
-                  )}
-                  <span className="text-[9px]" style={{ color: 'var(--text-secondary)' }}>{selectedPlaylist.tracks.length} tracks</span>
-                </div>
-
-                {/* Actions */}
-                <div className="flex gap-1 mb-2">
-                  <button onClick={async () => {
-                    await loadPlaylist(selectedPlaylist.id)
-                    const ms = await getCurrentMusic()
-                    setMusicState(safeMusicState(ms))
-                    setPanelTab('queue')
-                  }} className="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[10px] font-medium"
-                    style={{ backgroundColor: 'var(--accent)' + '20', color: 'var(--accent)', border: '1px solid var(--accent)' + '40' }}>
-                    <Play size={10} /> Cargar en cola
-                  </button>
-                </div>
-
-                {/* Search to add tracks */}
-                <div className="flex gap-1 mb-2">
-                  <input value={plSearchQuery} onChange={e => setPlSearchQuery(e.target.value)}
-                    onKeyDown={async e => {
-                      if (e.key !== 'Enter' || !plSearchQuery.trim()) return
-                      setPlSearching(true)
-                      try { setPlSearchResults(await searchMusic(plSearchQuery)) } catch {} finally { setPlSearching(false) }
-                    }}
-                    placeholder="Buscar para agregar..."
-                    className="flex-1 px-2 py-1 rounded-lg text-[10px] outline-none"
-                    style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
-                  {plSearching && <Loader2 size={12} className="animate-spin" style={{ color: 'var(--accent)' }} />}
-                </div>
-
-                {/* Search results for playlist */}
-                {plSearchResults.length > 0 && (
-                  <div className="mb-2 space-y-0.5">
-                    {plSearchResults.slice(0, 8).map(track => (
-                      <div key={track.id} className="flex items-center gap-1.5 px-1.5 py-1 rounded cursor-pointer hover:opacity-80"
-                        style={{ backgroundColor: 'var(--bg-tertiary)' }}
-                        onClick={async () => {
-                          const updated = await addTrackToPlaylist(selectedPlaylist.id, { id: track.id, title: track.title, artist: track.artist, thumbnail: track.thumbnail, duration: track.duration })
-                          setSelectedPlaylist(updated)
-                          setPlaylists(await fetchPlaylists())
-                        }}>
-                        <img src={track.thumbnail} alt="" className="w-6 h-6 rounded object-cover shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[9px] truncate" style={{ color: 'var(--text-primary)' }}>{track.title}</p>
-                          <p className="text-[8px] truncate" style={{ color: 'var(--text-secondary)' }}>{track.artist}</p>
-                        </div>
-                        <Plus size={10} style={{ color: 'var(--success)' }} />
-                      </div>
-                    ))}
-                    <button onClick={() => setPlSearchResults([])} className="w-full text-[9px] py-0.5" style={{ color: 'var(--text-secondary)' }}>Cerrar resultados</button>
-                  </div>
-                )}
-
-                {/* Track list */}
-                <div className="space-y-0.5">
-                  {selectedPlaylist.tracks.map((track, i) => (
-                    <div key={`${track.id}-${i}`} className="flex items-center gap-1.5 px-1.5 py-1 rounded-lg group" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
-                      <span className="text-[8px] font-mono w-3 text-center shrink-0" style={{ color: 'var(--text-secondary)' }}>{i + 1}</span>
-                      <img src={track.thumbnail} alt="" className="w-6 h-6 rounded object-cover shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[9px] truncate leading-tight" style={{ color: 'var(--text-primary)' }}>{track.title}</p>
-                        <p className="text-[8px] truncate" style={{ color: 'var(--text-secondary)' }}>{track.artist} · {formatDuration(track.duration)}</p>
-                      </div>
-                      <div className="flex items-center gap-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {i > 0 && <button onClick={async () => {
-                          const updated = await moveTrackInPlaylist(selectedPlaylist.id, i, i - 1)
-                          setSelectedPlaylist(updated)
-                        }} className="p-0.5" style={{ color: 'var(--text-secondary)' }}><ChevronUp size={9} /></button>}
-                        {i < selectedPlaylist.tracks.length - 1 && <button onClick={async () => {
-                          const updated = await moveTrackInPlaylist(selectedPlaylist.id, i, i + 1)
-                          setSelectedPlaylist(updated)
-                        }} className="p-0.5" style={{ color: 'var(--text-secondary)' }}><ChevronDown size={9} /></button>}
-                      </div>
-                      <button onClick={async () => {
-                        const updated = await removeTrackFromPlaylist(selectedPlaylist.id, i)
-                        setSelectedPlaylist(updated)
-                        setPlaylists(await fetchPlaylists())
-                      }} className="p-0.5 opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: 'var(--danger)' }}><Trash2 size={9} /></button>
-                    </div>
-                  ))}
-                </div>
-                {selectedPlaylist.tracks.length === 0 && (
-                  <p className="text-center py-4 text-[10px]" style={{ color: 'var(--text-secondary)' }}>Lista vacia — busca canciones para agregar</p>
-                )}
-              </div>
-            ) : (
-              /* Playlist list */
               <div>
                 <div className="flex items-center gap-1 mb-2">
                   <button onClick={() => setShowNewPlaylist(!showNewPlaylist)}
@@ -650,8 +553,8 @@ export default function MusicPanel() {
                       if (!newPlName.trim()) return
                       const pl = await createPlaylist(newPlName, newPlDesc)
                       setPlaylists(await fetchPlaylists())
-                      setSelectedPlaylist(pl)
                       setShowNewPlaylist(false); setNewPlName(''); setNewPlDesc('')
+                      navigate(`/playlists/${pl.id}`)
                     }} disabled={!newPlName.trim()} className="w-full py-1 rounded text-[10px] font-medium"
                       style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>Crear</button>
                   </div>
@@ -664,12 +567,18 @@ export default function MusicPanel() {
                     {playlists.map(pl => (
                       <div key={pl.id} className="flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer group hover:opacity-80"
                         style={{ backgroundColor: 'var(--bg-tertiary)' }}
-                        onClick={() => setSelectedPlaylist(pl)}>
+                        onClick={() => navigate(`/playlists/${pl.id}`)}>
                         <ListMusic size={14} style={{ color: 'var(--accent)' }} />
                         <div className="flex-1 min-w-0">
                           <p className="text-[11px] font-medium truncate" style={{ color: 'var(--text-primary)' }}>{pl.name}</p>
                           <p className="text-[9px]" style={{ color: 'var(--text-secondary)' }}>{pl.tracks.length} tracks · {pl.created_by}</p>
                         </div>
+                        <button onClick={(e) => {
+                          e.stopPropagation()
+                          navigate(`/playlists/${pl.id}`)
+                        }} className="p-1 rounded hover:opacity-80 opacity-0 group-hover:opacity-100" style={{ color: 'var(--accent)' }} title="Editar lista">
+                          <Pencil size={10} />
+                        </button>
                         <button onClick={async (e) => {
                           e.stopPropagation()
                           await loadPlaylist(pl.id)
@@ -692,7 +601,6 @@ export default function MusicPanel() {
                   </div>
                 )}
               </div>
-            )}
           </div>
         )}
       </div>
