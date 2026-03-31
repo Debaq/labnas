@@ -70,6 +70,38 @@ pub enum RepeatMode {
     One,
 }
 
+// --- Playlist types (persisted in config) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Playlist {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub created_by: String,
+    pub tracks: Vec<PlaylistTrack>,
+    pub created_at: String,
+    #[serde(default)]
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaylistTrack {
+    pub id: String, // YouTube ID
+    pub title: String,
+    pub artist: String,
+    pub thumbnail: String,
+    pub duration: u32,
+    #[serde(default)]
+    pub added_by: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PlaylistsConfig {
+    #[serde(default)]
+    pub playlists: Vec<Playlist>,
+}
+
 fn now_epoch_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1491,4 +1523,281 @@ pub async fn music_monitor_loop(state: AppState) {
             advance_queue(&state).await;
         }
     }
+}
+
+// ══════════════════════════════════════════
+// Playlists (persisted in config)
+// ══════════════════════════════════════════
+
+use crate::config::save_config;
+use axum::http::HeaderMap;
+
+async fn get_session_username(state: &AppState, headers: &HeaderMap) -> String {
+    let token = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string());
+    if let Some(token) = token {
+        let sessions = state.sessions.lock().await;
+        if let Some(session) = sessions.get(&token) {
+            return session.username.clone();
+        }
+    }
+    "unknown".to_string()
+}
+
+fn now_iso() -> String {
+    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string()
+}
+
+/// GET /api/music/playlists
+pub async fn list_playlists(State(state): State<AppState>) -> Json<Vec<Playlist>> {
+    let config = state.config.lock().await;
+    Json(config.playlists.playlists.clone())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreatePlaylistReq {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+/// POST /api/music/playlists
+pub async fn create_playlist(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<CreatePlaylistReq>,
+) -> Result<Json<Playlist>, (StatusCode, String)> {
+    if req.name.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Nombre requerido".to_string()));
+    }
+    let username = get_session_username(&state, &headers).await;
+    let now = now_iso();
+    let playlist = Playlist {
+        id: uuid::Uuid::new_v4().to_string()[..8].to_string(),
+        name: req.name.trim().to_string(),
+        description: req.description,
+        created_by: username,
+        tracks: Vec::new(),
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    let mut config = state.config.lock().await;
+    config.playlists.playlists.push(playlist.clone());
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(playlist))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdatePlaylistReq {
+    pub name: Option<String>,
+    pub description: Option<String>,
+}
+
+/// PUT /api/music/playlists/{id}
+pub async fn update_playlist(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<UpdatePlaylistReq>,
+) -> Result<Json<Playlist>, (StatusCode, String)> {
+    let mut config = state.config.lock().await;
+    let pl = config.playlists.playlists.iter_mut().find(|p| p.id == id)
+        .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
+    if let Some(name) = req.name { pl.name = name; }
+    if let Some(desc) = req.description { pl.description = desc; }
+    pl.updated_at = now_iso();
+    let result = pl.clone();
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(result))
+}
+
+/// DELETE /api/music/playlists/{id}
+pub async fn delete_playlist(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let mut config = state.config.lock().await;
+    let before = config.playlists.playlists.len();
+    config.playlists.playlists.retain(|p| p.id != id);
+    if config.playlists.playlists.len() == before {
+        return Err((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()));
+    }
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddTrackReq {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    #[serde(default)]
+    pub thumbnail: String,
+    #[serde(default)]
+    pub duration: u32,
+}
+
+/// POST /api/music/playlists/{id}/tracks
+pub async fn add_track_to_playlist(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(req): Json<AddTrackReq>,
+) -> Result<Json<Playlist>, (StatusCode, String)> {
+    let username = get_session_username(&state, &headers).await;
+    let mut config = state.config.lock().await;
+    let pl = config.playlists.playlists.iter_mut().find(|p| p.id == id)
+        .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
+    pl.tracks.push(PlaylistTrack {
+        id: req.id,
+        title: req.title,
+        artist: req.artist,
+        thumbnail: req.thumbnail,
+        duration: req.duration,
+        added_by: username,
+    });
+    pl.updated_at = now_iso();
+    let result = pl.clone();
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(result))
+}
+
+/// DELETE /api/music/playlists/{id}/tracks/{index}
+pub async fn remove_track_from_playlist(
+    State(state): State<AppState>,
+    Path((id, index)): Path<(String, usize)>,
+) -> Result<Json<Playlist>, (StatusCode, String)> {
+    let mut config = state.config.lock().await;
+    let pl = config.playlists.playlists.iter_mut().find(|p| p.id == id)
+        .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
+    if index >= pl.tracks.len() {
+        return Err((StatusCode::BAD_REQUEST, "Indice fuera de rango".to_string()));
+    }
+    pl.tracks.remove(index);
+    pl.updated_at = now_iso();
+    let result = pl.clone();
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(result))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MoveTrackReq {
+    pub from: usize,
+    pub to: usize,
+}
+
+/// POST /api/music/playlists/{id}/tracks/move
+pub async fn move_track_in_playlist(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<MoveTrackReq>,
+) -> Result<Json<Playlist>, (StatusCode, String)> {
+    let mut config = state.config.lock().await;
+    let pl = config.playlists.playlists.iter_mut().find(|p| p.id == id)
+        .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
+    if req.from >= pl.tracks.len() || req.to >= pl.tracks.len() {
+        return Err((StatusCode::BAD_REQUEST, "Indice fuera de rango".to_string()));
+    }
+    let track = pl.tracks.remove(req.from);
+    pl.tracks.insert(req.to, track);
+    pl.updated_at = now_iso();
+    let result = pl.clone();
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(result))
+}
+
+/// POST /api/music/playlists/{id}/load - Load playlist into queue
+pub async fn load_playlist(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    let username = get_session_username(&state, &headers).await;
+    let config = state.config.lock().await;
+    let pl = config.playlists.playlists.iter().find(|p| p.id == id)
+        .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
+
+    let tracks: Vec<MusicTrack> = pl.tracks.iter().map(|t| MusicTrack {
+        id: t.id.clone(),
+        title: t.title.clone(),
+        artist: t.artist.clone(),
+        thumbnail: t.thumbnail.clone(),
+        duration: t.duration,
+        added_by: Some(username.clone()),
+    }).collect();
+    let count = tracks.len();
+    drop(config);
+
+    let mut music = state.music.lock().await;
+    music.queue.extend(tracks);
+    drop(music);
+
+    Ok((StatusCode::OK, format!("{} canciones agregadas a la cola", count)))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SaveQueueReq {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+/// POST /api/music/playlists/save-queue - Save current queue + current as playlist
+pub async fn save_queue_as_playlist(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<SaveQueueReq>,
+) -> Result<Json<Playlist>, (StatusCode, String)> {
+    if req.name.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Nombre requerido".to_string()));
+    }
+    let username = get_session_username(&state, &headers).await;
+    let music = state.music.lock().await;
+
+    let mut tracks: Vec<PlaylistTrack> = Vec::new();
+    // Add current track first
+    if let Some(ref current) = music.current {
+        tracks.push(PlaylistTrack {
+            id: current.id.clone(),
+            title: current.title.clone(),
+            artist: current.artist.clone(),
+            thumbnail: current.thumbnail.clone(),
+            duration: current.duration,
+            added_by: username.clone(),
+        });
+    }
+    // Add queue
+    for t in &music.queue {
+        tracks.push(PlaylistTrack {
+            id: t.id.clone(),
+            title: t.title.clone(),
+            artist: t.artist.clone(),
+            thumbnail: t.thumbnail.clone(),
+            duration: t.duration,
+            added_by: t.added_by.clone().unwrap_or_else(|| username.clone()),
+        });
+    }
+    drop(music);
+
+    if tracks.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "No hay canciones para guardar".to_string()));
+    }
+
+    let now = now_iso();
+    let playlist = Playlist {
+        id: uuid::Uuid::new_v4().to_string()[..8].to_string(),
+        name: req.name.trim().to_string(),
+        description: req.description,
+        created_by: username,
+        tracks,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+
+    let mut config = state.config.lock().await;
+    config.playlists.playlists.push(playlist.clone());
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(playlist))
 }

@@ -4,6 +4,7 @@ use crate::models::network::KnownDevice;
 use crate::models::notes::Note;
 use crate::models::notifications::NotificationConfig;
 use crate::models::printers3d::Printer3DConfig;
+use crate::handlers::music::PlaylistsConfig;
 use crate::models::inventory::InventoryConfig;
 use crate::models::portfolio::PortfolioConfig;
 use crate::models::printing::CupsPrinterConfig;
@@ -43,6 +44,8 @@ pub struct LabNasConfig {
     pub cups_printers: Vec<CupsPrinterConfig>,
     #[serde(default)]
     pub inventory: InventoryConfig,
+    #[serde(default)]
+    pub playlists: PlaylistsConfig,
     #[serde(default)]
     pub portfolio: PortfolioConfig,
 }

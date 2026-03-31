@@ -281,6 +281,7 @@ export interface PrintHistoryEntry {
 
 export type PortfolioType = 'project' | 'course' | 'diploma' | 'workshop'
 export type PortfolioStatus = 'planned' | 'active' | 'completed' | 'cancelled' | 'submitted'
+export type PortfolioScope = 'own' | 'external' | 'historic'
 
 export interface PortfolioRequirement {
   id: string
@@ -298,9 +299,12 @@ export interface PortfolioMilestone {
 export interface PortfolioEntry {
   id: string
   entry_type: PortfolioType
+  scope: PortfolioScope
   title: string
   description: string
   institution: string
+  url: string
+  contact: string
   funding_source: string
   budget: number | null
   principal_investigator: string

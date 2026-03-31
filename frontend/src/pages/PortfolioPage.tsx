@@ -10,7 +10,7 @@ import {
   fetchPortfolio, createPortfolioEntry, updatePortfolioEntry, deletePortfolioEntry,
   togglePortfolioRequirement, togglePortfolioMilestone, fetchUsernames,
 } from '../api'
-import type { PortfolioEntry, PortfolioType, PortfolioStatus, PortfolioRequirement, PortfolioMilestone } from '../types'
+import type { PortfolioEntry, PortfolioType, PortfolioStatus, PortfolioScope, PortfolioRequirement, PortfolioMilestone } from '../types'
 
 const TYPE_CONFIG: Record<PortfolioType, { label: string; icon: typeof Microscope }> = {
   project: { label: 'Proyecto', icon: Microscope },
@@ -27,13 +27,22 @@ const STATUS_CONFIG: Record<PortfolioStatus, { label: string; color: string }> =
   cancelled: { label: 'Cancelado', color: 'var(--danger)' },
 }
 
+const SCOPE_CONFIG: Record<PortfolioScope, { label: string; color: string }> = {
+  own: { label: 'Nuestro', color: 'var(--accent)' },
+  external: { label: 'Externo / Referencia', color: 'var(--warning)' },
+  historic: { label: 'Historico', color: 'var(--text-secondary)' },
+}
+
 const MODALITIES = ['Presencial', 'Online', 'Hibrido']
 
 const emptyForm = (): Partial<PortfolioEntry> => ({
   entry_type: 'project',
+  scope: 'own',
   title: '',
   description: '',
   institution: '',
+  url: '',
+  contact: '',
   funding_source: '',
   budget: null,
   principal_investigator: '',
@@ -57,6 +66,7 @@ export default function PortfolioPage() {
   const [loading, setLoading] = useState(true)
   const [filterType, setFilterType] = useState<PortfolioType | 'all'>('all')
   const [filterStatus, setFilterStatus] = useState<PortfolioStatus | 'all'>('all')
+  const [filterScope, setFilterScope] = useState<PortfolioScope | 'all'>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedEntry, setExpandedEntry] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
@@ -82,6 +92,7 @@ export default function PortfolioPage() {
   const filtered = entries.filter(e => {
     if (filterType !== 'all' && e.entry_type !== filterType) return false
     if (filterStatus !== 'all' && e.status !== filterStatus) return false
+    if (filterScope !== 'all' && (e.scope || 'own') !== filterScope) return false
     if (searchQuery) {
       const q = searchQuery.toLowerCase()
       return e.title.toLowerCase().includes(q) ||
@@ -342,6 +353,28 @@ export default function PortfolioPage() {
           </div>
         </div>
 
+        {/* Filtros por alcance */}
+        <div className="rounded-xl p-4" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
+          <h3 className="text-xs font-semibold uppercase mb-3" style={{ color: 'var(--text-secondary)' }}>Alcance</h3>
+          <div className="space-y-1">
+            <button onClick={() => setFilterScope('all')}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-all"
+              style={{ backgroundColor: filterScope === 'all' ? 'var(--accent-alpha)' : 'transparent', color: filterScope === 'all' ? 'var(--accent)' : 'var(--text-primary)' }}>
+              <span>Todos</span>
+            </button>
+            {(Object.entries(SCOPE_CONFIG) as [PortfolioScope, typeof SCOPE_CONFIG['own']][]).map(([key, cfg]) => (
+              <button key={key} onClick={() => setFilterScope(key)}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-all"
+                style={{ backgroundColor: filterScope === key ? 'var(--accent-alpha)' : 'transparent', color: filterScope === key ? 'var(--accent)' : 'var(--text-primary)' }}>
+                <span className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: cfg.color }} />
+                  {cfg.label}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Boton nueva ficha */}
         <button
           onClick={openNew}
@@ -386,12 +419,16 @@ export default function PortfolioPage() {
                     <h3 className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
                       {entry.title}
                     </h3>
-                    <span
-                      className="text-[11px] px-2 py-0.5 rounded-full font-medium flex-shrink-0"
-                      style={{ backgroundColor: stCfg.color + '22', color: stCfg.color }}
-                    >
+                    <span className="text-[11px] px-2 py-0.5 rounded-full font-medium flex-shrink-0"
+                      style={{ backgroundColor: stCfg.color + '22', color: stCfg.color }}>
                       {stCfg.label}
                     </span>
+                    {entry.scope && entry.scope !== 'own' && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0"
+                        style={{ backgroundColor: SCOPE_CONFIG[entry.scope]?.color + '22', color: SCOPE_CONFIG[entry.scope]?.color }}>
+                        {SCOPE_CONFIG[entry.scope]?.label}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-4 mt-1">
                     {entry.institution && (
@@ -678,6 +715,22 @@ export default function PortfolioPage() {
                     </div>
                   </div>
                   <div>
+                    <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>Alcance</label>
+                    <div className="flex gap-2">
+                      {(Object.entries(SCOPE_CONFIG) as [PortfolioScope, typeof SCOPE_CONFIG['own']][]).map(([key, cfg]) => (
+                        <button key={key} type="button" onClick={() => setForm({ ...form, scope: key })}
+                          className="flex-1 py-1.5 rounded-lg text-xs font-medium transition-all"
+                          style={{
+                            backgroundColor: (form.scope || 'own') === key ? cfg.color + '20' : 'var(--bg-tertiary)',
+                            color: (form.scope || 'own') === key ? cfg.color : 'var(--text-secondary)',
+                            border: (form.scope || 'own') === key ? `2px solid ${cfg.color}` : '2px solid transparent',
+                          }}>
+                          {cfg.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
                     <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>Titulo *</label>
                     <input
                       type="text"
@@ -720,6 +773,20 @@ export default function PortfolioPage() {
                       >
                         {MODALITIES.map(m => <option key={m} value={m}>{m}</option>)}
                       </select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>URL / Enlace</label>
+                      <input type="text" value={form.url || ''} onChange={e => setForm({ ...form, url: e.target.value })}
+                        placeholder="https://..." className="w-full px-3 py-2 rounded-lg text-sm font-mono"
+                        style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>Contacto</label>
+                      <input type="text" value={form.contact || ''} onChange={e => setForm({ ...form, contact: e.target.value })}
+                        placeholder="Persona de contacto, email..." className="w-full px-3 py-2 rounded-lg text-sm"
+                        style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
                     </div>
                   </div>
                 </>

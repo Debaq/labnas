@@ -1164,6 +1164,49 @@ export interface MusicState {
   elapsed: number
 }
 
+export interface PlaylistTrack {
+  id: string; title: string; artist: string; thumbnail: string; duration: number; added_by: string
+}
+export interface Playlist {
+  id: string; name: string; description: string; created_by: string
+  tracks: PlaylistTrack[]; created_at: string; updated_at: string
+}
+
+export async function fetchPlaylists(): Promise<Playlist[]> {
+  const res = await api('/api/music/playlists'); return res.ok ? res.json() : []
+}
+export async function createPlaylist(name: string, description?: string): Promise<Playlist> {
+  const res = await api('/api/music/playlists', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, description: description || '' }) })
+  if (!res.ok) throw new Error('Error al crear playlist'); return res.json()
+}
+export async function updatePlaylist(id: string, data: { name?: string; description?: string }): Promise<Playlist> {
+  const res = await api(`/api/music/playlists/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+  if (!res.ok) throw new Error('Error al actualizar playlist'); return res.json()
+}
+export async function deletePlaylist(id: string): Promise<void> {
+  await api(`/api/music/playlists/${id}`, { method: 'DELETE' })
+}
+export async function addTrackToPlaylist(playlistId: string, track: { id: string; title: string; artist: string; thumbnail: string; duration: number }): Promise<Playlist> {
+  const res = await api(`/api/music/playlists/${playlistId}/tracks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(track) })
+  if (!res.ok) throw new Error('Error al agregar track'); return res.json()
+}
+export async function removeTrackFromPlaylist(playlistId: string, index: number): Promise<Playlist> {
+  const res = await api(`/api/music/playlists/${playlistId}/tracks/${index}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar track'); return res.json()
+}
+export async function moveTrackInPlaylist(playlistId: string, from: number, to: number): Promise<Playlist> {
+  const res = await api(`/api/music/playlists/${playlistId}/tracks/move`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from, to }) })
+  if (!res.ok) throw new Error('Error al mover track'); return res.json()
+}
+export async function loadPlaylist(playlistId: string): Promise<void> {
+  const res = await api(`/api/music/playlists/${playlistId}/load`, { method: 'POST' })
+  if (!res.ok) throw new Error('Error al cargar playlist')
+}
+export async function saveQueueAsPlaylist(name: string, description?: string): Promise<Playlist> {
+  const res = await api('/api/music/playlists/save-queue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, description: description || '' }) })
+  if (!res.ok) throw new Error('Error al guardar playlist'); return res.json()
+}
+
 export async function searchMusic(q: string): Promise<MusicTrack[]> {
   const res = await api(`/api/music/search?q=${encodeURIComponent(q)}`)
   if (!res.ok) throw new Error('Error buscando musica')

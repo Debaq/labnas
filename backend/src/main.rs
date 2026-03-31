@@ -129,6 +129,15 @@ async fn main() {
         .route("/api/music/mpv-args", post(handlers::music::set_mpv_args))
         .route("/api/music/video", post(handlers::music::set_video))
         .route("/api/music/screens", get(handlers::music::list_screens))
+        .route("/api/music/playlists", get(handlers::music::list_playlists))
+        .route("/api/music/playlists", post(handlers::music::create_playlist))
+        .route("/api/music/playlists/save-queue", post(handlers::music::save_queue_as_playlist))
+        .route("/api/music/playlists/{id}", put(handlers::music::update_playlist))
+        .route("/api/music/playlists/{id}", delete(handlers::music::delete_playlist))
+        .route("/api/music/playlists/{id}/tracks", post(handlers::music::add_track_to_playlist))
+        .route("/api/music/playlists/{id}/tracks/{index}", delete(handlers::music::remove_track_from_playlist))
+        .route("/api/music/playlists/{id}/tracks/move", post(handlers::music::move_track_in_playlist))
+        .route("/api/music/playlists/{id}/load", post(handlers::music::load_playlist))
         // Terminal
         .route("/api/terminal", get(handlers::terminal::terminal_handler))
         // Printers 3D

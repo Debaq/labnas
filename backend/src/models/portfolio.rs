@@ -26,6 +26,21 @@ pub enum PortfolioStatus {
     Submitted,
 }
 
+/// Alcance: propio (participamos), externo (referencia), historico (archivo)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PortfolioScope {
+    Own,       // Participamos / lideramos
+    External,  // Externo, solo referencia informativa
+    Historic,  // Historico / archivo
+}
+
+impl Default for PortfolioScope {
+    fn default() -> Self {
+        Self::Own
+    }
+}
+
 impl Default for PortfolioStatus {
     fn default() -> Self {
         Self::Planned
@@ -55,11 +70,17 @@ pub struct PortfolioEntry {
     pub id: String,
     #[serde(default)]
     pub entry_type: PortfolioType,
+    #[serde(default)]
+    pub scope: PortfolioScope,
     pub title: String,
     #[serde(default)]
     pub description: String,
     #[serde(default)]
     pub institution: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub contact: String,
     #[serde(default)]
     pub funding_source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
