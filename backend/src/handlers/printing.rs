@@ -301,16 +301,16 @@ pub async fn print_upload(
 
     let result = run_lp_command(&printer_name, &tmp_file, copies.clone(), pages.clone(), &lp_options).await;
 
-    let _ = tokio::fs::remove_dir_all(&tmp_path).await;
-
     if result.is_ok() {
         let username = extract_session(&state, &headers)
             .await
             .map(|(u, _)| u)
             .unwrap_or_else(|| "unknown".to_string());
         state.log_activity("Impresion", &format!("{} en {}", file_name, printer_name), &username).await;
-        track_print_stats(&state, &printer_name, &copies, &pages, &lp_options, &username).await;
+        track_print_stats(&state, &printer_name, &tmp_file, &copies, &pages, &lp_options, &username).await;
     }
+
+    let _ = tokio::fs::remove_dir_all(&tmp_path).await;
 
     result
 }
@@ -660,9 +660,32 @@ pub async fn cancel_job(Path(id): Path<String>) -> Result<StatusCode, (StatusCod
 
 // ── Estadísticas y costos por impresora ──
 
-/// Estima cantidad de páginas desde un rango como "1-5,8,10-12"
-fn estimate_page_count(pages: &Option<String>, copies: u32) -> u64 {
-    let page_count = match pages {
+/// Cuenta páginas reales de un archivo usando pdfinfo (para PDFs)
+async fn count_file_pages(file_path: &str) -> u64 {
+    if file_path.to_lowercase().ends_with(".pdf") {
+        if let Ok(output) = Command::new("pdfinfo")
+            .arg(file_path)
+            .output()
+            .await
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                if line.starts_with("Pages:") {
+                    if let Some(n) = line.split(':').nth(1) {
+                        if let Ok(pages) = n.trim().parse::<u64>() {
+                            return pages;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    1 // No-PDF o error: asumir 1 página
+}
+
+/// Calcula páginas efectivas considerando rango, total real y copias
+fn calculate_printed_pages(pages_range: &Option<String>, total_pages: u64, copies: u32) -> u64 {
+    let page_count = match pages_range {
         Some(pg) if !pg.is_empty() => {
             let mut count: u64 = 0;
             for part in pg.split(',') {
@@ -677,9 +700,9 @@ fn estimate_page_count(pages: &Option<String>, copies: u32) -> u64 {
                     count += 1;
                 }
             }
-            if count == 0 { 1 } else { count }
+            if count == 0 { total_pages } else { count }
         }
-        _ => 1, // Sin rango = asumimos 1 página
+        _ => total_pages, // Sin rango = todas las páginas del documento
     };
     page_count * copies as u64
 }
@@ -721,6 +744,7 @@ fn increment_stats(stats: &mut crate::models::printing::PrinterStats, total_page
 async fn track_print_stats(
     state: &AppState,
     printer_name: &str,
+    file_path: &str,
     copies: &Option<String>,
     pages: &Option<String>,
     options: &HashMap<String, String>,
@@ -731,7 +755,8 @@ async fn track_print_stats(
         .and_then(|c| c.parse::<u32>().ok())
         .unwrap_or(1)
         .max(1);
-    let total_pages = estimate_page_count(pages, num_copies);
+    let doc_pages = count_file_pages(file_path).await;
+    let total_pages = calculate_printed_pages(pages, doc_pages, num_copies);
     let paper_type = classify_paper(options);
 
     let mut config = state.config.lock().await;
