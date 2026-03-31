@@ -501,9 +501,10 @@ export default function PrintingPage() {
                       style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
                     >
                       <option value="">Todas</option>
-                      <option value="odd">Solo impares</option>
-                      <option value="even">Solo pares</option>
+                      <option value="odd">Solo impares (1, 3, 5...)</option>
+                      <option value="even">Solo pares (2, 4, 6...)</option>
                     </select>
+                    <span className="block text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>Para imprimir a doble cara manual</span>
                   </div>
                   <div>
                     <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Paginas por hoja</label>
@@ -513,47 +514,59 @@ export default function PrintingPage() {
                       className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
                       style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
                     >
-                      <option value="1">1</option>
-                      <option value="2">2</option>
-                      <option value="4">4</option>
-                      <option value="6">6</option>
-                      <option value="9">9</option>
-                      <option value="16">16</option>
+                      <option value="1">1 (normal)</option>
+                      <option value="2">2 en 1</option>
+                      <option value="4">4 en 1</option>
+                      <option value="6">6 en 1</option>
+                      <option value="9">9 en 1</option>
+                      <option value="16">16 en 1</option>
                     </select>
+                    {numberUp !== '1' && <span className="block text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>{numberUp} paginas reducidas en cada hoja</span>}
                   </div>
                   <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Orden de paginas</label>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Orden de salida</label>
                     <select
                       value={outputOrder}
                       onChange={(e) => setOutputOrder(e.target.value)}
                       className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
                       style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
                     >
-                      <option value="">Normal</option>
-                      <option value="reverse">Inverso (ultima primero)</option>
+                      <option value="">Normal (1, 2, 3...)</option>
+                      <option value="reverse">Inverso (...3, 2, 1)</option>
                     </select>
+                    {outputOrder === 'reverse' && <span className="block text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>Las hojas salen ordenadas boca arriba</span>}
                   </div>
                 </div>
-                <div className="flex items-center gap-6 mt-3">
+                <div className="flex flex-col gap-2 mt-3">
                   {Number(copies) > 1 && (
-                    <label className="flex items-center gap-2 cursor-pointer">
+                    <label className="flex items-start gap-2 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={collate}
                         onChange={(e) => setCollate(e.target.checked)}
+                        className="mt-0.5"
                         style={{ accentColor: 'var(--accent)' }}
                       />
-                      <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Intercalar copias</span>
+                      <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                        Intercalar copias
+                        <span className="block text-[10px] mt-0.5" style={{ opacity: 0.7 }}>
+                          {collate ? 'Cada copia completa: 1-2-3, 1-2-3' : 'Agrupar por pagina: 1-1, 2-2, 3-3'}
+                        </span>
+                      </span>
                     </label>
                   )}
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  <label className="flex items-start gap-2 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={fitToPage}
                       onChange={(e) => setFitToPage(e.target.checked)}
+                      className="mt-0.5"
                       style={{ accentColor: 'var(--accent)' }}
                     />
-                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Ajustar a pagina</span>
+                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                      Ajustar a pagina
+                      <span className="block text-[10px] mt-0.5" style={{ opacity: 0.7 }}>Escala el contenido para que entre en la hoja</span>
+                    </span>
                   </label>
                 </div>
               </div>
