@@ -1,6 +1,6 @@
 use axum::{
     extract::{Multipart, Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Json,
 };
 use std::collections::HashMap;
@@ -9,9 +9,25 @@ use tokio::process::Command;
 
 use crate::config::save_config;
 use crate::models::printing::{
-    CupsPrintJob, CupsPrinter, PrintFileRequest, PrinterCosts, PrinterOption, PrinterStatsResponse,
+    AllUserCostsResponse, CupsPrintJob, CupsPrinter, PrintFileRequest, PrinterCosts,
+    PrinterOption, PrinterStatsResponse, UserCostsResponse, UserPrinterStats,
 };
 use crate::state::AppState;
+
+/// Extrae el username de la sesión a partir del header Authorization
+async fn extract_session(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Option<(String, crate::models::notifications::UserRole)> {
+    let token = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string())?;
+    let sessions = state.sessions.lock().await;
+    let session = sessions.get(&token)?;
+    Some((session.username.clone(), session.role.clone()))
+}
 
 // Formatos que CUPS imprime bien nativamente (sin conversion)
 const PRINTABLE_EXTENSIONS: &[&str] = &[
@@ -204,6 +220,7 @@ pub async fn printer_options(
 
 pub async fn print_upload(
     State(state): State<AppState>,
+    headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
     let mut printer: Option<String> = None;
@@ -287,8 +304,12 @@ pub async fn print_upload(
     let _ = tokio::fs::remove_dir_all(&tmp_path).await;
 
     if result.is_ok() {
-        state.log_activity("Impresion", &format!("{} en {}", file_name, printer_name), "web").await;
-        track_print_stats(&state, &printer_name, &copies, &pages, &lp_options).await;
+        let username = extract_session(&state, &headers)
+            .await
+            .map(|(u, _)| u)
+            .unwrap_or_else(|| "unknown".to_string());
+        state.log_activity("Impresion", &format!("{} en {}", file_name, printer_name), &username).await;
+        track_print_stats(&state, &printer_name, &copies, &pages, &lp_options, &username).await;
     }
 
     result
@@ -685,13 +706,25 @@ fn classify_paper(options: &HashMap<String, String>) -> &'static str {
     }
 }
 
-/// Registra estadísticas de impresión en la config
+/// Incrementa stats globales y por usuario
+fn increment_stats(stats: &mut crate::models::printing::PrinterStats, total_pages: u64, paper_type: &str) {
+    stats.total_jobs += 1;
+    stats.total_pages += total_pages;
+    match paper_type {
+        "oficio" => stats.pages_oficio += total_pages,
+        "special" => stats.pages_special += total_pages,
+        _ => stats.pages_carta += total_pages,
+    }
+}
+
+/// Registra estadísticas de impresión en la config (global + por usuario)
 async fn track_print_stats(
     state: &AppState,
     printer_name: &str,
     copies: &Option<String>,
     pages: &Option<String>,
     options: &HashMap<String, String>,
+    username: &str,
 ) {
     let num_copies = copies
         .as_ref()
@@ -719,13 +752,15 @@ async fn track_print_stats(
         }
     };
 
-    printer_config.stats.total_jobs += 1;
-    printer_config.stats.total_pages += total_pages;
-    match paper_type {
-        "oficio" => printer_config.stats.pages_oficio += total_pages,
-        "special" => printer_config.stats.pages_special += total_pages,
-        _ => printer_config.stats.pages_carta += total_pages,
-    }
+    // Stats globales
+    increment_stats(&mut printer_config.stats, total_pages, paper_type);
+
+    // Stats por usuario
+    let user_stats = printer_config
+        .user_stats
+        .entry(username.to_string())
+        .or_default();
+    increment_stats(user_stats, total_pages, paper_type);
 
     let _ = save_config(&config).await;
 }
@@ -806,7 +841,87 @@ pub async fn reset_printer_stats(
 
     if let Some(p) = config.cups_printers.iter_mut().find(|p| p.name == name) {
         p.stats = crate::models::printing::PrinterStats::default();
+        p.user_stats.clear();
         save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     }
     Ok(StatusCode::OK)
+}
+
+/// Construye costos por usuario a partir de la config
+fn build_user_costs(
+    config: &crate::config::LabNasConfig,
+    filter_user: Option<&str>,
+) -> AllUserCostsResponse {
+    let mut user_map: std::collections::BTreeMap<String, Vec<UserPrinterStats>> =
+        std::collections::BTreeMap::new();
+    let mut general_cost = 0.0;
+    let mut general_jobs = 0u64;
+    let mut general_pages = 0u64;
+
+    for printer in &config.cups_printers {
+        let pcost = calculate_estimated_cost(&printer.costs, &printer.stats);
+        general_cost += pcost;
+        general_jobs += printer.stats.total_jobs;
+        general_pages += printer.stats.total_pages;
+
+        for (username, stats) in &printer.user_stats {
+            if let Some(filter) = filter_user {
+                if username != filter {
+                    continue;
+                }
+            }
+            let est = calculate_estimated_cost(&printer.costs, stats);
+            user_map
+                .entry(username.clone())
+                .or_default()
+                .push(UserPrinterStats {
+                    printer: printer.name.clone(),
+                    stats: stats.clone(),
+                    estimated_cost: est,
+                });
+        }
+    }
+
+    let users = user_map
+        .into_iter()
+        .map(|(username, printers)| {
+            let total_cost: f64 = printers.iter().map(|p| p.estimated_cost).sum();
+            let total_jobs: u64 = printers.iter().map(|p| p.stats.total_jobs).sum();
+            let total_pages: u64 = printers.iter().map(|p| p.stats.total_pages).sum();
+            UserCostsResponse {
+                username,
+                total_cost,
+                total_jobs,
+                total_pages,
+                printers,
+            }
+        })
+        .collect();
+
+    AllUserCostsResponse {
+        users,
+        general_cost,
+        general_jobs,
+        general_pages,
+    }
+}
+
+/// GET /api/printing/user-costs — Admin: costos de todos los usuarios
+pub async fn get_all_user_costs(
+    State(state): State<AppState>,
+) -> Json<AllUserCostsResponse> {
+    let config = state.config.lock().await;
+    Json(build_user_costs(&config, None))
+}
+
+/// GET /api/printing/my-costs — Costos del usuario actual + totales generales
+pub async fn get_my_costs(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<AllUserCostsResponse>, (StatusCode, String)> {
+    let (username, _) = extract_session(&state, &headers)
+        .await
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    let config = state.config.lock().await;
+    Ok(Json(build_user_costs(&config, Some(&username))))
 }

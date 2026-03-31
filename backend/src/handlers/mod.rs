@@ -11,3 +11,4 @@ pub mod system;
 pub mod tasks;
 pub mod terminal;
 pub mod inventory;
+pub mod portfolio;

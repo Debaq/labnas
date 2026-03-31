@@ -5,6 +5,7 @@ use crate::models::notes::Note;
 use crate::models::notifications::NotificationConfig;
 use crate::models::printers3d::Printer3DConfig;
 use crate::models::inventory::InventoryConfig;
+use crate::models::portfolio::PortfolioConfig;
 use crate::models::printing::CupsPrinterConfig;
 use crate::models::tasks::TasksConfig;
 use serde::{Deserialize, Serialize};
@@ -36,10 +37,14 @@ pub struct LabNasConfig {
     pub services: Vec<LabService>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lastfm_api_key: Option<String>,
+    #[serde(default = "default_mpv_args")]
+    pub mpv_extra_args: Vec<String>,
     #[serde(default)]
     pub cups_printers: Vec<CupsPrinterConfig>,
     #[serde(default)]
     pub inventory: InventoryConfig,
+    #[serde(default)]
+    pub portfolio: PortfolioConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +55,10 @@ pub struct LabService {
     pub description: String,
     #[serde(default)]
     pub icon: String,
+}
+
+fn default_mpv_args() -> Vec<String> {
+    vec!["--af=lavfi=[loudnorm=I=-14:TP=-1:LRA=11]".to_string()]
 }
 
 fn default_mdns_hostname() -> String {

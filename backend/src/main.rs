@@ -125,6 +125,8 @@ async fn main() {
         .route("/api/music/queue/clear", post(handlers::music::queue_clear))
         .route("/api/music/shuffle", post(handlers::music::toggle_shuffle))
         .route("/api/music/repeat", post(handlers::music::toggle_repeat))
+        .route("/api/music/mpv-args", get(handlers::music::get_mpv_args))
+        .route("/api/music/mpv-args", post(handlers::music::set_mpv_args))
         .route("/api/music/video", post(handlers::music::set_video))
         .route("/api/music/screens", get(handlers::music::list_screens))
         // Terminal
@@ -159,6 +161,8 @@ async fn main() {
         .route("/api/printing/printers/{name}/stats", get(handlers::printing::get_printer_stats))
         .route("/api/printing/printers/{name}/costs", post(handlers::printing::set_printer_costs))
         .route("/api/printing/printers/{name}/stats/reset", post(handlers::printing::reset_printer_stats))
+        .route("/api/printing/user-costs", get(handlers::printing::get_all_user_costs))
+        .route("/api/printing/my-costs", get(handlers::printing::get_my_costs))
         // Notifications (Telegram)
         .route("/api/notifications/telegram", get(handlers::notifications::get_config))
         .route("/api/notifications/telegram/token", post(handlers::notifications::set_bot_token))
@@ -203,6 +207,13 @@ async fn main() {
         .route("/api/inventory/print-history", get(handlers::inventory::list_print_history))
         .route("/api/inventory/print-history", post(handlers::inventory::add_print_history))
         .route("/api/inventory/print-history/{id}", delete(handlers::inventory::delete_print_history))
+        // Portfolio
+        .route("/api/portfolio", get(handlers::portfolio::list_entries))
+        .route("/api/portfolio", post(handlers::portfolio::create_entry))
+        .route("/api/portfolio/{id}", put(handlers::portfolio::update_entry))
+        .route("/api/portfolio/{id}", delete(handlers::portfolio::delete_entry))
+        .route("/api/portfolio/{id}/requirements/{req_id}/toggle", post(handlers::portfolio::toggle_requirement))
+        .route("/api/portfolio/{id}/milestones/{mil_id}/toggle", post(handlers::portfolio::toggle_milestone))
         // File sharing
         .route("/api/shares", get(handlers::extras::list_shares))
         .route("/api/shares", post(handlers::extras::create_share))

@@ -649,6 +649,18 @@ export async function resetPrinterStats(name: string): Promise<void> {
   if (!res.ok) throw new Error('Error al resetear estadisticas')
 }
 
+export async function fetchAllUserCosts(): Promise<import('../types').AllUserCostsResponse> {
+  const res = await api('/api/printing/user-costs')
+  if (!res.ok) throw new Error('Error al obtener costos por usuario')
+  return res.json()
+}
+
+export async function fetchMyCosts(): Promise<import('../types').AllUserCostsResponse> {
+  const res = await api('/api/printing/my-costs')
+  if (!res.ok) throw new Error('Error al obtener mis costos')
+  return res.json()
+}
+
 // --- Tasks & Projects ---
 
 export async function fetchProjects(): Promise<Project[]> {
@@ -918,6 +930,51 @@ export async function addPrintHistory(data: Partial<import('../types').PrintHist
 export async function deletePrintHistory(id: string): Promise<void> {
   const res = await api(`/api/inventory/print-history/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar entrada')
+}
+
+// --- Portfolio ---
+
+export async function fetchPortfolio(): Promise<import('../types').PortfolioEntry[]> {
+  const res = await api('/api/portfolio')
+  if (!res.ok) throw new Error('Error al obtener portafolio')
+  return res.json()
+}
+
+export async function createPortfolioEntry(data: Partial<import('../types').PortfolioEntry>): Promise<import('../types').PortfolioEntry> {
+  const res = await api('/api/portfolio', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Error al crear entrada')
+  return res.json()
+}
+
+export async function updatePortfolioEntry(id: string, data: Partial<import('../types').PortfolioEntry>): Promise<import('../types').PortfolioEntry> {
+  const res = await api(`/api/portfolio/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Error al actualizar entrada')
+  return res.json()
+}
+
+export async function deletePortfolioEntry(id: string): Promise<void> {
+  const res = await api(`/api/portfolio/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar entrada')
+}
+
+export async function togglePortfolioRequirement(entryId: string, reqId: string): Promise<import('../types').PortfolioEntry> {
+  const res = await api(`/api/portfolio/${entryId}/requirements/${reqId}/toggle`, { method: 'POST' })
+  if (!res.ok) throw new Error('Error al cambiar requisito')
+  return res.json()
+}
+
+export async function togglePortfolioMilestone(entryId: string, milId: string): Promise<import('../types').PortfolioEntry> {
+  const res = await api(`/api/portfolio/${entryId}/milestones/${milId}/toggle`, { method: 'POST' })
+  if (!res.ok) throw new Error('Error al cambiar hito')
+  return res.json()
 }
 
 // --- File Sharing ---
@@ -1227,5 +1284,21 @@ export async function removeFromQueue(index: number): Promise<MusicState> {
 export async function recommendMusic(): Promise<MusicState> {
   const res = await api('/api/music/recommend', { method: 'POST' })
   if (!res.ok) { const t = await res.text(); throw new Error(t) }
+  return res.json()
+}
+
+export async function getMpvArgs(): Promise<string[]> {
+  const res = await api('/api/music/mpv-args')
+  if (!res.ok) throw new Error('Error obteniendo args de mpv')
+  return res.json()
+}
+
+export async function setMpvArgs(args: string[]): Promise<string[]> {
+  const res = await api('/api/music/mpv-args', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args),
+  })
+  if (!res.ok) throw new Error('Error guardando args de mpv')
   return res.json()
 }

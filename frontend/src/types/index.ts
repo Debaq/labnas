@@ -203,6 +203,27 @@ export interface PrinterStatsResponse {
   estimated_cost: number
 }
 
+export interface UserPrinterStats {
+  printer: string
+  stats: PrinterStats
+  estimated_cost: number
+}
+
+export interface UserCostsResponse {
+  username: string
+  total_cost: number
+  total_jobs: number
+  total_pages: number
+  printers: UserPrinterStats[]
+}
+
+export interface AllUserCostsResponse {
+  users: UserCostsResponse[]
+  general_cost: number
+  general_jobs: number
+  general_pages: number
+}
+
 // --- Inventory ---
 
 export interface InventoryCategory {
@@ -253,6 +274,49 @@ export interface PrintHistoryEntry {
   total_cost: number
   success: boolean
   notes: string
+  created_at: string
+}
+
+// --- Portfolio ---
+
+export type PortfolioType = 'project' | 'course' | 'diploma' | 'workshop'
+export type PortfolioStatus = 'planned' | 'active' | 'completed' | 'cancelled' | 'submitted'
+
+export interface PortfolioRequirement {
+  id: string
+  text: string
+  completed: boolean
+}
+
+export interface PortfolioMilestone {
+  id: string
+  title: string
+  date: string
+  completed: boolean
+}
+
+export interface PortfolioEntry {
+  id: string
+  entry_type: PortfolioType
+  title: string
+  description: string
+  institution: string
+  funding_source: string
+  budget: number | null
+  principal_investigator: string
+  collaborators: string[]
+  participants: string[]
+  start_date: string
+  end_date: string | null
+  hours: number | null
+  modality: string
+  status: PortfolioStatus
+  requirements: PortfolioRequirement[]
+  milestones: PortfolioMilestone[]
+  tags: string[]
+  notes: string
+  related_files: string[]
+  related_inventory: string[]
   created_at: string
 }
 

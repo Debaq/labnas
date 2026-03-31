@@ -75,6 +75,7 @@ export default function DashboardPage() {
   const [printerStatuses, setPrinterStatuses] = useState<Printer3DStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [services, setServices] = useState<LabService[]>([])
+  const [serverIp, setServerIp] = useState<string | null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [projects, setProjects] = useState<Project[]>([])
@@ -95,7 +96,7 @@ export default function DashboardPage() {
       ])
       if (disksData.status === 'fulfilled') setDisks(disksData.value)
       if (hostsData.status === 'fulfilled') setHosts(hostsData.value)
-      if (healthData.status === 'fulfilled') setHealth(healthData.value)
+      if (healthData.status === 'fulfilled') { setHealth(healthData.value); if (healthData.value.ip) setServerIp(healthData.value.ip) }
       if (sysInfoData.status === 'fulfilled') setSystemInfo(sysInfoData.value)
       if (servicesData.status === 'fulfilled') setServices(servicesData.value)
       if (tasksData.status === 'fulfilled') setTasks(tasksData.value)
@@ -454,10 +455,12 @@ export default function DashboardPage() {
             </h2>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-            {services.map(svc => (
+            {services.map(svc => {
+              const host = (serverIp && window.location.hostname.includes('.local')) ? serverIp : window.location.hostname
+              return (
               <a
                 key={svc.port}
-                href={`${window.location.protocol}//${window.location.hostname}:${svc.port}`}
+                href={`${window.location.protocol}//${host}:${svc.port}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-3 p-4 rounded-lg transition-all hover:opacity-80"
@@ -475,7 +478,8 @@ export default function DashboardPage() {
                 </div>
                 <ExternalLink size={14} style={{ color: 'var(--text-secondary)' }} />
               </a>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}

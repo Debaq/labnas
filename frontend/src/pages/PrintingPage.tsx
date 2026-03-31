@@ -14,6 +14,11 @@ import {
   Save,
   RotateCcw,
   Zap,
+  Users,
+  User,
+  ChevronDown,
+  ChevronRight,
+  DollarSign,
 } from 'lucide-react'
 import {
   fetchCupsPrinters,
@@ -27,15 +32,25 @@ import {
   setPrinterCosts,
   resetPrinterStats,
   wakePrinter,
+  fetchAllUserCosts,
+  fetchMyCosts,
 } from '../api'
-import type { CupsPrinter, CupsPrintJob, PrinterOption, PrinterStatsResponse } from '../types'
+import { useAuth } from '../auth/AuthContext'
+import type { CupsPrinter, CupsPrintJob, PrinterOption, PrinterStatsResponse, AllUserCostsResponse } from '../types'
 
 export default function PrintingPage() {
+  const { isAdmin } = useAuth()
   const [printers, setPrinters] = useState<CupsPrinter[]>([])
   const [jobs, setJobs] = useState<CupsPrintJob[]>([])
   const [loading, setLoading] = useState(true)
   const [printing, setPrinting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // User costs
+  const [userCosts, setUserCosts] = useState<AllUserCostsResponse | null>(null)
+  const [userCostsLoading, setUserCostsLoading] = useState(false)
+  const [showUserCosts, setShowUserCosts] = useState(false)
+  const [expandedUser, setExpandedUser] = useState<string | null>(null)
 
   // Print modal
   const [showModal, setShowModal] = useState(false)
@@ -89,6 +104,15 @@ export default function PrintingPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  async function loadUserCosts() {
+    setUserCostsLoading(true)
+    try {
+      const data = isAdmin ? await fetchAllUserCosts() : await fetchMyCosts()
+      setUserCosts(data)
+    } catch {}
+    setUserCostsLoading(false)
   }
 
   async function loadStats(printerName: string) {
@@ -347,22 +371,21 @@ export default function PrintingPage() {
                   <span className="text-xs font-mono ml-auto" style={{ color: 'var(--text-secondary)' }}>
                     {p.name}
                   </span>
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation()
+                      try {
+                        await wakePrinter(p.name)
+                        await loadData()
+                      } catch {}
+                    }}
+                    className="p-1 rounded-lg transition-all duration-200 hover:opacity-80"
+                    style={{ color: 'var(--warning)' }}
+                    title="Despertar y habilitar"
+                  >
+                    <Zap size={14} />
+                  </button>
                   {p.state === 'disabled' ? (
-                    <>
-                    <button
-                      onClick={async (e) => {
-                        e.stopPropagation()
-                        try {
-                          await wakePrinter(p.name)
-                          await loadData()
-                        } catch {}
-                      }}
-                      className="p-1 rounded-lg transition-all duration-200 hover:opacity-80"
-                      style={{ color: 'var(--warning)' }}
-                      title="Despertar y habilitar"
-                    >
-                      <Zap size={14} />
-                    </button>
                     <button
                       onClick={async (e) => {
                         e.stopPropagation()
@@ -377,7 +400,6 @@ export default function PrintingPage() {
                     >
                       <Play size={14} />
                     </button>
-                    </>
                   ) : (
                     <button
                       onClick={async (e) => {
@@ -579,6 +601,146 @@ export default function PrintingPage() {
             </table>
           )}
         </div>
+      </div>
+
+      {/* User Costs */}
+      <div>
+        <button
+          onClick={() => {
+            const next = !showUserCosts
+            setShowUserCosts(next)
+            if (next && !userCosts) loadUserCosts()
+          }}
+          className="flex items-center gap-2 text-base font-semibold mb-4 hover:opacity-80 transition-opacity"
+          style={{ color: 'var(--text-primary)' }}
+        >
+          {showUserCosts ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+          <DollarSign size={18} style={{ color: 'var(--accent)' }} />
+          Costos por Usuario
+        </button>
+
+        {showUserCosts && (
+          <div
+            className="rounded-xl p-4 space-y-4"
+            style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
+          >
+            {userCostsLoading ? (
+              <div className="flex justify-center py-6">
+                <Loader2 size={20} className="animate-spin" style={{ color: 'var(--accent)' }} />
+              </div>
+            ) : !userCosts ? (
+              <p className="text-sm text-center py-4" style={{ color: 'var(--text-secondary)' }}>
+                No se pudieron cargar los costos
+              </p>
+            ) : (
+              <>
+                {/* General totals */}
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                    <div className="text-xl font-bold font-mono" style={{ color: 'var(--text-primary)' }}>
+                      {userCosts.general_jobs}
+                    </div>
+                    <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Trabajos totales</div>
+                  </div>
+                  <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                    <div className="text-xl font-bold font-mono" style={{ color: 'var(--text-primary)' }}>
+                      {userCosts.general_pages}
+                    </div>
+                    <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Paginas totales</div>
+                  </div>
+                  <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                    <div className="text-xl font-bold font-mono" style={{ color: userCosts.general_cost > 0 ? 'var(--accent)' : 'var(--text-primary)' }}>
+                      {userCosts.general_cost > 0 ? `$${userCosts.general_cost.toFixed(0)}` : '--'}
+                    </div>
+                    <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Costo total</div>
+                  </div>
+                </div>
+
+                {/* Per user */}
+                {userCosts.users.length === 0 ? (
+                  <p className="text-xs text-center py-3" style={{ color: 'var(--text-secondary)' }}>
+                    Aun no hay impresiones registradas por usuario
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {userCosts.users.map((u) => (
+                      <div
+                        key={u.username}
+                        className="rounded-lg overflow-hidden"
+                        style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+                      >
+                        <button
+                          onClick={() => setExpandedUser(expandedUser === u.username ? null : u.username)}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-left hover:opacity-80 transition-opacity"
+                        >
+                          {isAdmin ? <Users size={14} style={{ color: 'var(--accent)' }} /> : <User size={14} style={{ color: 'var(--accent)' }} />}
+                          <span className="text-sm font-medium flex-1" style={{ color: 'var(--text-primary)' }}>
+                            {u.username}
+                          </span>
+                          <span className="text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>
+                            {u.total_jobs} trabajos
+                          </span>
+                          <span className="text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>
+                            {u.total_pages} pag
+                          </span>
+                          <span className="text-sm font-bold font-mono" style={{ color: u.total_cost > 0 ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                            {u.total_cost > 0 ? `$${u.total_cost.toFixed(0)}` : '--'}
+                          </span>
+                          {expandedUser === u.username ? <ChevronDown size={14} style={{ color: 'var(--text-secondary)' }} /> : <ChevronRight size={14} style={{ color: 'var(--text-secondary)' }} />}
+                        </button>
+
+                        {expandedUser === u.username && u.printers.length > 0 && (
+                          <div className="px-4 pb-3 space-y-2" style={{ borderTop: '1px solid var(--border)' }}>
+                            <div className="pt-2 text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>
+                              Desglose por impresora
+                            </div>
+                            {u.printers.map((pr) => (
+                              <div
+                                key={pr.printer}
+                                className="flex items-center gap-3 rounded-md px-3 py-2"
+                                style={{ backgroundColor: 'var(--bg-primary)' }}
+                              >
+                                <Printer size={12} style={{ color: 'var(--text-secondary)' }} />
+                                <span className="text-xs font-mono flex-1" style={{ color: 'var(--text-primary)' }}>
+                                  {pr.printer}
+                                </span>
+                                <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+                                  {pr.stats.total_jobs}j / {pr.stats.total_pages}p
+                                </span>
+                                {pr.stats.pages_carta > 0 && (
+                                  <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>C:{pr.stats.pages_carta}</span>
+                                )}
+                                {pr.stats.pages_oficio > 0 && (
+                                  <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>O:{pr.stats.pages_oficio}</span>
+                                )}
+                                {pr.stats.pages_special > 0 && (
+                                  <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>E:{pr.stats.pages_special}</span>
+                                )}
+                                <span className="text-xs font-bold font-mono" style={{ color: pr.estimated_cost > 0 ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                                  {pr.estimated_cost > 0 ? `$${pr.estimated_cost.toFixed(0)}` : '--'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex justify-end">
+                  <button
+                    onClick={loadUserCosts}
+                    className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg hover:opacity-80"
+                    style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                  >
+                    <RefreshCw size={10} /> Actualizar
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Print Options Modal */}

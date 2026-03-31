@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CupsPrinter {
@@ -45,6 +46,9 @@ pub struct CupsPrinterConfig {
     pub costs: PrinterCosts,
     #[serde(default)]
     pub stats: PrinterStats,
+    /// Stats por usuario: username -> PrinterStats
+    #[serde(default)]
+    pub user_stats: BTreeMap<String, PrinterStats>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -83,4 +87,31 @@ pub struct PrinterStatsResponse {
     pub costs: PrinterCosts,
     pub stats: PrinterStats,
     pub estimated_cost: f64,
+}
+
+/// Stats de un usuario en una impresora con costo calculado
+#[derive(Debug, Clone, Serialize)]
+pub struct UserPrinterStats {
+    pub printer: String,
+    pub stats: PrinterStats,
+    pub estimated_cost: f64,
+}
+
+/// Costos de un usuario (totales + desglose por impresora)
+#[derive(Debug, Clone, Serialize)]
+pub struct UserCostsResponse {
+    pub username: String,
+    pub total_cost: f64,
+    pub total_jobs: u64,
+    pub total_pages: u64,
+    pub printers: Vec<UserPrinterStats>,
+}
+
+/// Respuesta completa: todos los usuarios o solo el actual
+#[derive(Debug, Clone, Serialize)]
+pub struct AllUserCostsResponse {
+    pub users: Vec<UserCostsResponse>,
+    pub general_cost: f64,
+    pub general_jobs: u64,
+    pub general_pages: u64,
 }

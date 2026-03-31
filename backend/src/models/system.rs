@@ -5,6 +5,7 @@ pub struct HealthResponse {
     pub status: String,
     pub version: String,
     pub uptime: String,
+    pub ip: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

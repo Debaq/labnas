@@ -108,8 +108,9 @@ pub async fn permission_check(
         (&Method::POST, p) if p.starts_with("/api/network/device/") => is_admin,
         (&Method::DELETE, p) if p.starts_with("/api/network/device/") => is_admin,
 
-        // Admin only: printer enable/disable
+        // Admin only: printer enable/disable + all user costs
         (&Method::POST, p) if p.contains("/enable") || p.contains("/disable") => is_admin,
+        (&Method::GET, "/api/printing/user-costs") => is_admin,
 
         // Email: groq-key solo admin, el resto cualquier autenticado
         (&Method::POST, "/api/email/groq-key") => is_admin,

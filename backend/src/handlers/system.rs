@@ -42,10 +42,13 @@ pub async fn health_handler(State(state): State<AppState>) -> Json<HealthRespons
     let mins = (secs % 3600) / 60;
     let uptime_str = format!("{}h {}m {}s", hours, mins, secs % 60);
 
+    let ip = local_ip_address::local_ip().ok().map(|ip| ip.to_string());
+
     Json(HealthResponse {
         status: "ok".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         uptime: uptime_str,
+        ip,
     })
 }
 

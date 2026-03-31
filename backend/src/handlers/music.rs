@@ -266,6 +266,17 @@ async fn spawn_player(state: &AppState, video_id: &str) {
         format!("--input-ipc-server={}", MPV_SOCKET),
     ];
 
+    // Args extra de mpv desde la config del admin
+    {
+        let cfg = state.config.lock().await;
+        for arg in &cfg.mpv_extra_args {
+            let trimmed = arg.trim();
+            if !trimmed.is_empty() {
+                args.push(trimmed.to_string());
+            }
+        }
+    }
+
     if video {
         // Asegurar acceso X antes de abrir ventana
         ensure_x_access().await;
@@ -771,6 +782,25 @@ pub async fn toggle_repeat(
         RepeatMode::One => RepeatMode::Off,
     };
     Json(ms.clone())
+}
+
+/// GET /api/music/mpv-args - Obtener args extra de mpv
+pub async fn get_mpv_args(
+    State(state): State<AppState>,
+) -> Json<Vec<String>> {
+    let cfg = state.config.lock().await;
+    Json(cfg.mpv_extra_args.clone())
+}
+
+/// POST /api/music/mpv-args - Guardar args extra de mpv
+pub async fn set_mpv_args(
+    State(state): State<AppState>,
+    Json(args): Json<Vec<String>>,
+) -> Json<Vec<String>> {
+    let mut cfg = state.config.lock().await;
+    cfg.mpv_extra_args = args.clone();
+    let _ = crate::config::save_config(&cfg).await;
+    Json(args)
 }
 
 /// POST /api/music/video - Activar/desactivar video + pantalla

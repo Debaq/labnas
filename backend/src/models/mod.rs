@@ -9,3 +9,4 @@ pub mod notes;
 pub mod system;
 pub mod tasks;
 pub mod inventory;
+pub mod portfolio;
