@@ -44,7 +44,7 @@ async function api(url: string, opts?: RequestInit): Promise<Response> {
   return fetch(url, {
     ...opts,
     headers: isFormData
-      ? { Authorization: headers['Authorization'] || '' }
+      ? (headers['Authorization'] ? { Authorization: headers['Authorization'] } : {})
       : headers,
   })
 }
@@ -607,7 +607,10 @@ export async function printFileUpload(file: File, printer: string, opts?: {
     method: 'POST',
     body: formData,
   })
-  if (!res.ok) throw new Error('Error al imprimir')
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText)
+    throw new Error(text || 'Error al imprimir')
+  }
 }
 
 export async function printFilePath(req: PrintFileRequest): Promise<void> {

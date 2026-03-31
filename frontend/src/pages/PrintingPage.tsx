@@ -237,8 +237,9 @@ export default function PrintingPage() {
       setJobs(j)
       // Refresh stats if expanded
       if (expandedStats === selectedPrinter) loadStats(selectedPrinter)
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error imprimiendo:', err)
+      alert('Error al imprimir: ' + (err.message || err))
     } finally {
       setPrinting(false)
     }
