@@ -13,6 +13,28 @@ use crate::models::notifications::*;
 use crate::models::tasks::{Project, Task, TaskStatus};
 use crate::state::AppState;
 
+/// Permisos por defecto segun el rol (cuando no se envian explicitamente)
+pub fn default_permissions_for_role(role: &UserRole) -> UserPermissions {
+    match role {
+        UserRole::Admin => UserPermissions {
+            terminal: true,
+            impresion: true,
+            archivos_escritura: true,
+        },
+        UserRole::Operador => UserPermissions {
+            terminal: true,
+            impresion: true,
+            archivos_escritura: true,
+        },
+        UserRole::Observador => UserPermissions {
+            terminal: false,
+            impresion: true,
+            archivos_escritura: false,
+        },
+        UserRole::Pendiente => UserPermissions::default(),
+    }
+}
+
 /// Respuesta sanitizada de NotificationConfig que nunca expone el bot_token
 #[derive(serde::Serialize)]
 pub struct NotificationConfigResponse {
@@ -108,6 +130,9 @@ pub async fn set_chat_role(
     chat.role = req.role;
     if let Some(perms) = req.permissions {
         chat.permissions = perms;
+    } else {
+        // Asignar permisos por defecto segun el rol si no se envian explicitamente
+        chat.permissions = default_permissions_for_role(&chat.role);
     }
     let new_role = chat.role.clone();
     let new_perms = chat.permissions.clone();

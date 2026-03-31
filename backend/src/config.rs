@@ -4,6 +4,7 @@ use crate::models::network::KnownDevice;
 use crate::models::notes::Note;
 use crate::models::notifications::NotificationConfig;
 use crate::models::printers3d::Printer3DConfig;
+use crate::models::printing::CupsPrinterConfig;
 use crate::models::tasks::TasksConfig;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -34,6 +35,8 @@ pub struct LabNasConfig {
     pub services: Vec<LabService>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lastfm_api_key: Option<String>,
+    #[serde(default)]
+    pub cups_printers: Vec<CupsPrinterConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

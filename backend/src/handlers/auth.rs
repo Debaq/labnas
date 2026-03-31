@@ -285,6 +285,9 @@ pub async fn set_user_role(
     user.role = req.role.clone();
     if let Some(perms) = req.permissions {
         user.permissions = perms;
+    } else {
+        // Asignar permisos por defecto segun el rol si no se envian explicitamente
+        user.permissions = crate::handlers::notifications::default_permissions_for_role(&user.role);
     }
     let new_role = user.role.clone();
     let new_perms = user.permissions.clone();

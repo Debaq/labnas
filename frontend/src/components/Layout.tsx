@@ -197,31 +197,6 @@ export default function Layout() {
           ))}
         </nav>
 
-        {/* Theme selector - oculto cuando esta colapsado */}
-        {!collapsed && (
-          <div className="px-4 py-3" style={{ borderTop: '1px solid var(--border)' }}>
-            <label className="block text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-              Tema
-            </label>
-            <select
-              value={theme}
-              onChange={(e) => setTheme(e.target.value as any)}
-              className="w-full px-3 py-1.5 rounded-lg text-sm cursor-pointer outline-none transition-all duration-200"
-              style={{
-                backgroundColor: 'var(--input-bg)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--input-border)',
-              }}
-            >
-              {themeNames.map((t) => (
-                <option key={t} value={t}>
-                  {t === 'auto' ? 'Automatico' : t.charAt(0).toUpperCase() + t.slice(1)}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
         {/* User info */}
         <div
           className="px-3 py-3 flex items-center"

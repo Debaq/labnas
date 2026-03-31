@@ -55,6 +55,16 @@ pub struct AddPrinter3DRequest {
     pub camera_url: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UpdatePrinter3DRequest {
+    pub name: Option<String>,
+    pub ip: Option<String>,
+    pub port: Option<u16>,
+    pub printer_type: Option<Printer3DType>,
+    pub api_key: Option<Option<String>>,
+    pub camera_url: Option<Option<String>>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DetectPrintersResult {
     pub ip: String,

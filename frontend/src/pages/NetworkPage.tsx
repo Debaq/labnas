@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Radar, Monitor, Wifi, Loader2, Box, ShieldCheck, ShieldAlert, Tag, X } from 'lucide-react'
-import { scanNetwork, fetchHosts, labelDevice, unlabelDevice } from '../api'
-import type { NetworkHost } from '../types'
+import { scanNetwork, fetchHosts, labelDevice, unlabelDevice, fetchPrinters3D } from '../api'
+import type { NetworkHost, Printer3DConfig } from '../types'
 
 export default function NetworkPage() {
   const navigate = useNavigate()
@@ -12,15 +12,18 @@ export default function NetworkPage() {
   const [labelModal, setLabelModal] = useState<NetworkHost | null>(null)
   const [labelInput, setLabelInput] = useState('')
   const [iconInput, setIconInput] = useState('')
+  const [printer3DIps, setPrinter3DIps] = useState<Set<string>>(new Set())
 
   const deviceIcons = [
     '💻', '🖥️', '📱', '🖨️', '📷', '🎮', '📺', '🔌',
     '🌐', '📡', '🏠', '🔒', '💡', '🎵', '🤖', '⚡',
     '🔧', '📦', '🖲️', '⌨️', '🎧', '🕹️', '📻', '🔬',
+    '🧊', '🏭',
   ]
 
   useEffect(() => {
     loadHosts()
+    fetchPrinters3D().then(ps => setPrinter3DIps(new Set(ps.map(p => p.ip)))).catch(() => {})
   }, [])
 
   async function loadHosts() {
@@ -243,7 +246,7 @@ export default function NetworkPage() {
                           </button>
                         </>
                       )}
-                      {host.is_alive && (
+                      {host.is_alive && !printer3DIps.has(host.ip) && (
                         <button
                           onClick={() => navigate(`/printers3d?ip=${host.ip}`)}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all duration-200 hover:opacity-80"
@@ -253,6 +256,12 @@ export default function NetworkPage() {
                           <Box size={12} />
                           3D
                         </button>
+                      )}
+                      {printer3DIps.has(host.ip) && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-medium"
+                          style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}>
+                          <Box size={10} /> Impresora 3D
+                        </span>
                       )}
                     </div>
                   </td>

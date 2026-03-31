@@ -10,6 +10,10 @@ import {
   Settings2,
   Play,
   Pause,
+  BarChart3,
+  Save,
+  RotateCcw,
+  Zap,
 } from 'lucide-react'
 import {
   fetchCupsPrinters,
@@ -19,8 +23,12 @@ import {
   cancelPrintJob,
   enablePrinter,
   disablePrinter,
+  fetchPrinterStats,
+  setPrinterCosts,
+  resetPrinterStats,
+  wakePrinter,
 } from '../api'
-import type { CupsPrinter, CupsPrintJob, PrinterOption } from '../types'
+import type { CupsPrinter, CupsPrintJob, PrinterOption, PrinterStatsResponse } from '../types'
 
 export default function PrintingPage() {
   const [printers, setPrinters] = useState<CupsPrinter[]>([])
@@ -40,6 +48,12 @@ export default function PrintingPage() {
   const [printerOptions, setPrinterOptions] = useState<PrinterOption[]>([])
   const [optionValues, setOptionValues] = useState<Record<string, string>>({})
   const [optionsLoading, setOptionsLoading] = useState(false)
+
+  // Printer stats/costs
+  const [expandedStats, setExpandedStats] = useState<string | null>(null)
+  const [printerStats, setPrinterStats] = useState<Record<string, PrinterStatsResponse>>({})
+  const [editingCosts, setEditingCosts] = useState<Record<string, { ink_per_page: string; paper_carta: string; paper_oficio: string; paper_special: string }>>({})
+  const [savingCosts, setSavingCosts] = useState(false)
 
   // Standard print options
   const [orientation, setOrientation] = useState('')
@@ -74,6 +88,55 @@ export default function PrintingPage() {
       if (j.status === 'fulfilled') setJobs(j.value)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function loadStats(printerName: string) {
+    try {
+      const stats = await fetchPrinterStats(printerName)
+      setPrinterStats(prev => ({ ...prev, [printerName]: stats }))
+      setEditingCosts(prev => ({
+        ...prev,
+        [printerName]: {
+          ink_per_page: stats.costs.ink_per_page ? String(stats.costs.ink_per_page) : '',
+          paper_carta: stats.costs.paper_carta ? String(stats.costs.paper_carta) : '',
+          paper_oficio: stats.costs.paper_oficio ? String(stats.costs.paper_oficio) : '',
+          paper_special: stats.costs.paper_special ? String(stats.costs.paper_special) : '',
+        },
+      }))
+    } catch { /* ignore */ }
+  }
+
+  async function handleSaveCosts(printerName: string) {
+    const c = editingCosts[printerName]
+    if (!c) return
+    setSavingCosts(true)
+    try {
+      await setPrinterCosts(printerName, {
+        ink_per_page: parseFloat(c.ink_per_page) || 0,
+        paper_carta: parseFloat(c.paper_carta) || 0,
+        paper_oficio: parseFloat(c.paper_oficio) || 0,
+        paper_special: parseFloat(c.paper_special) || 0,
+      })
+      await loadStats(printerName)
+    } catch { /* ignore */ }
+    finally { setSavingCosts(false) }
+  }
+
+  async function handleResetStats(printerName: string) {
+    if (!confirm('Resetear estadisticas de esta impresora?')) return
+    try {
+      await resetPrinterStats(printerName)
+      await loadStats(printerName)
+    } catch { /* ignore */ }
+  }
+
+  function toggleStats(printerName: string) {
+    if (expandedStats === printerName) {
+      setExpandedStats(null)
+    } else {
+      setExpandedStats(printerName)
+      if (!printerStats[printerName]) loadStats(printerName)
     }
   }
 
@@ -148,6 +211,8 @@ export default function PrintingPage() {
       setSelectedFile(null)
       const j = await fetchPrintJobs()
       setJobs(j)
+      // Refresh stats if expanded
+      if (expandedStats === selectedPrinter) loadStats(selectedPrinter)
     } catch (err) {
       console.error('Error imprimiendo:', err)
     } finally {
@@ -283,6 +348,21 @@ export default function PrintingPage() {
                     {p.name}
                   </span>
                   {p.state === 'disabled' ? (
+                    <>
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation()
+                        try {
+                          await wakePrinter(p.name)
+                          await loadData()
+                        } catch {}
+                      }}
+                      className="p-1 rounded-lg transition-all duration-200 hover:opacity-80"
+                      style={{ color: 'var(--warning)' }}
+                      title="Despertar y habilitar"
+                    >
+                      <Zap size={14} />
+                    </button>
                     <button
                       onClick={async (e) => {
                         e.stopPropagation()
@@ -297,6 +377,7 @@ export default function PrintingPage() {
                     >
                       <Play size={14} />
                     </button>
+                    </>
                   ) : (
                     <button
                       onClick={async (e) => {
@@ -313,7 +394,109 @@ export default function PrintingPage() {
                       <Pause size={14} />
                     </button>
                   )}
+                  <button
+                    onClick={() => toggleStats(p.name)}
+                    className="p-1 rounded-lg transition-all duration-200 hover:opacity-80"
+                    style={{ color: expandedStats === p.name ? 'var(--accent)' : 'var(--text-secondary)' }}
+                    title="Estadisticas y costos"
+                  >
+                    <BarChart3 size={14} />
+                  </button>
                 </div>
+
+                {/* Stats panel */}
+                {expandedStats === p.name && (() => {
+                  const data = printerStats[p.name]
+                  const costs = editingCosts[p.name]
+                  if (!data) return (
+                    <div className="mt-3 pt-3 flex justify-center" style={{ borderTop: '1px solid var(--border)' }}>
+                      <Loader2 size={16} className="animate-spin" style={{ color: 'var(--accent)' }} />
+                    </div>
+                  )
+                  return (
+                    <div className="mt-3 pt-3 space-y-3" style={{ borderTop: '1px solid var(--border)' }}>
+                      {/* Stats */}
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="rounded-lg p-2" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                          <div className="text-lg font-bold font-mono" style={{ color: 'var(--text-primary)' }}>{data.stats.total_jobs}</div>
+                          <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Trabajos</div>
+                        </div>
+                        <div className="rounded-lg p-2" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                          <div className="text-lg font-bold font-mono" style={{ color: 'var(--text-primary)' }}>{data.stats.total_pages}</div>
+                          <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Paginas</div>
+                        </div>
+                        <div className="rounded-lg p-2" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                          <div className="text-lg font-bold font-mono" style={{ color: data.estimated_cost > 0 ? 'var(--accent)' : 'var(--text-primary)' }}>
+                            {data.estimated_cost > 0 ? `$${data.estimated_cost.toFixed(0)}` : '--'}
+                          </div>
+                          <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Costo est.</div>
+                        </div>
+                      </div>
+
+                      {/* Pages breakdown */}
+                      {data.stats.total_pages > 0 && (
+                        <div className="flex gap-3 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+                          {data.stats.pages_carta > 0 && <span>Carta: {data.stats.pages_carta}</span>}
+                          {data.stats.pages_oficio > 0 && <span>Oficio: {data.stats.pages_oficio}</span>}
+                          {data.stats.pages_special > 0 && <span>Especial: {data.stats.pages_special}</span>}
+                        </div>
+                      )}
+
+                      {/* Cost config */}
+                      {costs && (
+                        <div>
+                          <div className="text-[10px] font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>Costos por pagina</div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {([
+                              ['ink_per_page', 'Tinta/Toner'],
+                              ['paper_carta', 'Papel carta'],
+                              ['paper_oficio', 'Papel oficio'],
+                              ['paper_special', 'Papel especial'],
+                            ] as const).map(([key, label]) => (
+                              <div key={key} className="relative">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="any"
+                                  value={costs[key]}
+                                  onChange={(e) => setEditingCosts(prev => ({
+                                    ...prev,
+                                    [p.name]: { ...prev[p.name], [key]: e.target.value },
+                                  }))}
+                                  placeholder={label}
+                                  className="w-full px-2 py-1.5 rounded-lg text-xs outline-none pr-6"
+                                  style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                                />
+                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] pointer-events-none" style={{ color: 'var(--text-secondary)', opacity: 0.5 }}>$</span>
+                                <span className="block text-[9px] mt-0.5" style={{ color: 'var(--text-secondary)', opacity: 0.6 }}>{label}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="flex items-center gap-2 mt-2">
+                            <button
+                              onClick={() => handleSaveCosts(p.name)}
+                              disabled={savingCosts}
+                              className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg"
+                              style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
+                            >
+                              {savingCosts ? <Loader2 size={10} className="animate-spin" /> : <Save size={10} />}
+                              Guardar
+                            </button>
+                            {data.stats.total_jobs > 0 && (
+                              <button
+                                onClick={() => handleResetStats(p.name)}
+                                className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg"
+                                style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                              >
+                                <RotateCcw size={10} /> Resetear stats
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
               </div>
             ))}
           </div>

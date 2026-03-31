@@ -15,6 +15,8 @@ import {
   Users,
   Tag,
   UserPlus,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
 import {
   fetchProjects,
@@ -64,10 +66,14 @@ export default function TasksPage() {
   const [eventTitle, setEventTitle] = useState('')
   const [eventDate, setEventDate] = useState('')
   const [eventTime, setEventTime] = useState('')
-  const [eventInvitees, setEventInvitees] = useState('')
+  const [eventInvitees, setEventInvitees] = useState<string[]>([])
+  const [inviteeSearch, setInviteeSearch] = useState('')
   const [eventRemind, setEventRemind] = useState(15)
   const [eventRecurrence, setEventRecurrence] = useState('')
   const [eventRecurrenceEnd, setEventRecurrenceEnd] = useState('')
+  const [calendarMonth, setCalendarMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1) })
+  const [selectedDay, setSelectedDay] = useState<string | null>(null)
+  const [calendarView, setCalendarView] = useState<'month' | 'week'>('month')
 
   // Formulario de nueva tarea
   const [taskTitle, setTaskTitle] = useState('')
@@ -329,14 +335,89 @@ export default function TasksPage() {
       </div>
 
       {/* Calendario */}
-      {tab === 'calendario' && (
+      {tab === 'calendario' && (() => {
+        const today = new Date()
+        const todayStr = today.toISOString().slice(0, 10)
+        const year = calendarMonth.getFullYear()
+        const month = calendarMonth.getMonth()
+        const firstDay = new Date(year, month, 1)
+        const lastDay = new Date(year, month + 1, 0)
+        const startPad = (firstDay.getDay() + 6) % 7 // Lunes = 0
+        const daysInMonth = lastDay.getDate()
+        const prevMonth = new Date(year, month - 1, 1)
+        const prevMonthLastDay = new Date(year, month, 0).getDate()
+
+        // Build calendar grid (6 weeks max)
+        const cells: { day: number; month: number; year: number; dateStr: string; isCurrentMonth: boolean }[] = []
+        // Previous month padding
+        for (let i = startPad - 1; i >= 0; i--) {
+          const d = prevMonthLastDay - i
+          const m = prevMonth.getMonth()
+          const y = prevMonth.getFullYear()
+          cells.push({ day: d, month: m, year: y, dateStr: `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`, isCurrentMonth: false })
+        }
+        // Current month
+        for (let d = 1; d <= daysInMonth; d++) {
+          cells.push({ day: d, month, year, dateStr: `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`, isCurrentMonth: true })
+        }
+        // Next month padding
+        const remaining = 7 - (cells.length % 7)
+        if (remaining < 7) {
+          const nm = month + 1
+          const ny = nm > 11 ? year + 1 : year
+          const nmNorm = nm % 12
+          for (let d = 1; d <= remaining; d++) {
+            cells.push({ day: d, month: nmNorm, year: ny, dateStr: `${ny}-${String(nmNorm + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`, isCurrentMonth: false })
+          }
+        }
+
+        // Map events by date
+        const eventsByDate: Record<string, CalendarEvent[]> = {}
+        for (const ev of events) {
+          if (!eventsByDate[ev.date]) eventsByDate[ev.date] = []
+          eventsByDate[ev.date].push(ev)
+        }
+        // Also map tasks with due_date
+        const tasksByDate: Record<string, Task[]> = {}
+        for (const t of tasks) {
+          if (t.due_date) {
+            if (!tasksByDate[t.due_date]) tasksByDate[t.due_date] = []
+            tasksByDate[t.due_date].push(t)
+          }
+        }
+
+        const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+        const dayNames = ['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom']
+
+        const selectedEvents = selectedDay ? (eventsByDate[selectedDay] || []).sort((a, b) => a.time.localeCompare(b.time)) : []
+        const selectedTasks = selectedDay ? (tasksByDate[selectedDay] || []) : []
+
+        return (
         <div className="space-y-4">
+          {/* Header */}
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-              {events.length} evento{events.length !== 1 ? 's' : ''}
-            </span>
+            <div className="flex items-center gap-3">
+              <button onClick={() => setCalendarMonth(new Date(year, month - 1, 1))} className="p-1.5 rounded-lg hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+                <ChevronLeft size={18} />
+              </button>
+              <h2 className="text-base font-semibold min-w-[180px] text-center" style={{ color: 'var(--text-primary)' }}>
+                {monthNames[month]} {year}
+              </h2>
+              <button onClick={() => setCalendarMonth(new Date(year, month + 1, 1))} className="p-1.5 rounded-lg hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+                <ChevronRight size={18} />
+              </button>
+              <button
+                onClick={() => { setCalendarMonth(new Date(today.getFullYear(), today.getMonth(), 1)); setSelectedDay(todayStr) }}
+                className="text-xs px-2.5 py-1 rounded-lg font-medium"
+                style={{ color: 'var(--accent)', border: '1px solid var(--border)' }}
+              >Hoy</button>
+            </div>
             <button
-              onClick={() => { setShowEventModal(true); setEventTitle(''); setEventDate(''); setEventTime(''); setEventInvitees(''); setEventRemind(15); setEventRecurrence(''); setEventRecurrenceEnd('') }}
+              onClick={() => {
+                setShowEventModal(true); setEventTitle(''); setEventTime('')
+                setEventDate(selectedDay || todayStr)
+                setEventInvitees([]); setInviteeSearch(''); setEventRemind(15); setEventRecurrence(''); setEventRecurrenceEnd('')
+              }}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
               style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
             >
@@ -344,86 +425,157 @@ export default function TasksPage() {
             </button>
           </div>
 
-          {events.length === 0 ? (
-            <div className="rounded-xl p-12 text-center" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
-              <Calendar size={40} className="mx-auto mb-3" style={{ color: 'var(--text-secondary)' }} />
-              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>No hay eventos</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {events
-                .slice()
-                .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))
-                .map(ev => {
-                  const isPast = `${ev.date} ${ev.time}` < new Date().toISOString().slice(0, 16).replace('T', ' ')
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
+            {/* Calendar Grid */}
+            <div className="rounded-xl overflow-hidden" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
+              {/* Day headers */}
+              <div className="grid grid-cols-7">
+                {dayNames.map(d => (
+                  <div key={d} className="py-2 text-center text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>
+                    {d}
+                  </div>
+                ))}
+              </div>
+              {/* Day cells */}
+              <div className="grid grid-cols-7">
+                {cells.map((cell, i) => {
+                  const isToday = cell.dateStr === todayStr
+                  const isSelected = cell.dateStr === selectedDay
+                  const dayEvents = eventsByDate[cell.dateStr] || []
+                  const dayTasks = tasksByDate[cell.dateStr] || []
+                  const hasItems = dayEvents.length > 0 || dayTasks.length > 0
                   return (
                     <div
-                      key={ev.id}
-                      className="rounded-xl p-5"
+                      key={i}
+                      onClick={() => setSelectedDay(cell.dateStr === selectedDay ? null : cell.dateStr)}
+                      className="relative p-1.5 min-h-[80px] cursor-pointer transition-all duration-150 hover:opacity-80"
                       style={{
-                        backgroundColor: 'var(--card-bg)',
-                        border: '1px solid var(--card-border)',
-                        opacity: isPast ? 0.5 : 1,
+                        borderRight: (i + 1) % 7 !== 0 ? '1px solid var(--border)' : undefined,
+                        borderBottom: i < cells.length - 7 ? '1px solid var(--border)' : undefined,
+                        backgroundColor: isSelected ? 'var(--accent-alpha)' : isToday ? 'var(--success-alpha)' : 'transparent',
+                        opacity: cell.isCurrentMonth ? 1 : 0.35,
                       }}
                     >
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{ev.title}</h3>
-                          <p className="text-xs mt-1 font-mono" style={{ color: 'var(--accent)' }}>
-                            {ev.date} {ev.time}
-                          </p>
-                          <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-                            Por: {ev.created_by} | Aviso: {ev.remind_before_min}min antes
-                            {ev.recurrence && ev.recurrence !== 'none' && (
-                              <span className="ml-2 px-1.5 py-0.5 rounded text-[10px]" style={{ backgroundColor: 'var(--accent)' + '20', color: 'var(--accent)' }}>
-                                {ev.recurrence === 'daily' ? 'Diario' : ev.recurrence === 'weekly' ? 'Semanal' : 'Mensual'}
-                                {ev.recurrence_end && ` hasta ${ev.recurrence_end}`}
-                              </span>
-                            )}
-                          </p>
-                          {ev.invitees.length > 0 && (
-                            <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-                              Invitados: {ev.invitees.join(', ')}
-                            </p>
-                          )}
-                          {(ev.accepted.length > 0 || ev.declined.length > 0) && (
-                            <div className="flex gap-3 mt-2 text-xs">
-                              {ev.accepted.length > 0 && (
-                                <span style={{ color: 'var(--success)' }}>Aceptaron: {ev.accepted.join(', ')}</span>
-                              )}
-                              {ev.declined.length > 0 && (
-                                <span style={{ color: 'var(--danger)' }}>Rechazaron: {ev.declined.join(', ')}</span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          {user && !ev.accepted.includes(user.username) && !ev.declined.includes(user.username) && ev.created_by !== user.username && (
-                            <>
-                              <button
-                                onClick={async () => { await acceptEvent(ev.id, user!.username); await loadData() }}
-                                className="px-2 py-1 rounded-lg text-xs font-medium"
-                                style={{ color: 'var(--success)', border: '1px solid var(--success)' }}
-                              >Aceptar</button>
-                              <button
-                                onClick={async () => { await declineEvent(ev.id, user!.username); await loadData() }}
-                                className="px-2 py-1 rounded-lg text-xs font-medium"
-                                style={{ color: 'var(--danger)', border: '1px solid var(--danger)' }}
-                              >Rechazar</button>
-                            </>
-                          )}
-                          <button
-                            onClick={async () => { await deleteEvent(ev.id); await loadData() }}
-                            className="p-1.5 rounded-lg hover:opacity-80"
-                            style={{ color: 'var(--danger)' }}
-                          ><Trash2 size={14} /></button>
-                        </div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span
+                          className={'text-xs font-medium' + (isToday ? ' w-5 h-5 rounded-full flex items-center justify-center' : '')}
+                          style={{
+                            color: isToday ? '#fff' : isSelected ? 'var(--accent)' : 'var(--text-primary)',
+                            backgroundColor: isToday ? 'var(--accent)' : undefined,
+                          }}
+                        >
+                          {cell.day}
+                        </span>
+                        {hasItems && !isSelected && (
+                          <span className="text-[9px] font-mono" style={{ color: 'var(--accent)' }}>{dayEvents.length + dayTasks.length}</span>
+                        )}
+                      </div>
+                      {/* Event dots */}
+                      <div className="space-y-0.5">
+                        {dayEvents.slice(0, 3).map(ev => (
+                          <div key={ev.id} className="text-[9px] leading-tight truncate px-1 py-0.5 rounded" style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}>
+                            {ev.time.slice(0, 5)} {ev.title}
+                          </div>
+                        ))}
+                        {dayTasks.slice(0, Math.max(0, 3 - dayEvents.length)).map(t => (
+                          <div key={t.id} className="text-[9px] leading-tight truncate px-1 py-0.5 rounded" style={{ backgroundColor: 'var(--warning)' + '20', color: 'var(--warning)' }}>
+                            {t.due_time ? t.due_time.slice(0, 5) + ' ' : ''}{t.title}
+                          </div>
+                        ))}
+                        {(dayEvents.length + dayTasks.length) > 3 && (
+                          <span className="text-[9px] px-1" style={{ color: 'var(--text-secondary)' }}>+{dayEvents.length + dayTasks.length - 3} mas</span>
+                        )}
                       </div>
                     </div>
                   )
                 })}
+              </div>
             </div>
-          )}
+
+            {/* Side panel: selected day details */}
+            <div className="space-y-3">
+              {selectedDay ? (
+                <>
+                  <div className="rounded-xl p-4" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
+                    <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
+                      {new Date(selectedDay + 'T12:00:00').toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' })}
+                    </h3>
+                    <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+                      {selectedEvents.length} evento{selectedEvents.length !== 1 ? 's' : ''}, {selectedTasks.length} tarea{selectedTasks.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+
+                  {selectedEvents.length === 0 && selectedTasks.length === 0 && (
+                    <div className="rounded-xl p-6 text-center" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
+                      <Calendar size={24} className="mx-auto mb-2" style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
+                      <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Sin eventos este dia</p>
+                    </div>
+                  )}
+
+                  {selectedEvents.map(ev => {
+                    const isPast = `${ev.date} ${ev.time}` < new Date().toISOString().slice(0, 16).replace('T', ' ')
+                    return (
+                      <div key={ev.id} className="rounded-xl p-4" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)', opacity: isPast ? 0.5 : 1 }}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold font-mono" style={{ color: 'var(--accent)' }}>{ev.time.slice(0, 5)}</span>
+                              <h4 className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{ev.title}</h4>
+                            </div>
+                            <p className="text-[10px] mt-1" style={{ color: 'var(--text-secondary)' }}>
+                              {ev.created_by}
+                              {ev.recurrence && ev.recurrence !== 'none' && (
+                                <span className="ml-1.5 px-1 py-0.5 rounded text-[9px]" style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}>
+                                  {ev.recurrence === 'daily' ? 'Diario' : ev.recurrence === 'weekly' ? 'Semanal' : 'Mensual'}
+                                </span>
+                              )}
+                            </p>
+                            {ev.invitees.length > 0 && (
+                              <p className="text-[10px] mt-1" style={{ color: 'var(--text-secondary)' }}>
+                                {ev.invitees.map(inv => {
+                                  const accepted = ev.accepted.includes(inv)
+                                  const declined = ev.declined.includes(inv)
+                                  return <span key={inv} className="mr-1.5" style={{ color: accepted ? 'var(--success)' : declined ? 'var(--danger)' : 'var(--text-secondary)' }}>{inv}</span>
+                                })}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {user && !ev.accepted.includes(user.username) && !ev.declined.includes(user.username) && ev.created_by !== user.username && (
+                              <>
+                                <button onClick={async () => { await acceptEvent(ev.id, user!.username); await loadData() }}
+                                  className="p-1 rounded-lg" style={{ color: 'var(--success)' }} title="Aceptar"><CheckCircle2 size={14} /></button>
+                                <button onClick={async () => { await declineEvent(ev.id, user!.username); await loadData() }}
+                                  className="p-1 rounded-lg" style={{ color: 'var(--danger)' }} title="Rechazar"><XCircle size={14} /></button>
+                              </>
+                            )}
+                            <button onClick={async () => { await deleteEvent(ev.id); await loadData() }}
+                              className="p-1 rounded-lg hover:opacity-80" style={{ color: 'var(--danger)' }}><Trash2 size={12} /></button>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+
+                  {selectedTasks.map(t => (
+                    <div key={t.id} className="rounded-xl p-4" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--warning)' + '40' }}>
+                      <div className="flex items-center gap-2">
+                        <ClipboardList size={12} style={{ color: 'var(--warning)' }} />
+                        <span className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>{t.title}</span>
+                        {t.due_time && <span className="text-[10px] font-mono" style={{ color: 'var(--warning)' }}>{t.due_time.slice(0, 5)}</span>}
+                        <span className="text-[10px] ml-auto px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--warning)' + '20', color: 'var(--warning)' }}>Tarea</span>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <div className="rounded-xl p-6 text-center" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
+                  <Calendar size={24} className="mx-auto mb-2" style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
+                  <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Selecciona un dia para ver sus eventos</p>
+                </div>
+              )}
+            </div>
+          </div>
 
           {/* Event Modal */}
           {showEventModal && (
@@ -455,10 +607,57 @@ export default function TasksPage() {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Invitados (separar con comas, o "all")</label>
-                    <input value={eventInvitees} onChange={e => setEventInvitees(e.target.value)} placeholder="nick, ana, all"
-                      className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Invitados</label>
+                    {/* Selected chips */}
+                    {eventInvitees.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {eventInvitees.map(name => (
+                          <span key={name} className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"
+                            style={{ backgroundColor: name === 'all' ? 'var(--accent-alpha)' : 'var(--bg-tertiary)', color: name === 'all' ? 'var(--accent)' : 'var(--text-primary)' }}>
+                            {name === 'all' ? 'Todos' : name}
+                            <button type="button" onClick={() => setEventInvitees(prev => prev.filter(n => n !== name))} className="hover:opacity-60"><X size={10} /></button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {/* Search input */}
+                    {!eventInvitees.includes('all') && (
+                      <div className="relative">
+                        <input
+                          value={inviteeSearch}
+                          onChange={e => setInviteeSearch(e.target.value)}
+                          placeholder={eventInvitees.length > 0 ? 'Agregar otro...' : 'Buscar usuario...'}
+                          className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                          style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                        />
+                        {/* Suggestions */}
+                        {inviteeSearch.length > 0 && (() => {
+                          const q = inviteeSearch.toLowerCase()
+                          const suggestions = allUsers.filter(u => u.toLowerCase().includes(q) && !eventInvitees.includes(u) && u !== user?.username)
+                          const showAll = 'todos'.includes(q) || 'all'.includes(q)
+                          if (!suggestions.length && !showAll) return null
+                          return (
+                            <div className="absolute z-10 left-0 right-0 rounded-lg mt-1 overflow-hidden max-h-36 overflow-y-auto shadow-lg"
+                              style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--border)' }}>
+                              {showAll && (
+                                <button type="button" onClick={() => { setEventInvitees(['all']); setInviteeSearch('') }}
+                                  className="w-full text-left px-3 py-2 text-xs font-medium hover:opacity-80"
+                                  style={{ color: 'var(--accent)', backgroundColor: 'var(--accent-alpha)' }}>
+                                  Todos los usuarios
+                                </button>
+                              )}
+                              {suggestions.map(u => (
+                                <button type="button" key={u} onClick={() => { setEventInvitees(prev => [...prev, u]); setInviteeSearch('') }}
+                                  className="w-full text-left px-3 py-2 text-xs hover:opacity-80 transition-all"
+                                  style={{ color: 'var(--text-primary)', borderTop: '1px solid var(--border)' }}>
+                                  {u}
+                                </button>
+                              ))}
+                            </div>
+                          )
+                        })()}
+                      </div>
+                    )}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -494,8 +693,7 @@ export default function TasksPage() {
                   <button
                     onClick={async () => {
                       if (!eventTitle.trim() || !eventDate || !eventTime) return
-                      const invitees = eventInvitees.split(',').map(s => s.trim()).filter(Boolean)
-                      await createEvent({ title: eventTitle, date: eventDate, time: eventTime, invitees, remind_before_min: eventRemind, recurrence: eventRecurrence || undefined, recurrence_end: eventRecurrenceEnd || null })
+                      await createEvent({ title: eventTitle, date: eventDate, time: eventTime, invitees: eventInvitees, remind_before_min: eventRemind, recurrence: eventRecurrence || undefined, recurrence_end: eventRecurrenceEnd || null })
                       setShowEventModal(false)
                       await loadData()
                     }}
@@ -508,7 +706,8 @@ export default function TasksPage() {
             </div>
           )}
         </div>
-      )}
+        )
+      })()}
 
       {/* Tareas */}
       {tab === 'tareas' && (

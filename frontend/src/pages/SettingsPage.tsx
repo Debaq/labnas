@@ -339,29 +339,53 @@ export default function SettingsPage() {
               </div>
             ) : (
               <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
-                {services.map(svc => (
-                  <div key={svc.port} className="flex items-center justify-between px-5 py-3">
-                    <div className="flex items-center gap-3">
-                      <span className="text-lg">{svc.icon || '🔗'}</span>
-                      <div>
-                        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{svc.name}</span>
-                        <span className="text-xs font-mono ml-2" style={{ color: 'var(--accent)' }}>:{svc.port}</span>
+                {services.map(svc => {
+                  const svcUrl = `${window.location.protocol}//${window.location.hostname}:${svc.port}`
+                  return (
+                    <div key={svc.port} className="flex items-center justify-between px-5 py-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="text-lg">{svc.icon || '🔗'}</span>
+                        <div className="min-w-0">
+                          <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{svc.name}</span>
+                          <span className="text-xs font-mono ml-2" style={{ color: 'var(--accent)' }}>:{svc.port}</span>
+                          {svc.description && (
+                            <span className="text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{svc.description}</span>
+                          )}
+                          <a
+                            href={svcUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block text-[10px] font-mono truncate hover:underline"
+                            style={{ color: 'var(--text-secondary)', opacity: 0.7 }}
+                          >
+                            {svcUrl}
+                          </a>
+                        </div>
                       </div>
-                      {svc.description && (
-                        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{svc.description}</span>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        <a
+                          href={svcUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-1.5 rounded-lg transition-all hover:opacity-80"
+                          style={{ color: 'var(--accent)' }}
+                          title="Abrir servicio"
+                        >
+                          <ExternalLink size={14} />
+                        </a>
+                        <button onClick={async () => {
+                          try {
+                            await deleteService(svc.port)
+                            setServices(prev => prev.filter(s => s.port !== svc.port))
+                          } catch {}
+                        }}
+                          className="p-1.5 rounded-lg transition-all hover:opacity-80" style={{ color: 'var(--danger)' }}>
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </div>
-                    <button onClick={async () => {
-                      try {
-                        await deleteService(svc.port)
-                        setServices(prev => prev.filter(s => s.port !== svc.port))
-                      } catch {}
-                    }}
-                      className="p-1.5 rounded-lg transition-all hover:opacity-80" style={{ color: 'var(--danger)' }}>
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
@@ -376,7 +400,7 @@ export default function SettingsPage() {
             Apariencia
           </h2>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           {/* Auto theme card */}
           <button
             onClick={() => setTheme('auto' as any)}

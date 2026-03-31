@@ -358,6 +358,33 @@ pub async fn add_printer(
     Ok((StatusCode::CREATED, Json(printer)))
 }
 
+pub async fn update_printer(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<UpdatePrinter3DRequest>,
+) -> Result<Json<Printer3DConfig>, (StatusCode, String)> {
+    let mut config = state.config.lock().await;
+    let printer = config
+        .printers3d
+        .iter_mut()
+        .find(|p| p.id == id)
+        .ok_or((StatusCode::NOT_FOUND, "Impresora no encontrada".to_string()))?;
+
+    if let Some(name) = req.name { printer.name = name; }
+    if let Some(ip) = req.ip { printer.ip = ip; }
+    if let Some(port) = req.port { printer.port = port; }
+    if let Some(printer_type) = req.printer_type { printer.printer_type = printer_type; }
+    if let Some(api_key) = req.api_key { printer.api_key = api_key; }
+    if let Some(camera_url) = req.camera_url { printer.camera_url = camera_url; }
+
+    let updated = printer.clone();
+    save_config(&config)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    Ok(Json(updated))
+}
+
 pub async fn delete_printer(
     State(state): State<AppState>,
     Path(id): Path<String>,

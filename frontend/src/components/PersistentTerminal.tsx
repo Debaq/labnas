@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { RotateCcw } from 'lucide-react'
 import '@xterm/xterm/css/xterm.css'
 
 export default function PersistentTerminal() {
@@ -134,6 +135,26 @@ export default function PersistentTerminal() {
     setInitialized(true)
   }, [isVisible, initialized])
 
+  function handleRestart() {
+    // Cerrar WebSocket
+    if (wsRef.current) {
+      wsRef.current.onclose = null
+      wsRef.current.close()
+      wsRef.current = null
+    }
+    // Destruir terminal
+    if (termRef.current) {
+      termRef.current.dispose()
+      termRef.current = null
+    }
+    fitRef.current = null
+    // Limpiar container
+    if (containerRef.current) {
+      containerRef.current.innerHTML = ''
+    }
+    setInitialized(false)
+  }
+
   // Fit + focus cuando se vuelve visible
   useEffect(() => {
     if (isVisible && fitRef.current && termRef.current) {
@@ -169,10 +190,21 @@ export default function PersistentTerminal() {
         </h2>
         <span
           className="px-2.5 py-0.5 rounded-full text-xs font-medium"
-          style={{ backgroundColor: 'var(--success-alpha)', color: 'var(--success)' }}
+          style={{ backgroundColor: initialized ? 'var(--success-alpha)' : 'var(--danger-alpha)', color: initialized ? 'var(--success)' : 'var(--danger)' }}
         >
           {initialized ? 'bash' : 'desconectada'}
         </span>
+        {initialized && (
+          <button
+            onClick={handleRestart}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all duration-200 hover:opacity-80"
+            style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+            title="Reiniciar terminal"
+          >
+            <RotateCcw size={12} />
+            Reiniciar
+          </button>
+        )}
       </div>
       <div
         ref={containerRef}

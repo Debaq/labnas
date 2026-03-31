@@ -182,6 +182,27 @@ export interface PrintFileRequest {
   options: Record<string, string>
 }
 
+export interface PrinterCosts {
+  ink_per_page: number
+  paper_carta: number
+  paper_oficio: number
+  paper_special: number
+}
+
+export interface PrinterStats {
+  total_jobs: number
+  total_pages: number
+  pages_carta: number
+  pages_oficio: number
+  pages_special: number
+}
+
+export interface PrinterStatsResponse {
+  costs: PrinterCosts
+  stats: PrinterStats
+  estimated_cost: number
+}
+
 // --- Tasks & Projects ---
 
 export type TaskStatus = 'pendiente' | 'enprogreso' | 'completada' | 'rechazada'

@@ -4,9 +4,13 @@ use axum::{
     Json,
 };
 use std::collections::HashMap;
+use std::time::Duration;
 use tokio::process::Command;
 
-use crate::models::printing::{CupsPrintJob, CupsPrinter, PrintFileRequest, PrinterOption};
+use crate::config::save_config;
+use crate::models::printing::{
+    CupsPrintJob, CupsPrinter, PrintFileRequest, PrinterCosts, PrinterOption, PrinterStatsResponse,
+};
 use crate::state::AppState;
 
 // Formatos que CUPS imprime bien nativamente (sin conversion)
@@ -278,12 +282,13 @@ pub async fn print_upload(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let result = run_lp_command(&printer_name, &tmp_file, copies, pages, &lp_options).await;
+    let result = run_lp_command(&printer_name, &tmp_file, copies.clone(), pages.clone(), &lp_options).await;
 
     let _ = tokio::fs::remove_dir_all(&tmp_path).await;
 
     if result.is_ok() {
         state.log_activity("Impresion", &format!("{} en {}", file_name, printer_name), "web").await;
+        track_print_stats(&state, &printer_name, &copies, &pages, &lp_options).await;
     }
 
     result
@@ -333,6 +338,88 @@ pub async fn print_file_path(
     .await
 }
 
+/// Obtiene la URI del dispositivo CUPS para detectar si es de red
+async fn get_printer_uri(printer: &str) -> Option<String> {
+    let output = Command::new("lpstat")
+        .args(["-v", printer])
+        .env("LANG", "C")
+        .output()
+        .await
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    // Format: "device for PrinterName: socket://192.168.1.50:9100"
+    text.split_once(": ").map(|(_, uri)| uri.trim().to_string())
+}
+
+/// Extrae IP de una URI CUPS (socket://ip:port, ipp://ip/..., http://ip/...)
+fn extract_ip_from_uri(uri: &str) -> Option<String> {
+    let stripped = uri
+        .strip_prefix("socket://")
+        .or_else(|| uri.strip_prefix("ipp://"))
+        .or_else(|| uri.strip_prefix("ipps://"))
+        .or_else(|| uri.strip_prefix("http://"))
+        .or_else(|| uri.strip_prefix("https://"))
+        .or_else(|| uri.strip_prefix("lpd://"))?;
+    // IP is before : or /
+    let ip = stripped.split(&[':', '/'][..]).next()?;
+    // Validate it looks like an IP
+    if ip.split('.').count() == 4 && ip.split('.').all(|p| p.parse::<u8>().is_ok()) {
+        Some(ip.to_string())
+    } else {
+        None
+    }
+}
+
+/// Intenta despertar una impresora de red conectandose a puertos comunes
+async fn wake_printer(uri: &str) {
+    let Some(ip) = extract_ip_from_uri(uri) else { return };
+
+    // Intentar conectar a puerto 9100 (JetDirect) o 80 (web) para despertar
+    for port in [9100u16, 80, 443, 631] {
+        let addr = format!("{}:{}", ip, port);
+        if let Ok(Ok(_)) = tokio::time::timeout(
+            Duration::from_millis(1500),
+            tokio::net::TcpStream::connect(&addr),
+        )
+        .await
+        {
+            // Conexion exitosa = impresora despierta
+            return;
+        }
+    }
+}
+
+/// Auto-habilita una impresora si esta deshabilitada y configura retry policy
+async fn ensure_printer_ready(printer: &str) {
+    // Verificar estado
+    let status = Command::new("lpstat")
+        .args(["-p", printer])
+        .env("LANG", "C")
+        .output()
+        .await;
+
+    if let Ok(output) = status {
+        let text = String::from_utf8_lossy(&output.stdout).to_lowercase();
+        if text.contains("disabled") {
+            // Re-habilitar
+            let _ = Command::new("cupsenable").arg(printer).output().await;
+        }
+    }
+
+    // Intentar despertar si es de red
+    if let Some(uri) = get_printer_uri(printer).await {
+        if !uri.starts_with("usb://") {
+            wake_printer(&uri).await;
+        }
+    }
+
+    // Asegurar que la politica de error sea retry-job (no stop-printer)
+    let _ = Command::new("lpadmin")
+        .args(["-p", printer, "-o", "printer-error-policy=retry-job"])
+        .output()
+        .await;
+}
+
 async fn run_lp_command(
     printer: &str,
     file_path: &str,
@@ -341,6 +428,9 @@ async fn run_lp_command(
     options: &HashMap<String, String>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
     validate_printer_name(printer)?;
+
+    // Auto-enable, wake, and set retry policy
+    ensure_printer_ready(printer).await;
 
     let mut args = vec!["-d".to_string(), printer.to_string()];
 
@@ -463,6 +553,15 @@ pub async fn disable_printer(
     }
 }
 
+/// POST /api/printing/printers/{name}/wake - Despertar impresora y re-habilitarla
+pub async fn wake_printer_endpoint(
+    Path(name): Path<String>,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    validate_printer_name(&name)?;
+    ensure_printer_ready(&name).await;
+    Ok((StatusCode::OK, "Impresora despertada y habilitada".to_string()))
+}
+
 pub async fn list_jobs() -> Result<Json<Vec<CupsPrintJob>>, (StatusCode, String)> {
     let output = Command::new("lpstat")
         .arg("-o")
@@ -536,4 +635,178 @@ pub async fn cancel_job(Path(id): Path<String>) -> Result<StatusCode, (StatusCod
             format!("Error cancelando trabajo: {}", err),
         ))
     }
+}
+
+// ── Estadísticas y costos por impresora ──
+
+/// Estima cantidad de páginas desde un rango como "1-5,8,10-12"
+fn estimate_page_count(pages: &Option<String>, copies: u32) -> u64 {
+    let page_count = match pages {
+        Some(pg) if !pg.is_empty() => {
+            let mut count: u64 = 0;
+            for part in pg.split(',') {
+                let part = part.trim();
+                if let Some((start, end)) = part.split_once('-') {
+                    if let (Ok(s), Ok(e)) = (start.trim().parse::<u64>(), end.trim().parse::<u64>()) {
+                        if e >= s {
+                            count += e - s + 1;
+                        }
+                    }
+                } else if part.parse::<u64>().is_ok() {
+                    count += 1;
+                }
+            }
+            if count == 0 { 1 } else { count }
+        }
+        _ => 1, // Sin rango = asumimos 1 página
+    };
+    page_count * copies as u64
+}
+
+/// Clasifica tipo de papel desde la opción media de CUPS
+fn classify_paper(options: &HashMap<String, String>) -> &'static str {
+    let media = options
+        .get("media")
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default();
+
+    if media.contains("legal") || media.contains("oficio") || media.contains("folio") {
+        "oficio"
+    } else if media.contains("photo")
+        || media.contains("glossy")
+        || media.contains("transparency")
+        || media.contains("envelope")
+        || media.contains("label")
+        || media.contains("a3")
+    {
+        "special"
+    } else {
+        "carta" // Letter, A4, o sin especificar
+    }
+}
+
+/// Registra estadísticas de impresión en la config
+async fn track_print_stats(
+    state: &AppState,
+    printer_name: &str,
+    copies: &Option<String>,
+    pages: &Option<String>,
+    options: &HashMap<String, String>,
+) {
+    let num_copies = copies
+        .as_ref()
+        .and_then(|c| c.parse::<u32>().ok())
+        .unwrap_or(1)
+        .max(1);
+    let total_pages = estimate_page_count(pages, num_copies);
+    let paper_type = classify_paper(options);
+
+    let mut config = state.config.lock().await;
+    let printer_config = match config
+        .cups_printers
+        .iter_mut()
+        .find(|p| p.name == printer_name)
+    {
+        Some(p) => p,
+        None => {
+            config.cups_printers.push(
+                crate::models::printing::CupsPrinterConfig {
+                    name: printer_name.to_string(),
+                    ..Default::default()
+                },
+            );
+            config.cups_printers.last_mut().unwrap()
+        }
+    };
+
+    printer_config.stats.total_jobs += 1;
+    printer_config.stats.total_pages += total_pages;
+    match paper_type {
+        "oficio" => printer_config.stats.pages_oficio += total_pages,
+        "special" => printer_config.stats.pages_special += total_pages,
+        _ => printer_config.stats.pages_carta += total_pages,
+    }
+
+    let _ = save_config(&config).await;
+}
+
+fn calculate_estimated_cost(
+    costs: &crate::models::printing::PrinterCosts,
+    stats: &crate::models::printing::PrinterStats,
+) -> f64 {
+    let ink = stats.total_pages as f64 * costs.ink_per_page;
+    let paper_carta = stats.pages_carta as f64 * costs.paper_carta;
+    let paper_oficio = stats.pages_oficio as f64 * costs.paper_oficio;
+    let paper_special = stats.pages_special as f64 * costs.paper_special;
+    ink + paper_carta + paper_oficio + paper_special
+}
+
+/// GET /api/printing/printers/{name}/stats
+pub async fn get_printer_stats(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Json<PrinterStatsResponse> {
+    let config = state.config.lock().await;
+    let printer = config.cups_printers.iter().find(|p| p.name == name);
+    match printer {
+        Some(p) => {
+            let estimated_cost = calculate_estimated_cost(&p.costs, &p.stats);
+            Json(PrinterStatsResponse {
+                costs: p.costs.clone(),
+                stats: p.stats.clone(),
+                estimated_cost,
+            })
+        }
+        None => Json(PrinterStatsResponse {
+            costs: PrinterCosts::default(),
+            stats: crate::models::printing::PrinterStats::default(),
+            estimated_cost: 0.0,
+        }),
+    }
+}
+
+/// POST /api/printing/printers/{name}/costs
+pub async fn set_printer_costs(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Json(costs): Json<PrinterCosts>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    validate_printer_name(&name)?;
+    let mut config = state.config.lock().await;
+
+    let printer_config = match config
+        .cups_printers
+        .iter_mut()
+        .find(|p| p.name == name)
+    {
+        Some(p) => p,
+        None => {
+            config.cups_printers.push(
+                crate::models::printing::CupsPrinterConfig {
+                    name: name.clone(),
+                    ..Default::default()
+                },
+            );
+            config.cups_printers.last_mut().unwrap()
+        }
+    };
+
+    printer_config.costs = costs;
+    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(StatusCode::OK)
+}
+
+/// POST /api/printing/printers/{name}/stats/reset
+pub async fn reset_printer_stats(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    validate_printer_name(&name)?;
+    let mut config = state.config.lock().await;
+
+    if let Some(p) = config.cups_printers.iter_mut().find(|p| p.name == name) {
+        p.stats = crate::models::printing::PrinterStats::default();
+        save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    }
+    Ok(StatusCode::OK)
 }

@@ -1,6 +1,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Box,
+  ArrowLeft,
   Plus,
   Trash2,
   Upload,
@@ -28,11 +30,15 @@ import {
   ArrowLeft,
   ArrowRight,
   ExternalLink,
+  Calculator,
+  DollarSign,
+  Pencil,
 } from 'lucide-react'
 import {
   fetchPrinters3D,
   addPrinter3D,
   deletePrinter3D,
+  updatePrinter3D,
   fetchPrinter3DStatus,
   uploadGcode,
   detectPrinters3D,
@@ -68,7 +74,288 @@ function formatFileSize(bytes: number | null | undefined): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+// ── Calculadora de costos 3D ──
+
+interface HardwareItem {
+  id: string
+  name: string
+  cost: number | string
+  qty: number | string
+}
+
+function CostCalculator() {
+  // Material
+  const [materialWeight, setMaterialWeight] = useState<number | string>('')
+  const [materialPriceKg, setMaterialPriceKg] = useState<number | string>('')
+
+  // Electricidad
+  const [printHours, setPrintHours] = useState<number | string>('')
+  const [printerWatts, setPrinterWatts] = useState<number | string>('')
+  const [kwhPrice, setKwhPrice] = useState<number | string>('')
+
+  // Maquina
+  const [machineCost, setMachineCost] = useState<number | string>('')
+  const [machineLifeHours, setMachineLifeHours] = useState<number | string>('')
+
+  // Tiempo de trabajo
+  const [designHours, setDesignHours] = useState<number | string>('')
+  const [prepHours, setPrepHours] = useState<number | string>('')
+  const [postProcessHours, setPostProcessHours] = useState<number | string>('')
+  const [hourlyRate, setHourlyRate] = useState<number | string>('')
+
+  // Hardware extra
+  const [hardwareItems, setHardwareItems] = useState<HardwareItem[]>([])
+
+  // Factores
+  const [failRate, setFailRate] = useState<number | string>('')
+  const [margin, setMargin] = useState<number | string>('')
+  const [quantity, setQuantity] = useState<number | string>(1)
+
+  function n(v: number | string): number { return Number(v) || 0 }
+
+  const materialCost = (n(materialWeight) / 1000) * n(materialPriceKg)
+  const electricityCost = (n(printHours) * n(printerWatts) / 1000) * n(kwhPrice)
+  const depreciationCost = n(machineLifeHours) > 0 ? (n(machineCost) / n(machineLifeHours)) * n(printHours) : 0
+  const laborCost = (n(designHours) + n(prepHours) + n(postProcessHours)) * n(hourlyRate)
+  const hardwareCost = hardwareItems.reduce((sum, item) => sum + n(item.cost) * n(item.qty), 0)
+
+  const subtotal = materialCost + electricityCost + depreciationCost + laborCost + hardwareCost
+  const failAdjusted = n(failRate) > 0 ? subtotal * (1 + n(failRate) / 100) : subtotal
+  const withMargin = n(margin) > 0 ? failAdjusted * (1 + n(margin) / 100) : failAdjusted
+  const totalPerUnit = withMargin
+  const totalAll = totalPerUnit * Math.max(n(quantity), 1)
+
+  const hasAnyCost = subtotal > 0
+
+  function addHardwareItem() {
+    setHardwareItems(prev => [...prev, { id: crypto.randomUUID(), name: '', cost: '', qty: 1 }])
+  }
+
+  function updateHardwareItem(id: string, field: keyof HardwareItem, value: string | number) {
+    setHardwareItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item))
+  }
+
+  function removeHardwareItem(id: string) {
+    setHardwareItems(prev => prev.filter(item => item.id !== id))
+  }
+
+  function resetAll() {
+    setMaterialWeight(''); setMaterialPriceKg('')
+    setPrintHours(''); setPrinterWatts(''); setKwhPrice('')
+    setMachineCost(''); setMachineLifeHours('')
+    setDesignHours(''); setPrepHours(''); setPostProcessHours(''); setHourlyRate('')
+    setHardwareItems([])
+    setFailRate(''); setMargin(''); setQuantity(1)
+  }
+
+  const inputStyle = { backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }
+  const inputClass = "w-full px-3 py-2 rounded-lg text-sm outline-none"
+
+  function NumField({ label, hint, value, onChange, unit, placeholder }: {
+    label: string; hint?: string; value: number | string; onChange: (v: number | string) => void; unit?: string; placeholder?: string
+  }) {
+    return (
+      <div>
+        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{label}</label>
+        <div className="relative">
+          <input
+            type="number"
+            min={0}
+            step="any"
+            value={value}
+            onChange={(e) => onChange(e.target.value === '' ? '' : parseFloat(e.target.value))}
+            placeholder={placeholder || '0'}
+            className={inputClass + (unit ? ' pr-10' : '')}
+            style={inputStyle}
+          />
+          {unit && (
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style={{ color: 'var(--text-secondary)', opacity: 0.6 }}>{unit}</span>
+          )}
+        </div>
+        {hint && <span className="block text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>{hint}</span>}
+      </div>
+    )
+  }
+
+  function CostLine({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
+    if (value <= 0) return null
+    return (
+      <div className="flex justify-between items-center py-1">
+        <span className="text-xs" style={{ color: highlight ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{label}</span>
+        <span className={'text-sm font-mono' + (highlight ? ' font-bold' : '')} style={{ color: highlight ? 'var(--accent)' : 'var(--text-primary)' }}>
+          ${value.toFixed(2)}
+        </span>
+      </div>
+    )
+  }
+
+  function SectionHeader({ title }: { title: string }) {
+    return (
+      <div className="flex items-center gap-2 mb-2 mt-1">
+        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent)' }}>{title}</span>
+        <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="rounded-xl p-5"
+      style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
+    >
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Calculator size={18} style={{ color: 'var(--accent)' }} />
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Calculadora de costos</h3>
+        </div>
+        {hasAnyCost && (
+          <button onClick={resetAll} className="text-xs px-2 py-1 rounded-lg" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+            Limpiar
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6">
+        {/* Columna izquierda: inputs */}
+        <div className="space-y-4">
+          {/* Material */}
+          <div>
+            <SectionHeader title="Material" />
+            <div className="grid grid-cols-2 gap-3">
+              <NumField label="Peso del material" value={materialWeight} onChange={setMaterialWeight} unit="g" hint="Peso que indica el slicer" />
+              <NumField label="Precio del filamento" value={materialPriceKg} onChange={setMaterialPriceKg} unit="$/kg" />
+            </div>
+          </div>
+
+          {/* Electricidad + Maquina */}
+          <div>
+            <SectionHeader title="Impresora" />
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <NumField label="Tiempo de impresion" value={printHours} onChange={setPrintHours} unit="h" hint="Estimado del slicer" />
+              <NumField label="Consumo" value={printerWatts} onChange={setPrinterWatts} unit="W" hint="Potencia de la impresora" />
+              <NumField label="Precio electricidad" value={kwhPrice} onChange={setKwhPrice} unit="$/kWh" />
+            </div>
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <NumField label="Costo de la impresora" value={machineCost} onChange={setMachineCost} unit="$" hint="Precio de compra" />
+              <NumField label="Vida util estimada" value={machineLifeHours} onChange={setMachineLifeHours} unit="h" hint="Horas totales de uso esperado" />
+            </div>
+          </div>
+
+          {/* Tiempo de trabajo */}
+          <div>
+            <SectionHeader title="Mano de obra" />
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <NumField label="Diseno" value={designHours} onChange={setDesignHours} unit="h" hint="Modelado 3D" />
+              <NumField label="Preparacion" value={prepHours} onChange={setPrepHours} unit="h" hint="Slicing, calibracion" />
+              <NumField label="Post-procesado" value={postProcessHours} onChange={setPostProcessHours} unit="h" hint="Lijado, pintura, curado" />
+              <NumField label="Tarifa por hora" value={hourlyRate} onChange={setHourlyRate} unit="$/h" />
+            </div>
+          </div>
+
+          {/* Hardware extra */}
+          <div>
+            <SectionHeader title="Hardware adicional" />
+            <span className="block text-[10px] mb-2" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>Insertos, herrajes, tornillos, electrónica, etc.</span>
+            {hardwareItems.map((item) => (
+              <div key={item.id} className="flex items-center gap-2 mb-2">
+                <input
+                  type="text"
+                  value={item.name}
+                  onChange={(e) => updateHardwareItem(item.id, 'name', e.target.value)}
+                  placeholder="Descripcion"
+                  className="flex-1 px-3 py-1.5 rounded-lg text-sm outline-none"
+                  style={inputStyle}
+                />
+                <input
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={item.cost}
+                  onChange={(e) => updateHardwareItem(item.id, 'cost', e.target.value === '' ? '' : parseFloat(e.target.value))}
+                  placeholder="$/u"
+                  className="w-20 px-2 py-1.5 rounded-lg text-sm outline-none text-right"
+                  style={inputStyle}
+                />
+                <input
+                  type="number"
+                  min={1}
+                  value={item.qty}
+                  onChange={(e) => updateHardwareItem(item.id, 'qty', e.target.value === '' ? '' : parseInt(e.target.value))}
+                  placeholder="Cant"
+                  className="w-16 px-2 py-1.5 rounded-lg text-sm outline-none text-right"
+                  style={inputStyle}
+                />
+                <button onClick={() => removeHardwareItem(item.id)} className="p-1 rounded-lg" style={{ color: 'var(--danger)' }}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={addHardwareItem}
+              className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg"
+              style={{ color: 'var(--accent)', border: '1px dashed var(--border)' }}
+            >
+              <Plus size={12} /> Agregar item
+            </button>
+          </div>
+
+          {/* Ajustes finales */}
+          <div>
+            <SectionHeader title="Ajustes" />
+            <div className="grid grid-cols-3 gap-3">
+              <NumField label="Tasa de fallo" value={failRate} onChange={setFailRate} unit="%" hint="Impresiones fallidas esperadas" />
+              <NumField label="Margen de ganancia" value={margin} onChange={setMargin} unit="%" />
+              <NumField label="Cantidad" value={quantity} onChange={setQuantity} placeholder="1" hint="Unidades a producir" />
+            </div>
+          </div>
+        </div>
+
+        {/* Columna derecha: resumen */}
+        <div>
+          <div
+            className="rounded-xl p-4 sticky top-4"
+            style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <DollarSign size={16} style={{ color: 'var(--accent)' }} />
+              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent)' }}>Resumen</span>
+            </div>
+
+            {!hasAnyCost ? (
+              <p className="text-xs text-center py-4" style={{ color: 'var(--text-secondary)' }}>
+                Completa los campos que necesites para calcular el costo
+              </p>
+            ) : (
+              <div>
+                <div className="space-y-0.5" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '8px', marginBottom: '8px' }}>
+                  <CostLine label="Material" value={materialCost} />
+                  <CostLine label="Electricidad" value={electricityCost} />
+                  <CostLine label="Depreciacion maquina" value={depreciationCost} />
+                  <CostLine label="Mano de obra" value={laborCost} />
+                  <CostLine label="Hardware adicional" value={hardwareCost} />
+                </div>
+
+                <CostLine label="Subtotal" value={subtotal} />
+                {n(failRate) > 0 && <CostLine label={`+ Fallo (${n(failRate)}%)`} value={failAdjusted - subtotal} />}
+                {n(margin) > 0 && <CostLine label={`+ Margen (${n(margin)}%)`} value={withMargin - failAdjusted} />}
+
+                <div className="mt-3 pt-3" style={{ borderTop: '2px solid var(--accent)' }}>
+                  <CostLine label="Costo por unidad" value={totalPerUnit} highlight />
+                  {n(quantity) > 1 && (
+                    <CostLine label={`Total (${n(quantity)} unidades)`} value={totalAll} highlight />
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Printers3DPage() {
+  const navigate = useNavigate()
   const [printers, setPrinters] = useState<Printer3DConfig[]>([])
   const [statuses, setStatuses] = useState<Record<string, Printer3DStatus>>({})
   const [loading, setLoading] = useState(true)
@@ -78,6 +365,7 @@ export default function Printers3DPage() {
   const [uploading, setUploading] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<string | null>(null)
   const [expandedPrinter, setExpandedPrinter] = useState<string | null>(null)
+  const [selectedPrinterId, setSelectedPrinterId] = useState<string | null>(null)
   const [printerFiles, setPrinterFiles] = useState<Record<string, PrinterFileInfo[]>>({})
   const [loadingFiles, setLoadingFiles] = useState<string | null>(null)
   const [jogDistance, setJogDistance] = useState(10)
@@ -97,13 +385,14 @@ export default function Printers3DPage() {
     }
   }
 
-  // Form state
+  // Form state (shared between add and edit)
   const [formName, setFormName] = useState('')
   const [formIp, setFormIp] = useState('')
   const [formPort, setFormPort] = useState(5000)
   const [formType, setFormType] = useState<'OctoPrint' | 'Moonraker' | 'CrealityStock' | 'FlashForge'>('Moonraker')
   const [formApiKey, setFormApiKey] = useState('')
   const [formCameraUrl, setFormCameraUrl] = useState('')
+  const [editingPrinterId, setEditingPrinterId] = useState<string | null>(null)
 
   const loadPrinters = useCallback(async () => {
     try {
@@ -154,25 +443,7 @@ export default function Printers3DPage() {
     }, 3000)
   }
 
-  async function handleAdd() {
-    if (!formName.trim() || !formIp.trim()) return
-    const req: AddPrinter3DRequest = {
-      name: formName,
-      ip: formIp,
-      port: formPort,
-      printer_type: formType,
-      api_key: formApiKey || null,
-      camera_url: formCameraUrl || null,
-    }
-    try {
-      await addPrinter3D(req)
-      setShowAddModal(false)
-      resetForm()
-      await loadPrinters()
-    } catch (err) {
-      console.error('Error agregando impresora:', err)
-    }
-  }
+  // handleAdd is now replaced by handleSave (supports both add and edit)
 
   async function handleDelete(id: string) {
     if (!confirm('Eliminar esta impresora?')) return
@@ -330,6 +601,48 @@ export default function Printers3DPage() {
     setFormType('Moonraker')
     setFormApiKey('')
     setFormCameraUrl('')
+    setEditingPrinterId(null)
+  }
+
+  function openEditModal(printer: Printer3DConfig) {
+    setFormName(printer.name)
+    setFormIp(printer.ip)
+    setFormPort(printer.port)
+    setFormType(printer.printer_type)
+    setFormApiKey(printer.api_key || '')
+    setFormCameraUrl(printer.camera_url || '')
+    setEditingPrinterId(printer.id)
+    setShowAddModal(true)
+  }
+
+  async function handleSave() {
+    if (!formName.trim() || !formIp.trim()) return
+    try {
+      if (editingPrinterId) {
+        await updatePrinter3D(editingPrinterId, {
+          name: formName,
+          ip: formIp,
+          port: formPort,
+          printer_type: formType,
+          api_key: formApiKey || null,
+          camera_url: formCameraUrl || null,
+        })
+      } else {
+        await addPrinter3D({
+          name: formName,
+          ip: formIp,
+          port: formPort,
+          printer_type: formType,
+          api_key: formApiKey || null,
+          camera_url: formCameraUrl || null,
+        })
+      }
+      setShowAddModal(false)
+      resetForm()
+      await loadPrinters()
+    } catch (err) {
+      console.error('Error guardando impresora:', err)
+    }
   }
 
   // Barra de progreso de temperatura
@@ -345,90 +658,135 @@ export default function Printers3DPage() {
     )
   }
 
+  const selectedPrinter = printers.find(p => p.id === selectedPrinterId) || null
+
   return (
-    <div className="space-y-6">
-      {/* Top bar */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div className="flex items-center gap-3">
-          <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            {printers.length} impresora{printers.length !== 1 ? 's' : ''} configurada{printers.length !== 1 ? 's' : ''}
-          </span>
+    <>
+    <div className="flex gap-0 h-full -m-8" style={{ minHeight: 'calc(100vh - 130px)' }}>
+      {/* Left panel: printer list */}
+      <div
+        className="flex flex-col h-full shrink-0"
+        style={{ width: '280px', backgroundColor: 'var(--bg-secondary)', borderRight: '1px solid var(--border)' }}
+      >
+        {/* Header */}
+        <div className="p-4 space-y-2" style={{ borderBottom: '1px solid var(--border)' }}>
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="flex items-center gap-2 text-xs font-medium hover:opacity-80 transition-all"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            <ArrowLeft size={14} /> Volver al menu
+          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDetect}
+              disabled={detecting}
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+              style={{ color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+            >
+              {detecting ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+              Buscar
+            </button>
+            <button
+              onClick={() => { resetForm(); setShowAddModal(true) }}
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+              style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
+            >
+              <Plus size={12} /> Agregar
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleDetect}
-            disabled={detecting}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90"
-            style={{
-              backgroundColor: 'var(--card-bg)',
-              color: 'var(--text-primary)',
-              border: '1px solid var(--border)',
-            }}
-          >
-            {detecting ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
-            {detecting ? 'Detectando...' : 'Auto-detectar'}
-          </button>
-          <button
-            onClick={() => { resetForm(); setShowAddModal(true) }}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90"
-            style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
-          >
-            <Plus size={16} />
-            Agregar Impresora
-          </button>
+
+        {/* Detected banner */}
+        {detected.length > 0 && (() => {
+          const newDetected = detected.filter(d => !printers.some(p => p.ip === d.ip && p.port === d.port))
+          if (newDetected.length === 0) return null
+          return (
+            <div className="p-3 space-y-1" style={{ borderBottom: '1px solid var(--border)', backgroundColor: 'var(--accent-alpha)' }}>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-semibold" style={{ color: 'var(--accent)' }}>{newDetected.length} detectada{newDetected.length !== 1 ? 's' : ''}</span>
+                <button onClick={() => setDetected([])} style={{ color: 'var(--text-secondary)' }}><X size={12} /></button>
+              </div>
+              {newDetected.map((d, i) => (
+                <button key={i} onClick={() => fillFromDetected(d)} className="w-full text-left px-2 py-1.5 rounded-lg text-xs hover:opacity-80"
+                  style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--border)' }}>
+                  <span className="font-mono">{d.ip}</span>
+                  <span className="ml-1.5 text-[10px]" style={{ color: 'var(--accent)' }}>{d.printer_type}</span>
+                </button>
+              ))}
+            </div>
+          )
+        })()}
+
+        {/* Printer list */}
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin" style={{ color: 'var(--accent)' }} /></div>
+          ) : printers.length === 0 ? (
+            <div className="text-center py-8 px-4">
+              <Box size={28} className="mx-auto mb-2" style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
+              <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Sin impresoras</p>
+            </div>
+          ) : printers.map(printer => {
+            const status = statuses[printer.id]
+            const isOnline = status?.online ?? false
+            const job = status?.current_job
+            const isPrinting = job && job.state.toLowerCase().includes('print')
+            const isPaused = job && job.state.toLowerCase().includes('paus')
+            const isSelected = selectedPrinterId === printer.id
+            return (
+              <button
+                key={printer.id}
+                onClick={() => setSelectedPrinterId(printer.id)}
+                className="w-full text-left p-3 transition-all duration-150 hover:opacity-90"
+                style={{
+                  backgroundColor: isSelected ? 'var(--accent-alpha)' : 'transparent',
+                  borderBottom: '1px solid var(--border)',
+                  borderLeft: isSelected ? '3px solid var(--accent)' : '3px solid transparent',
+                }}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: isOnline ? 'var(--success)' : 'var(--danger)' }} />
+                  <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{printer.name}</span>
+                </div>
+                {isOnline && job && (isPrinting || isPaused) ? (
+                  <div className="ml-4">
+                    <div className="flex items-center justify-between text-[10px] mb-0.5">
+                      <span className="truncate" style={{ color: isPaused ? 'var(--warning)' : 'var(--accent)' }}>
+                        {isPaused ? 'Pausada' : 'Imprimiendo'}
+                      </span>
+                      <span className="font-mono font-bold" style={{ color: 'var(--text-primary)' }}>{job.progress.toFixed(0)}%</span>
+                    </div>
+                    <div className="w-full h-1 rounded-full" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                      <div className="h-full rounded-full transition-all duration-500" style={{ width: `${job.progress}%`, backgroundColor: isPaused ? 'var(--warning)' : 'var(--accent)' }} />
+                    </div>
+                    <div className="flex justify-between text-[9px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                      <span className="truncate mr-2">{job.file_name}</span>
+                      {job.time_remaining != null && <span className="shrink-0">{formatTime(job.time_remaining)}</span>}
+                    </div>
+                  </div>
+                ) : (
+                  <span className="text-[10px] ml-4" style={{ color: isOnline ? 'var(--success)' : 'var(--text-secondary)' }}>
+                    {isOnline ? 'Libre' : 'Desconectada'}
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
       </div>
 
-      {/* Detected printers */}
-      {detected.length > 0 && (
-        <div
-          className="rounded-xl p-4 space-y-2"
-          style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--accent)' }}
-        >
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold" style={{ color: 'var(--accent)' }}>
-              Impresoras detectadas en la red
-            </h3>
-            <button onClick={() => setDetected([])} style={{ color: 'var(--text-secondary)' }}>
-              <X size={16} />
-            </button>
+      {/* Right panel: selected printer or empty state */}
+      <div className="flex-1 overflow-y-auto p-6">
+        {!selectedPrinter ? (
+          <div className="flex flex-col items-center justify-center h-full">
+            <Box size={48} className="mb-3" style={{ color: 'var(--text-secondary)', opacity: 0.3 }} />
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              {printers.length === 0 ? 'Agrega una impresora para empezar' : 'Selecciona una impresora'}
+            </p>
           </div>
-          {detected.map((d, i) => (
-            <div key={i} className="flex items-center justify-between py-2" style={{ borderTop: '1px solid var(--border)' }}>
-              <div className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                <span className="font-mono">{d.ip}:{d.port}</span>
-                <span className="ml-2 px-2 py-0.5 rounded text-xs" style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}>
-                  {d.printer_type}
-                </span>
-                {d.name && <span className="ml-2" style={{ color: 'var(--text-secondary)' }}>{d.name}</span>}
-              </div>
-              <button
-                onClick={() => fillFromDetected(d)}
-                className="px-3 py-1 rounded text-xs font-medium"
-                style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
-              >
-                Agregar
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Printers */}
-      {loading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 size={32} className="animate-spin" style={{ color: 'var(--accent)' }} />
-        </div>
-      ) : printers.length === 0 ? (
-        <div className="text-center py-16">
-          <Box size={48} className="mx-auto mb-4" style={{ color: 'var(--text-secondary)' }} />
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            No hay impresoras 3D configuradas. Pulsa "Agregar" o "Auto-detectar".
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {printers.map((printer) => {
+        ) : (() => {
+          const printer = selectedPrinter
             const status = statuses[printer.id]
             const isOnline = status?.online ?? false
             const temps = status?.temperatures
@@ -670,6 +1028,14 @@ export default function Printers3DPage() {
                   )}
 
                   <div className="flex-1" />
+                  <button
+                    onClick={() => openEditModal(printer)}
+                    className="p-1.5 rounded-lg transition-all duration-200 hover:opacity-80"
+                    style={{ color: 'var(--text-secondary)' }}
+                    title="Editar"
+                  >
+                    <Pencil size={14} />
+                  </button>
                   <button
                     onClick={() => handleDelete(printer.id)}
                     className="p-1.5 rounded-lg transition-all duration-200 hover:opacity-80"
@@ -958,10 +1324,17 @@ export default function Printers3DPage() {
                   </div>
                 )}
               </div>
-            )
-          })}
-        </div>
-      )}
+            </div>
+
+            {/* Cost Calculator */}
+            <div className="mt-6">
+              <CostCalculator />
+            </div>
+          </div>
+        )
+      })()}
+      </div> {/* end right panel */}
+    </div> {/* end flex layout */}
 
       {/* Add Modal */}
       {showAddModal && (
@@ -972,7 +1345,7 @@ export default function Printers3DPage() {
           >
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
-                Agregar Impresora 3D
+                {editingPrinterId ? 'Editar Impresora 3D' : 'Agregar Impresora 3D'}
               </h3>
               <button onClick={() => setShowAddModal(false)} style={{ color: 'var(--text-secondary)' }}>
                 <X size={20} />
@@ -1070,16 +1443,16 @@ export default function Printers3DPage() {
                 Cancelar
               </button>
               <button
-                onClick={handleAdd}
+                onClick={handleSave}
                 className="px-4 py-2 rounded-lg text-sm font-medium"
                 style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
               >
-                Agregar
+                {editingPrinterId ? 'Guardar' : 'Agregar'}
               </button>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }

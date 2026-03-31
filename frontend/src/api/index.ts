@@ -177,6 +177,16 @@ export async function deletePrinter3D(id: string): Promise<void> {
   if (!res.ok) throw new Error('Error al eliminar impresora 3D')
 }
 
+export async function updatePrinter3D(id: string, data: Partial<Omit<import('../types').Printer3DConfig, 'id'>>): Promise<import('../types').Printer3DConfig> {
+  const res = await api(`/api/printers3d/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Error al actualizar impresora 3D')
+  return res.json()
+}
+
 export async function fetchPrinter3DStatus(id: string): Promise<Printer3DStatus> {
   const res = await api(`/api/printers3d/${id}/status`)
   if (!res.ok) throw new Error('Error al obtener estado de impresora')
@@ -602,6 +612,31 @@ export async function fetchPrintJobs(): Promise<CupsPrintJob[]> {
 export async function cancelPrintJob(id: string): Promise<void> {
   const res = await api(`/api/printing/jobs/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al cancelar trabajo')
+}
+
+export async function wakePrinter(name: string): Promise<void> {
+  const res = await api(`/api/printing/printers/${encodeURIComponent(name)}/wake`, { method: 'POST' })
+  if (!res.ok) throw new Error('Error al despertar impresora')
+}
+
+export async function fetchPrinterStats(name: string): Promise<import('../types').PrinterStatsResponse> {
+  const res = await api(`/api/printing/printers/${encodeURIComponent(name)}/stats`)
+  if (!res.ok) throw new Error('Error al obtener estadisticas')
+  return res.json()
+}
+
+export async function setPrinterCosts(name: string, costs: import('../types').PrinterCosts): Promise<void> {
+  const res = await api(`/api/printing/printers/${encodeURIComponent(name)}/costs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(costs),
+  })
+  if (!res.ok) throw new Error('Error al guardar costos')
+}
+
+export async function resetPrinterStats(name: string): Promise<void> {
+  const res = await api(`/api/printing/printers/${encodeURIComponent(name)}/stats/reset`, { method: 'POST' })
+  if (!res.ok) throw new Error('Error al resetear estadisticas')
 }
 
 // --- Tasks & Projects ---
