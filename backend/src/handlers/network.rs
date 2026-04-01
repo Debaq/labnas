@@ -4,13 +4,13 @@ use axum::{
     Json,
 };
 use chrono::Utc;
+use rusqlite::params;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr},
     time::{Duration, Instant},
 };
 
-use crate::config::save_config;
 use crate::models::network::{KnownDevice, LabelRequest, NetworkHost};
 use crate::state::AppState;
 
@@ -57,9 +57,23 @@ pub async fn scan_network(
     // Get MAC addresses from ARP table
     let mac_map = get_arp_table().await;
 
-    // Load known devices
-    let config = state.config.lock().await;
-    let known = &config.known_devices;
+    // Load known devices from DB
+    let known = crate::db::db_op(&state.db, |conn| {
+        let mut stmt = conn.prepare("SELECT mac, label, icon FROM known_devices")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |row| {
+            Ok(KnownDevice {
+                mac: row.get(0)?,
+                label: row.get(1)?,
+                icon: row.get(2)?,
+            })
+        }).map_err(|e| e.to_string())?;
+        let mut devices = Vec::new();
+        for row in rows {
+            devices.push(row.map_err(|e| e.to_string())?);
+        }
+        Ok(devices)
+    }).await?;
 
     // Enrich hosts with MAC, vendor, known status
     for host in &mut hosts {
@@ -102,12 +116,26 @@ pub async fn scan_network(
 
     // Alert via Telegram for brand new unknown devices
     if !brand_new.is_empty() {
-        let token = config.notifications.bot_token.clone();
-        let chats = config.notifications.telegram_chats.clone();
-        drop(config);
+        // Read bot_token and chats from DB
+        let tg_data = crate::db::db_op(&state.db, |conn| {
+            let token: Option<String> = conn.query_row(
+                "SELECT bot_token FROM notification_config WHERE id = 1",
+                [],
+                |row| row.get(0),
+            ).ok();
 
-        if let Some(token) = token {
-            if !chats.is_empty() {
+            let mut stmt = conn.prepare("SELECT chat_id FROM telegram_chats")
+                .map_err(|e| e.to_string())?;
+            let chat_ids: Vec<i64> = stmt.query_map([], |row| row.get(0))
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            Ok((token, chat_ids))
+        }).await;
+
+        if let Ok((Some(token), chat_ids)) = tg_data {
+            if !chat_ids.is_empty() {
                 let mut msg = String::from("*Nuevo dispositivo en la red*\n");
                 for h in &brand_new {
                     let mac = h.mac.as_deref().unwrap_or("?");
@@ -119,13 +147,11 @@ pub async fn scan_network(
                     ));
                 }
                 let client = &state.http_client;
-                for chat in &chats {
-                    let _ = send_tg(client, &token, chat.chat_id, &msg).await;
+                for chat_id in &chat_ids {
+                    let _ = send_tg(client, &token, *chat_id, &msg).await;
                 }
             }
         }
-    } else {
-        drop(config);
     }
 
     hosts.sort_by(|a, b| {
@@ -149,10 +175,10 @@ pub async fn get_hosts(State(state): State<AppState>) -> Json<Vec<NetworkHost>> 
     Json(hosts.clone())
 }
 
-/// Escaneo de red automático: al inicio + cada 5 minutos
+/// Escaneo de red automatico: al inicio + cada 5 minutos
 pub async fn network_scan_loop(state: AppState) {
     loop {
-        // Reutilizar la lógica de scan_network pero sin extractores axum
+        // Reutilizar la logica de scan_network pero sin extractores axum
         if let Ok(local_ip) = local_ip_address::local_ip() {
             if let IpAddr::V4(ipv4) = local_ip {
                 let octets = ipv4.octets();
@@ -173,9 +199,24 @@ pub async fn network_scan_loop(state: AppState) {
                 hosts.retain(|h| h.is_alive);
 
                 let mac_map = get_arp_table().await;
-                let config = state.config.lock().await;
-                let known = config.known_devices.clone();
-                drop(config);
+
+                // Load known devices from DB (synchronous)
+                let known: Vec<KnownDevice> = match crate::db::get_conn(&state.db) {
+                    Ok(conn) => {
+                        let mut stmt = conn.prepare("SELECT mac, label, icon FROM known_devices")
+                            .unwrap_or_else(|_| conn.prepare("SELECT 1 WHERE 0").unwrap());
+                        stmt.query_map([], |row| {
+                            Ok(KnownDevice {
+                                mac: row.get(0)?,
+                                label: row.get(1)?,
+                                icon: row.get(2)?,
+                            })
+                        })
+                        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                        .unwrap_or_default()
+                    }
+                    Err(_) => Vec::new(),
+                };
 
                 for host in &mut hosts {
                     if let Some(mac) = mac_map.get(&host.ip) {
@@ -217,30 +258,19 @@ pub async fn label_host(
     Json(req): Json<LabelRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let mac_upper = mac.to_uppercase();
-    let mut config = state.config.lock().await;
-
     let label = req.label;
     let icon = req.icon;
 
-    // Update or add
-    if let Some(existing) = config
-        .known_devices
-        .iter_mut()
-        .find(|d| d.mac.to_uppercase() == mac_upper)
-    {
-        existing.label = label.clone();
-        existing.icon = icon.clone();
-    } else {
-        config.known_devices.push(KnownDevice {
-            mac: mac_upper.clone(),
-            label: label.clone(),
-            icon: icon.clone(),
-        });
-    }
-
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let label_clone = label.clone();
+    let icon_clone = icon.clone();
+    let mac_clone = mac_upper.clone();
+    crate::db::db_op(&state.db, move |conn| {
+        conn.execute(
+            "INSERT OR REPLACE INTO known_devices (mac, label, icon) VALUES (?1, ?2, ?3)",
+            params![&mac_clone, &label_clone, &icon_clone],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }).await?;
 
     // Update in-memory hosts
     let mut hosts = state.scanned_hosts.lock().await;
@@ -260,20 +290,19 @@ pub async fn unlabel_host(
     Path(mac): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let mac_upper = mac.to_uppercase();
-    let mut config = state.config.lock().await;
 
-    let before = config.known_devices.len();
-    config
-        .known_devices
-        .retain(|d| d.mac.to_uppercase() != mac_upper);
+    let mac_clone = mac_upper.clone();
+    crate::db::db_op_status(&state.db, move |conn| {
+        let rows = conn.execute(
+            "DELETE FROM known_devices WHERE UPPER(mac) = ?1",
+            params![&mac_clone],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    if config.known_devices.len() == before {
-        return Err((StatusCode::NOT_FOUND, "Dispositivo no encontrado".to_string()));
-    }
-
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        if rows == 0 {
+            return Err((StatusCode::NOT_FOUND, "Dispositivo no encontrado".to_string()));
+        }
+        Ok(())
+    }).await?;
 
     // Update in-memory hosts
     let mut hosts = state.scanned_hosts.lock().await;

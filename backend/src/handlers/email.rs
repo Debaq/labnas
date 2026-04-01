@@ -4,11 +4,13 @@ use axum::{
     Json,
 };
 use chrono::Utc;
+use rusqlite::params;
+use rusqlite::OptionalExtension;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::config::save_config;
+use crate::db::{db_op, db_op_status, get_conn};
 use crate::models::email::{EmailAccount, EmailFilter, EmailMessage, FilterAction, MailProtocol};
 use crate::models::notifications::UserRole;
 use crate::state::AppState;
@@ -101,15 +103,24 @@ pub async fn configure_account(
         ));
     }
 
-    let mut config = state.config.lock().await;
-    // Reemplazar cuenta existente del usuario o agregar nueva
-    config.email.accounts.retain(|a| a.username != username);
-    config.email.accounts.push(account);
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let acct = account.clone();
+    db_op(&state.db, move |conn| {
+        conn.execute(
+            "INSERT OR REPLACE INTO email_accounts (username, host, port, protocol, email, password, filters)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                acct.username,
+                acct.host,
+                acct.port as i64,
+                serde_json::to_string(&acct.protocol).unwrap_or_default().trim_matches('"'),
+                acct.email,
+                acct.password,
+                serde_json::to_string(&acct.filters).unwrap_or_else(|_| "[]".to_string()),
+            ],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }).await?;
 
-    drop(config);
     state
         .log_activity(
             "email_configurado",
@@ -131,22 +142,21 @@ pub async fn delete_account(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let mut config = state.config.lock().await;
-    let before = config.email.accounts.len();
-    config.email.accounts.retain(|a| a.username != username);
+    let uname = username.clone();
+    let deleted = db_op(&state.db, move |conn| {
+        let changes = conn.execute(
+            "DELETE FROM email_accounts WHERE username = ?1",
+            params![&uname],
+        ).map_err(|e| e.to_string())?;
+        Ok(changes)
+    }).await?;
 
-    if config.email.accounts.len() == before {
+    if deleted == 0 {
         return Err((
             StatusCode::NOT_FOUND,
             "No tienes cuenta de correo configurada".to_string(),
         ));
     }
-
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-
-    drop(config);
 
     // Limpiar inbox del usuario
     let mut inbox = state.email_inbox.lock().await;
@@ -184,15 +194,31 @@ pub async fn check_now(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let config = state.config.lock().await;
-    let account = config
-        .email
-        .accounts
-        .iter()
-        .find(|a| a.username == username)
-        .cloned();
-    let groq_key = config.email.groq_api_key.clone();
-    drop(config);
+    let uname = username.clone();
+    let (account, groq_key) = db_op(&state.db, move |conn| {
+        let acct = conn.query_row(
+            "SELECT username, host, port, protocol, email, password, filters FROM email_accounts WHERE username = ?1",
+            params![&uname],
+            |row| {
+                let proto_str: String = row.get(3)?;
+                let filters_str: String = row.get(6)?;
+                Ok(EmailAccount {
+                    username: row.get(0)?,
+                    host: row.get(1)?,
+                    port: row.get::<_, i64>(2)? as u16,
+                    protocol: match proto_str.as_str() {
+                        "pop3" => MailProtocol::Pop3,
+                        _ => MailProtocol::Imap,
+                    },
+                    email: row.get(4)?,
+                    password: row.get(5)?,
+                    filters: serde_json::from_str(&filters_str).unwrap_or_default(),
+                })
+            },
+        ).optional().map_err(|e| e.to_string())?;
+        let gk = crate::db::get_setting(conn, "groq_api_key");
+        Ok((acct, gk))
+    }).await?;
 
     let Some(account) = account else {
         return Err((
@@ -266,13 +292,10 @@ pub async fn classify_email(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let config = state.config.lock().await;
-    let groq_key = config
-        .email
-        .groq_api_key
-        .clone()
-        .ok_or((StatusCode::BAD_REQUEST, "Groq API key no configurada".to_string()))?;
-    drop(config);
+    let groq_key = db_op(&state.db, |conn| {
+        Ok(crate::db::get_setting(conn, "groq_api_key"))
+    }).await?
+    .ok_or((StatusCode::BAD_REQUEST, "Groq API key no configurada".to_string()))?;
 
     let mut inbox = state.email_inbox.lock().await;
     let emails = inbox
@@ -347,32 +370,32 @@ pub async fn email_to_task(
     drop(inbox);
 
     // Crear la tarea
-    let task = crate::models::tasks::Task {
-        id: uuid::Uuid::new_v4().to_string()[..6].to_string(),
-        project_id: None,
-        title: title.clone(),
-        description: format!("De: {}\nFecha: {}\n\n{}", email_from_str(uid, &state, &username).await, "", ""),
-        assigned_to: vec![username.clone()],
-        status: crate::models::tasks::TaskStatus::Pendiente,
-        created_by: username.clone(),
-        due_date: None,
-        due_time: None,
-        requires_confirmation: false,
-        insistent: false,
-        reminder_minutes: 8,
-        confirmed_by: Vec::new(),
-        rejected_by: Vec::new(),
-        created_at: Utc::now(),
-        last_reminder: None,
-    };
+    let from_str = email_from_str(uid, &state, &username).await;
+    let task_id = uuid::Uuid::new_v4().to_string()[..6].to_string();
+    let description = format!("De: {}", from_str);
+    let assigned_json = serde_json::to_string(&vec![&username]).unwrap_or_default();
+    let now = Utc::now().to_rfc3339();
+    let tid = task_id.clone();
+    let t = title.clone();
+    let d = description.clone();
+    let u = username.clone();
+    let aj = assigned_json.clone();
+    let n = now.clone();
 
-    let mut config = state.config.lock().await;
-    config.tasks.tasks.push(task);
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    db_op(&state.db, move |conn| {
+        conn.execute(
+            "INSERT INTO tasks (id, project_id, title, description, assigned_to, status, created_by, due_date, due_time, requires_confirmation, insistent, reminder_minutes, confirmed_by, rejected_by, created_at, last_reminder)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+            params![
+                tid, Option::<String>::None, t, d,
+                aj, "pendiente", u, Option::<String>::None, Option::<String>::None,
+                false, false, 8i64,
+                "[]", "[]", n, Option::<String>::None,
+            ],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }).await?;
 
-    drop(config);
     state
         .log_activity("email_a_tarea", &title, &username)
         .await;
@@ -406,13 +429,11 @@ pub async fn set_groq_key(
         return Err((StatusCode::BAD_REQUEST, "Key vacia".to_string()));
     }
 
-    let mut config = state.config.lock().await;
-    config.email.groq_api_key = Some(key);
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let k = key.clone();
+    db_op(&state.db, move |conn| {
+        crate::db::set_setting(conn, "groq_api_key", &k)
+    }).await?;
 
-    drop(config);
     state
         .log_activity("groq_key", "API key de Groq configurada", &username)
         .await;
@@ -433,9 +454,19 @@ pub async fn list_filters(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let config = state.config.lock().await;
-    let account = config.email.accounts.iter().find(|a| a.username == username);
-    Ok(Json(account.map(|a| a.filters.clone()).unwrap_or_default()))
+    let uname = username.clone();
+    let filters = db_op(&state.db, move |conn| {
+        let filters_str: Option<String> = conn.query_row(
+            "SELECT filters FROM email_accounts WHERE username = ?1",
+            params![&uname],
+            |row| row.get(0),
+        ).optional().map_err(|e| e.to_string())?.flatten();
+        let filters: Vec<EmailFilter> = filters_str
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        Ok(filters)
+    }).await?;
+    Ok(Json(filters))
 }
 
 #[derive(Debug, Deserialize)]
@@ -457,23 +488,36 @@ pub async fn add_filter(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let mut config = state.config.lock().await;
-    let account = config.email.accounts.iter_mut().find(|a| a.username == username)
-        .ok_or((StatusCode::NOT_FOUND, "Cuenta de correo no configurada".to_string()))?;
+    let uname = username.clone();
+    db_op_status(&state.db, move |conn| {
+        let row_opt: Option<String> = conn.query_row(
+            "SELECT filters FROM email_accounts WHERE username = ?1",
+            params![&uname],
+            |row| row.get(0),
+        ).optional().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let filters_str = row_opt
+            .ok_or((StatusCode::NOT_FOUND, "Cuenta de correo no configurada".to_string()))?;
+        let mut filters: Vec<EmailFilter> = serde_json::from_str(&filters_str).unwrap_or_default();
 
-    // No duplicar
-    if account.filters.iter().any(|f| f.pattern == req.pattern) {
-        return Err((StatusCode::CONFLICT, "Filtro ya existe".to_string()));
-    }
+        // No duplicar
+        if filters.iter().any(|f| f.pattern == req.pattern) {
+            return Err((StatusCode::CONFLICT, "Filtro ya existe".to_string()));
+        }
 
-    account.filters.push(EmailFilter {
-        pattern: req.pattern,
-        action: req.action,
-        label: req.label,
-        auto_tag: req.auto_tag,
-    });
+        filters.push(EmailFilter {
+            pattern: req.pattern,
+            action: req.action,
+            label: req.label,
+            auto_tag: req.auto_tag,
+        });
 
-    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let new_json = serde_json::to_string(&filters).unwrap_or_else(|_| "[]".to_string());
+        conn.execute(
+            "UPDATE email_accounts SET filters = ?1 WHERE username = ?2",
+            params![new_json, &uname],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        Ok(())
+    }).await?;
     Ok(StatusCode::CREATED)
 }
 
@@ -487,18 +531,31 @@ pub async fn delete_filter(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let mut config = state.config.lock().await;
-    let account = config.email.accounts.iter_mut().find(|a| a.username == username)
-        .ok_or((StatusCode::NOT_FOUND, "Cuenta no configurada".to_string()))?;
-
     let decoded = urlencoding::decode(&pattern).unwrap_or_default().to_string();
-    let before = account.filters.len();
-    account.filters.retain(|f| f.pattern != decoded);
-    if account.filters.len() == before {
-        return Err((StatusCode::NOT_FOUND, "Filtro no encontrado".to_string()));
-    }
+    let uname = username.clone();
+    db_op_status(&state.db, move |conn| {
+        let row_opt: Option<String> = conn.query_row(
+            "SELECT filters FROM email_accounts WHERE username = ?1",
+            params![&uname],
+            |row| row.get(0),
+        ).optional().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let filters_str = row_opt
+            .ok_or((StatusCode::NOT_FOUND, "Cuenta no configurada".to_string()))?;
+        let mut filters: Vec<EmailFilter> = serde_json::from_str(&filters_str).unwrap_or_default();
 
-    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let before = filters.len();
+        filters.retain(|f| f.pattern != decoded);
+        if filters.len() == before {
+            return Err((StatusCode::NOT_FOUND, "Filtro no encontrado".to_string()));
+        }
+
+        let new_json = serde_json::to_string(&filters).unwrap_or_else(|_| "[]".to_string());
+        conn.execute(
+            "UPDATE email_accounts SET filters = ?1 WHERE username = ?2",
+            params![new_json, &uname],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        Ok(())
+    }).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -989,12 +1046,69 @@ pub async fn email_check_loop(state: AppState) {
     tokio::time::sleep(Duration::from_secs(30)).await;
 
     loop {
-        let config = state.config.lock().await;
-        let accounts = config.email.accounts.clone();
-        let groq_key = config.email.groq_api_key.clone();
-        let token = config.notifications.bot_token.clone();
-        let chats = config.notifications.telegram_chats.clone();
-        drop(config);
+        let db_data = {
+            let conn = match get_conn(&state.db) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("[Email] Error obteniendo conexion DB: {}", e);
+                    tokio::time::sleep(Duration::from_secs(300)).await;
+                    continue;
+                }
+            };
+
+            // Leer cuentas de email
+            let accounts: Vec<EmailAccount> = match conn.prepare(
+                "SELECT username, host, port, protocol, email, password, filters FROM email_accounts"
+            ) {
+                Ok(mut stmt) => {
+                    stmt.query_map([], |row| {
+                        let proto_str: String = row.get(3)?;
+                        let filters_str: String = row.get(6)?;
+                        Ok(EmailAccount {
+                            username: row.get(0)?,
+                            host: row.get(1)?,
+                            port: row.get::<_, i64>(2)? as u16,
+                            protocol: match proto_str.as_str() {
+                                "pop3" => MailProtocol::Pop3,
+                                _ => MailProtocol::Imap,
+                            },
+                            email: row.get(4)?,
+                            password: row.get(5)?,
+                            filters: serde_json::from_str(&filters_str).unwrap_or_default(),
+                        })
+                    }).unwrap().filter_map(|r| r.ok()).collect()
+                }
+                Err(e) => {
+                    eprintln!("[Email] Error preparando query: {}", e);
+                    Vec::new()
+                }
+            };
+
+            let groq_key = crate::db::get_setting(&conn, "groq_api_key");
+
+            // Leer bot_token de notification_config
+            let token: Option<String> = conn.query_row(
+                "SELECT bot_token FROM notification_config WHERE id = 1",
+                [],
+                |row| row.get(0),
+            ).ok().flatten();
+
+            // Leer chats de telegram_chats
+            let chats: Vec<(i64, Option<String>, String)> = match conn.prepare(
+                "SELECT chat_id, linked_web_user, name FROM telegram_chats"
+            ) {
+                Ok(mut stmt) => {
+                    stmt.query_map([], |row| {
+                        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                    }).unwrap().filter_map(|r| r.ok()).collect()
+                }
+                Err(_) => Vec::new(),
+            };
+
+            (accounts, groq_key, token, chats)
+        };
+
+        let (accounts, groq_key, token, chats) = db_data;
 
         for account in &accounts {
             let account_clone = account.clone();
@@ -1099,9 +1213,9 @@ pub async fn email_check_loop(state: AppState) {
                     // Buscar chat_id del usuario via linked_web_user
                     let target_chat = chats
                         .iter()
-                        .find(|c| c.linked_web_user.as_deref() == Some(&username));
+                        .find(|c| c.1.as_deref() == Some(&username));
 
-                    if let Some(chat) = target_chat {
+                    if let Some((chat_id, _, _)) = target_chat {
                         let msg = format!(
                             "*Correo urgente!*\n\n{} correo(s) nuevo(s), {} urgente(s):\n{}",
                             new_count,
@@ -1111,7 +1225,7 @@ pub async fn email_check_loop(state: AppState) {
                         let _ = send_telegram_notification(
                             &state.http_client,
                             token,
-                            chat.chat_id,
+                            *chat_id,
                             &msg,
                         )
                         .await;
@@ -1155,14 +1269,15 @@ async fn send_telegram_notification(
 /// Resumen de correos para un usuario de Telegram
 pub async fn get_emails_summary(state: &AppState, chat_name: &str) -> String {
     // Buscar el web user vinculado a este chat
-    let config = state.config.lock().await;
-    let linked_user = config
-        .notifications
-        .telegram_chats
-        .iter()
-        .find(|c| c.name == chat_name)
-        .and_then(|c| c.linked_web_user.clone());
-    drop(config);
+    let name = chat_name.to_string();
+    let linked_user = db_op(&state.db, move |conn| {
+        let user: Option<String> = conn.query_row(
+            "SELECT linked_web_user FROM telegram_chats WHERE name = ?1",
+            params![&name],
+            |row| row.get(0),
+        ).optional().map_err(|e| e.to_string())?.flatten();
+        Ok(user)
+    }).await.unwrap_or(None);
 
     let Some(username) = linked_user else {
         return "No tienes cuenta web vinculada. Usa `/vincular CODIGO` primero.".to_string();
@@ -1255,14 +1370,15 @@ pub async fn get_emails_summary(state: &AppState, chat_name: &str) -> String {
 
 /// Leer detalle de un email por UID
 pub async fn get_email_detail(state: &AppState, chat_name: &str, uid_str: &str) -> String {
-    let config = state.config.lock().await;
-    let linked_user = config
-        .notifications
-        .telegram_chats
-        .iter()
-        .find(|c| c.name == chat_name)
-        .and_then(|c| c.linked_web_user.clone());
-    drop(config);
+    let name = chat_name.to_string();
+    let linked_user = db_op(&state.db, move |conn| {
+        let user: Option<String> = conn.query_row(
+            "SELECT linked_web_user FROM telegram_chats WHERE name = ?1",
+            params![&name],
+            |row| row.get(0),
+        ).optional().map_err(|e| e.to_string())?.flatten();
+        Ok(user)
+    }).await.unwrap_or(None);
 
     let Some(username) = linked_user else {
         return "No tienes cuenta web vinculada. Usa `/vincular CODIGO` primero.".to_string();
@@ -1317,14 +1433,15 @@ pub async fn get_email_detail(state: &AppState, chat_name: &str, uid_str: &str) 
 
 /// Convertir email a tarea insistente desde Telegram
 pub async fn telegram_email_to_task(state: &AppState, chat_name: &str, uid_str: &str) -> String {
-    let config = state.config.lock().await;
-    let linked_user = config
-        .notifications
-        .telegram_chats
-        .iter()
-        .find(|c| c.name == chat_name)
-        .and_then(|c| c.linked_web_user.clone());
-    drop(config);
+    let name = chat_name.to_string();
+    let linked_user = db_op(&state.db, move |conn| {
+        let user: Option<String> = conn.query_row(
+            "SELECT linked_web_user FROM telegram_chats WHERE name = ?1",
+            params![&name],
+            |row| row.get(0),
+        ).optional().map_err(|e| e.to_string())?.flatten();
+        Ok(user)
+    }).await.unwrap_or(None);
 
     let Some(username) = linked_user else {
         return "No tienes cuenta web vinculada. Usa `/vincular CODIGO` primero.".to_string();
@@ -1362,29 +1479,34 @@ pub async fn telegram_email_to_task(state: &AppState, chat_name: &str, uid_str: 
     drop(inbox);
 
     // Crear tarea insistente
-    let task = crate::models::tasks::Task {
-        id: uuid::Uuid::new_v4().to_string()[..6].to_string(),
-        project_id: None,
-        title: title.clone(),
-        description: format!("De: {}", from),
-        assigned_to: vec![chat_name.to_string()],
-        status: crate::models::tasks::TaskStatus::Pendiente,
-        created_by: chat_name.to_string(),
-        due_date: None,
-        due_time: None,
-        requires_confirmation: true,
-        insistent: true,
-        reminder_minutes: 8,
-        confirmed_by: Vec::new(),
-        rejected_by: Vec::new(),
-        created_at: Utc::now(),
-        last_reminder: None,
-    };
+    let task_id = uuid::Uuid::new_v4().to_string()[..6].to_string();
+    let description = format!("De: {}", from);
+    let assigned_json = serde_json::to_string(&vec![chat_name]).unwrap_or_default();
+    let now = Utc::now().to_rfc3339();
+    let tid = task_id.clone();
+    let t = title.clone();
+    let d = description.clone();
+    let cn = chat_name.to_string();
+    let aj = assigned_json.clone();
+    let n = now.clone();
 
-    let task_id = task.id.clone();
-    let mut config = state.config.lock().await;
-    config.tasks.tasks.push(task);
-    let _ = save_config(&config).await;
+    let insert_result = db_op(&state.db, move |conn| {
+        conn.execute(
+            "INSERT INTO tasks (id, project_id, title, description, assigned_to, status, created_by, due_date, due_time, requires_confirmation, insistent, reminder_minutes, confirmed_by, rejected_by, created_at, last_reminder)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+            params![
+                tid, Option::<String>::None, t, d,
+                aj, "pendiente", cn, Option::<String>::None, Option::<String>::None,
+                true, true, 8i64,
+                "[]", "[]", n, Option::<String>::None,
+            ],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }).await;
+
+    if let Err(e) = insert_result {
+        return format!("Error creando tarea: {}", e.1);
+    }
 
     format!(
         "Tarea insistente creada!\n*{}*\nID: `{}`\n\nSe te recordara cada 8 min hasta confirmar.",

@@ -1,4 +1,4 @@
-use crate::config::LabNasConfig;
+use crate::db::DbPool;
 use crate::handlers::music::MusicState;
 use crate::models::email::EmailMessage;
 use crate::models::network::NetworkHost;
@@ -32,7 +32,7 @@ pub struct SessionInfo {
 pub struct AppState {
     pub scanned_hosts: Arc<Mutex<Vec<NetworkHost>>>,
     pub start_time: Instant,
-    pub config: Arc<Mutex<LabNasConfig>>,
+    pub db: DbPool,
     pub http_client: reqwest::Client,
     pub shutdown: Arc<Notify>,
     pub activity_log: Arc<Mutex<Vec<ActivityEvent>>>,

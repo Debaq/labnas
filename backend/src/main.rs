@@ -1,4 +1,5 @@
 mod config;
+mod db;
 mod handlers;
 mod middleware;
 mod models;
@@ -15,21 +16,29 @@ use tokio::sync::{Mutex, Notify};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 
-use config::load_config;
 use state::AppState;
 
 #[tokio::main]
 async fn main() {
-    let config = load_config().await;
-    let mdns_enabled = config.mdns_enabled;
-    let mdns_hostname = if config.mdns_hostname.is_empty() { "labnas".to_string() } else { config.mdns_hostname.clone() };
-    let upload_limit_mb = config.upload_limit_mb;
+    let pool = db::init_db();
+
+    // Read startup settings from DB
+    let (mdns_enabled, mdns_hostname, upload_limit_mb) = {
+        let conn = pool.get().expect("DB pool error at startup");
+        let mdns_enabled = db::get_setting_bool(&conn, "mdns_enabled");
+        let mdns_hostname = db::get_setting(&conn, "mdns_hostname")
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "labnas".to_string());
+        let upload_limit_mb = db::get_setting_u32(&conn, "upload_limit_mb", 50);
+        (mdns_enabled, mdns_hostname, upload_limit_mb)
+    };
+
     let shutdown = Arc::new(Notify::new());
 
     let state = AppState {
         scanned_hosts: Arc::new(Mutex::new(Vec::new())),
         start_time: Instant::now(),
-        config: Arc::new(Mutex::new(config)),
+        db: pool,
         http_client: reqwest::Client::new(),
         shutdown: shutdown.clone(),
         activity_log: Arc::new(Mutex::new(Vec::new())),
@@ -147,6 +156,12 @@ async fn main() {
         .route("/api/printers3d", get(handlers::printers3d::list_printers))
         .route("/api/printers3d", post(handlers::printers3d::add_printer))
         .route("/api/printers3d/detect", post(handlers::printers3d::detect_printers))
+        .route("/api/printers3d/test-home", post(handlers::printers3d::test_home))
+        .route("/api/printers3d/sections", get(handlers::printers3d::list_sections))
+        .route("/api/printers3d/sections", post(handlers::printers3d::add_section))
+        .route("/api/printers3d/sections/reorder", put(handlers::printers3d::reorder_sections))
+        .route("/api/printers3d/sections/{id}", put(handlers::printers3d::update_section))
+        .route("/api/printers3d/sections/{id}", delete(handlers::printers3d::delete_section))
         .route("/api/printers3d/{id}", delete(handlers::printers3d::delete_printer))
         .route("/api/printers3d/{id}", put(handlers::printers3d::update_printer))
         .route("/api/printers3d/{id}/status", get(handlers::printers3d::printer_status))
@@ -160,6 +175,7 @@ async fn main() {
         .route("/api/printers3d/{id}/files/{filename}/print", post(handlers::printers3d::print_file))
         .route("/api/printers3d/{id}/files/{filename}", delete(handlers::printers3d::delete_printer_file))
         .route("/api/printers3d/{id}/camera", get(handlers::printers3d::camera_snapshot))
+        .route("/api/printers3d/{id}/reorder", put(handlers::printers3d::reorder_printer))
         // CUPS Printing
         .route("/api/printing/printers", get(handlers::printing::list_printers))
         .route("/api/printing/printers/{name}/options", get(handlers::printing::printer_options))
@@ -249,6 +265,14 @@ async fn main() {
         .route("/api/email/filters", get(handlers::email::list_filters))
         .route("/api/email/filters", post(handlers::email::add_filter))
         .route("/api/email/filters/{pattern}", delete(handlers::email::delete_filter))
+        // User Reports
+        .route("/api/reports/config", get(handlers::reports::get_reports_config))
+        .route("/api/reports/config", post(handlers::reports::set_reports_config))
+        .route("/api/reports", get(handlers::reports::list_reports))
+        .route("/api/reports", post(handlers::reports::create_report))
+        .route("/api/reports/mine", get(handlers::reports::my_reports))
+        .route("/api/reports/{id}", put(handlers::reports::respond_report))
+        .route("/api/reports/{id}", delete(handlers::reports::delete_report))
         .layer(axum::extract::DefaultBodyLimit::max(upload_limit_mb as usize * 1024 * 1024))
         .layer(axum_mw::from_fn_with_state(state.clone(), middleware::permission_check))
         .layer(cors)

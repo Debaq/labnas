@@ -209,6 +209,16 @@ export async function detectPrinters3D(): Promise<DetectPrintersResult[]> {
   return res.json()
 }
 
+export async function testHome3D(ip: string, port: number, printer_type: string, api_key?: string): Promise<string> {
+  const res = await api('/api/printers3d/test-home', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ip, port, printer_type, api_key: api_key || null }),
+  })
+  if (!res.ok) throw new Error('Error al enviar Home')
+  return res.text()
+}
+
 export async function controlPrint3D(id: string, command: 'start' | 'pause' | 'resume' | 'cancel'): Promise<string> {
   const res = await api(`/api/printers3d/${id}/control`, {
     method: 'POST',
@@ -282,6 +292,57 @@ export async function deletePrinterFile(id: string, filename: string): Promise<v
 
 export function cameraSnapshotUrl(id: string): string {
   return `/api/printers3d/${id}/camera`
+}
+
+// Secciones de impresoras 3D
+export async function fetchPrinter3DSections(): Promise<import('../types').Printer3DSection[]> {
+  const res = await api('/api/printers3d/sections')
+  if (!res.ok) throw new Error('Error al obtener secciones')
+  return res.json()
+}
+
+export async function addPrinter3DSection(name: string): Promise<import('../types').Printer3DSection> {
+  const res = await api('/api/printers3d/sections', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  if (!res.ok) throw new Error('Error al crear seccion')
+  return res.json()
+}
+
+export async function updatePrinter3DSection(id: string, data: { name?: string; order?: number }): Promise<import('../types').Printer3DSection> {
+  const res = await api(`/api/printers3d/sections/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Error al actualizar seccion')
+  return res.json()
+}
+
+export async function deletePrinter3DSection(id: string): Promise<void> {
+  const res = await api(`/api/printers3d/sections/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al eliminar seccion')
+}
+
+export async function reorderPrinter3D(id: string, sectionId: string | null, order: number): Promise<import('../types').Printer3DConfig> {
+  const res = await api(`/api/printers3d/${id}/reorder`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ section_id: sectionId, order }),
+  })
+  if (!res.ok) throw new Error('Error al reordenar impresora')
+  return res.json()
+}
+
+export async function reorderPrinter3DSections(order: string[]): Promise<void> {
+  const res = await api('/api/printers3d/sections/reorder', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(order),
+  })
+  if (!res.ok) throw new Error('Error al reordenar secciones')
 }
 
 // --- Notifications (Telegram) ---
@@ -1352,5 +1413,58 @@ export async function setMpvArgs(args: string[]): Promise<string[]> {
     body: JSON.stringify(args),
   })
   if (!res.ok) throw new Error('Error guardando args de mpv')
+  return res.json()
+}
+
+// --- User Reports ---
+
+export async function fetchReportsConfig(): Promise<{ enabled: boolean }> {
+  const res = await api('/api/reports/config')
+  if (!res.ok) throw new Error('Error')
+  return res.json()
+}
+
+export async function setReportsConfig(enabled: boolean): Promise<void> {
+  await api('/api/reports/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+}
+
+export async function fetchReports(): Promise<import('../types').UserReport[]> {
+  const res = await api('/api/reports')
+  if (!res.ok) throw new Error('Error')
+  return res.json()
+}
+
+export async function createReport(data: { report_type: string; title: string; description: string }): Promise<import('../types').UserReport> {
+  const res = await api('/api/reports', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Error creando reporte')
+  return res.json()
+}
+
+export async function respondReport(id: string, data: { status: string; admin_response?: string }): Promise<import('../types').UserReport> {
+  const res = await api(`/api/reports/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error('Error respondiendo reporte')
+  return res.json()
+}
+
+export async function deleteReport(id: string): Promise<void> {
+  const res = await api(`/api/reports/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error eliminando reporte')
+}
+
+export async function fetchMyReports(username: string): Promise<import('../types').UserReport[]> {
+  const res = await api(`/api/reports/mine?user=${encodeURIComponent(username)}`)
+  if (!res.ok) throw new Error('Error')
   return res.json()
 }

@@ -7,10 +7,10 @@ use std::time::Duration;
 use sysinfo::{Disks, System};
 
 use chrono::Timelike;
+use rusqlite::params;
+use rusqlite::OptionalExtension;
 
-use crate::config::save_config;
 use crate::models::notifications::*;
-use crate::models::tasks::{Project, Task, TaskStatus};
 use crate::state::AppState;
 
 /// Permisos por defecto segun el rol (cuando no se envian explicitamente)
@@ -35,6 +35,24 @@ pub fn default_permissions_for_role(role: &UserRole) -> UserPermissions {
     }
 }
 
+fn parse_role(s: &str) -> UserRole {
+    match s {
+        "admin" => UserRole::Admin,
+        "operador" => UserRole::Operador,
+        "observador" => UserRole::Observador,
+        _ => UserRole::Pendiente,
+    }
+}
+
+fn role_to_str(role: &UserRole) -> &'static str {
+    match role {
+        UserRole::Admin => "admin",
+        UserRole::Operador => "operador",
+        UserRole::Observador => "observador",
+        UserRole::Pendiente => "pendiente",
+    }
+}
+
 /// Respuesta sanitizada de NotificationConfig que nunca expone el bot_token
 #[derive(serde::Serialize)]
 pub struct NotificationConfigResponse {
@@ -46,26 +64,117 @@ pub struct NotificationConfigResponse {
     pub daily_minute: u8,
 }
 
-impl From<&NotificationConfig> for NotificationConfigResponse {
-    fn from(config: &NotificationConfig) -> Self {
-        Self {
-            bot_configured: config.bot_token.is_some(),
-            bot_username: config.bot_username.clone(),
-            telegram_chats: config.telegram_chats.clone(),
-            daily_enabled: config.daily_enabled,
-            daily_hour: config.daily_hour,
-            daily_minute: config.daily_minute,
-        }
+// =====================
+// DB helper: read notification_config singleton
+// =====================
+
+fn read_notif_config(conn: &rusqlite::Connection) -> Result<(Option<String>, Option<String>, bool, u8, u8), String> {
+    conn.query_row(
+        "SELECT bot_token, bot_username, daily_enabled, daily_hour, daily_minute FROM notification_config WHERE id = 1",
+        [],
+        |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, bool>(2)?,
+                row.get::<_, u8>(3)?,
+                row.get::<_, u8>(4)?,
+            ))
+        },
+    )
+    .optional()
+    .map_err(|e| format!("DB: {}", e))?
+    .ok_or_else(|| "notification_config not found".to_string())
+}
+
+fn read_bot_token(conn: &rusqlite::Connection) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT bot_token FROM notification_config WHERE id = 1",
+        [],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .optional()
+    .map_err(|e| format!("DB: {}", e))
+    .map(|o| o.flatten())
+}
+
+fn read_all_chats(conn: &rusqlite::Connection) -> Result<Vec<TelegramChat>, String> {
+    let mut stmt = conn
+        .prepare("SELECT chat_id, name, username, role, perm_terminal, perm_impresion, perm_archivos_escritura, linked_web_user, daily_enabled, daily_hour, daily_minute FROM telegram_chats")
+        .map_err(|e| format!("DB: {}", e))?;
+    let rows = stmt
+        .query_map([], |row| {
+            let role_str: String = row.get(3)?;
+            Ok(TelegramChat {
+                chat_id: row.get(0)?,
+                name: row.get(1)?,
+                username: row.get(2)?,
+                role: parse_role(&role_str),
+                permissions: UserPermissions {
+                    terminal: row.get(4)?,
+                    impresion: row.get(5)?,
+                    archivos_escritura: row.get(6)?,
+                },
+                linked_web_user: row.get(7)?,
+                daily_enabled: row.get(8)?,
+                daily_hour: row.get(9)?,
+                daily_minute: row.get(10)?,
+            })
+        })
+        .map_err(|e| format!("DB: {}", e))?;
+    let mut list = Vec::new();
+    for r in rows {
+        list.push(r.map_err(|e| format!("DB row: {}", e))?);
     }
+    Ok(list)
+}
+
+fn read_chat(conn: &rusqlite::Connection, chat_id: i64) -> Result<Option<TelegramChat>, String> {
+    conn.query_row(
+        "SELECT chat_id, name, username, role, perm_terminal, perm_impresion, perm_archivos_escritura, linked_web_user, daily_enabled, daily_hour, daily_minute FROM telegram_chats WHERE chat_id = ?1",
+        params![chat_id],
+        |row| {
+            let role_str: String = row.get(3)?;
+            Ok(TelegramChat {
+                chat_id: row.get(0)?,
+                name: row.get(1)?,
+                username: row.get(2)?,
+                role: parse_role(&role_str),
+                permissions: UserPermissions {
+                    terminal: row.get(4)?,
+                    impresion: row.get(5)?,
+                    archivos_escritura: row.get(6)?,
+                },
+                linked_web_user: row.get(7)?,
+                daily_enabled: row.get(8)?,
+                daily_hour: row.get(9)?,
+                daily_minute: row.get(10)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| format!("DB: {}", e))
 }
 
 // =====================
 // API Handlers
 // =====================
 
-pub async fn get_config(State(state): State<AppState>) -> Json<NotificationConfigResponse> {
-    let config = state.config.lock().await;
-    Json(NotificationConfigResponse::from(&config.notifications))
+pub async fn get_config(State(state): State<AppState>) -> Result<Json<NotificationConfigResponse>, (StatusCode, String)> {
+    let resp = crate::db::db_op(&state.db, |conn| {
+        let (bot_token, bot_username, daily_enabled, daily_hour, daily_minute) = read_notif_config(conn)?;
+        let chats = read_all_chats(conn)?;
+        Ok(NotificationConfigResponse {
+            bot_configured: bot_token.is_some(),
+            bot_username,
+            telegram_chats: chats,
+            daily_enabled,
+            daily_hour,
+            daily_minute,
+        })
+    })
+    .await?;
+    Ok(Json(resp))
 }
 
 pub async fn set_bot_token(
@@ -87,29 +196,45 @@ pub async fn set_bot_token(
     .await
     .map_err(|e| (StatusCode::BAD_REQUEST, format!("Token invalido: {}", e)))?;
 
-    let mut config = state.config.lock().await;
-    config.notifications.bot_token = Some(token);
-    config.notifications.bot_username = Some(bot_info.username);
+    let bot_username = bot_info.username.clone();
+    let token_clone = token.clone();
+    let resp = crate::db::db_op(&state.db, move |conn| {
+        conn.execute(
+            "UPDATE notification_config SET bot_token = ?1, bot_username = ?2 WHERE id = 1",
+            params![token_clone, bot_username],
+        )
+        .map_err(|e| format!("DB: {}", e))?;
 
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let (bot_token, bot_username, daily_enabled, daily_hour, daily_minute) = read_notif_config(conn)?;
+        let chats = read_all_chats(conn)?;
+        Ok(NotificationConfigResponse {
+            bot_configured: bot_token.is_some(),
+            bot_username,
+            telegram_chats: chats,
+            daily_enabled,
+            daily_hour,
+            daily_minute,
+        })
+    })
+    .await?;
 
-    let resp = NotificationConfigResponse::from(&config.notifications);
     Ok((StatusCode::OK, Json(resp)))
 }
 
 pub async fn delete_bot_token(
     State(state): State<AppState>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    config.notifications.bot_token = None;
-    config.notifications.bot_username = None;
-    config.notifications.telegram_chats.clear();
-
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    crate::db::db_op(&state.db, |conn| {
+        conn.execute(
+            "UPDATE notification_config SET bot_token = NULL, bot_username = NULL WHERE id = 1",
+            [],
+        )
+        .map_err(|e| format!("DB: {}", e))?;
+        conn.execute("DELETE FROM telegram_chats", [])
+            .map_err(|e| format!("DB: {}", e))?;
+        Ok(())
+    })
+    .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -119,43 +244,63 @@ pub async fn set_chat_role(
     Path(chat_id): Path<i64>,
     Json(req): Json<SetRoleRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    let chat = config
-        .notifications
-        .telegram_chats
-        .iter_mut()
-        .find(|c| c.chat_id == chat_id)
-        .ok_or((StatusCode::NOT_FOUND, "Chat no encontrado".to_string()))?;
+    let new_role = req.role;
+    let new_perms = req.permissions.unwrap_or_else(|| default_permissions_for_role(&new_role));
+    let role_str = role_to_str(&new_role).to_string();
+    let perms_clone = new_perms.clone();
+    let role_clone = new_role.clone();
 
-    chat.role = req.role;
-    if let Some(perms) = req.permissions {
-        chat.permissions = perms;
-    } else {
-        // Asignar permisos por defecto segun el rol si no se envian explicitamente
-        chat.permissions = default_permissions_for_role(&chat.role);
-    }
-    let new_role = chat.role.clone();
-    let new_perms = chat.permissions.clone();
-    let linked_user = chat.linked_web_user.clone();
+    let linked_user = crate::db::db_op_status(&state.db, move |conn| {
+        // Check chat exists
+        let exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM telegram_chats WHERE chat_id = ?1",
+                params![chat_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            > 0;
 
-    // Sincronizar rol al usuario web vinculado
-    if let Some(ref username) = linked_user {
-        if let Some(web_user) = config.web_users.iter_mut().find(|u| &u.username == username) {
-            web_user.role = new_role.clone();
-            web_user.permissions = new_perms.clone();
+        if !exists {
+            return Err((StatusCode::NOT_FOUND, "Chat no encontrado".to_string()));
         }
-    }
 
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        conn.execute(
+            "UPDATE telegram_chats SET role = ?1, perm_terminal = ?2, perm_impresion = ?3, perm_archivos_escritura = ?4 WHERE chat_id = ?5",
+            params![role_str, perms_clone.terminal, perms_clone.impresion, perms_clone.archivos_escritura, chat_id],
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
 
-    // Sincronizar sesiones web activas
+        // Get linked web user
+        let linked: Option<String> = conn
+            .query_row(
+                "SELECT linked_web_user FROM telegram_chats WHERE chat_id = ?1",
+                params![chat_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            .flatten();
+
+        // Sync role to linked web user
+        if let Some(ref username) = linked {
+            conn.execute(
+                "UPDATE web_users SET role = ?1, perm_terminal = ?2, perm_impresion = ?3, perm_archivos_escritura = ?4 WHERE username = ?5",
+                params![role_str, perms_clone.terminal, perms_clone.impresion, perms_clone.archivos_escritura, username],
+            )
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+        }
+
+        Ok(linked)
+    })
+    .await?;
+
+    // Sync active web sessions
     if let Some(username) = linked_user {
         let mut sessions = state.sessions.lock().await;
         for session in sessions.values_mut() {
             if session.username == username {
-                session.role = new_role.clone();
+                session.role = role_clone.clone();
                 session.permissions = new_perms.clone();
             }
         }
@@ -168,20 +313,17 @@ pub async fn delete_chat(
     State(state): State<AppState>,
     Path(chat_id): Path<i64>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    let before = config.notifications.telegram_chats.len();
-    config
-        .notifications
-        .telegram_chats
-        .retain(|c| c.chat_id != chat_id);
+    crate::db::db_op_status(&state.db, move |conn| {
+        let deleted = conn
+            .execute("DELETE FROM telegram_chats WHERE chat_id = ?1", params![chat_id])
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
 
-    if config.notifications.telegram_chats.len() == before {
-        return Err((StatusCode::NOT_FOUND, "Chat no encontrado".to_string()));
-    }
-
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        if deleted == 0 {
+            return Err((StatusCode::NOT_FOUND, "Chat no encontrado".to_string()));
+        }
+        Ok(())
+    })
+    .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -190,14 +332,19 @@ pub async fn set_schedule(
     State(state): State<AppState>,
     Json(req): Json<ScheduleRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    config.notifications.daily_enabled = req.daily_enabled;
-    config.notifications.daily_hour = req.daily_hour.min(23);
-    config.notifications.daily_minute = req.daily_minute.min(59);
+    let hour = req.daily_hour.min(23);
+    let minute = req.daily_minute.min(59);
+    let enabled = req.daily_enabled;
 
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    crate::db::db_op(&state.db, move |conn| {
+        conn.execute(
+            "UPDATE notification_config SET daily_enabled = ?1, daily_hour = ?2, daily_minute = ?3 WHERE id = 1",
+            params![enabled, hour, minute],
+        )
+        .map_err(|e| format!("DB: {}", e))?;
+        Ok(())
+    })
+    .await?;
 
     Ok(StatusCode::OK)
 }
@@ -205,10 +352,12 @@ pub async fn set_schedule(
 pub async fn send_test(
     State(state): State<AppState>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
-    let config = state.config.lock().await;
-    let token = config.notifications.bot_token.clone();
-    let chats = config.notifications.telegram_chats.clone();
-    drop(config);
+    let (token, chats) = crate::db::db_op(&state.db, |conn| {
+        let token = read_bot_token(conn)?;
+        let chats = read_all_chats(conn)?;
+        Ok((token, chats))
+    })
+    .await?;
 
     let token = token.ok_or((StatusCode::BAD_REQUEST, "Bot no configurado".to_string()))?;
     if chats.is_empty() {
@@ -323,10 +472,20 @@ pub async fn telegram_bot_loop(state: AppState) {
     let mut startup_sent = false;
 
     loop {
-        let config = state.config.lock().await;
-        let token = config.notifications.bot_token.clone();
-        let chats = config.notifications.telegram_chats.clone();
-        drop(config);
+        // Read bot_token and chats from DB (fresh each iteration)
+        let (token, chats) = {
+            let conn = match crate::db::get_conn(&state.db) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("[Telegram] Error DB: {}", e);
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    continue;
+                }
+            };
+            let token = read_bot_token(&conn).unwrap_or(None);
+            let chats = read_all_chats(&conn).unwrap_or_default();
+            (token, chats)
+        };
 
         let Some(token) = token else {
             tokio::time::sleep(Duration::from_secs(5)).await;
@@ -403,15 +562,17 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
     if text.starts_with("/start") {
         register_chat(state, token, msg).await;
         // Check if they're pending
-        let config = state.config.lock().await;
-        let role = config
-            .notifications
-            .telegram_chats
-            .iter()
-            .find(|c| c.chat_id == chat_id)
-            .map(|c| c.role.clone())
-            .unwrap_or(UserRole::Pendiente);
-        drop(config);
+        let role = {
+            let conn = match crate::db::get_conn(&state.db) {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+            read_chat(&conn, chat_id)
+                .ok()
+                .flatten()
+                .map(|c| c.role)
+                .unwrap_or(UserRole::Pendiente)
+        };
 
         let response = match role {
             UserRole::Admin => "Hola! Eres el *administrador* de LabNAS.\n\nUsa /ayuda para ver los comandos.".to_string(),
@@ -423,21 +584,20 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
     }
 
     // Check user role
-    let config = state.config.lock().await;
-    let chat = config
-        .notifications
-        .telegram_chats
-        .iter()
-        .find(|c| c.chat_id == chat_id);
+    let chat = {
+        let conn = match crate::db::get_conn(&state.db) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        read_chat(&conn, chat_id).ok().flatten()
+    };
 
     let Some(chat) = chat else {
-        drop(config);
         let _ = send_telegram_message(&state.http_client, token, chat_id, "No estas registrado. Envia /start primero.").await;
         return;
     };
 
     if chat.role == UserRole::Pendiente {
-        drop(config);
         let _ = send_telegram_message(&state.http_client, token, chat_id, "Tu acceso esta pendiente de aprobacion.").await;
         return;
     }
@@ -448,7 +608,6 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
     let is_operator = chat.role == UserRole::Operador;
     let has_terminal = is_admin || chat.permissions.terminal;
     let has_printer3d = is_admin || is_operator;
-    drop(config);
 
     let response = match text {
         s if s.starts_with("/cmd ") => {
@@ -602,54 +761,54 @@ async fn register_chat(state: &AppState, token: &str, msg: &TgMessage) {
         .unwrap_or_else(|| format!("Chat {}", chat_id));
 
     let username = msg.chat.username.clone();
-    let mut config = state.config.lock().await;
 
-    // Update existing
-    if let Some(existing) = config
-        .notifications
-        .telegram_chats
-        .iter_mut()
-        .find(|c| c.chat_id == chat_id)
-    {
-        existing.name = name;
-        existing.username = username;
-        let _ = save_config(&config).await;
+    // Read current state from DB
+    let conn = match crate::db::get_conn(&state.db) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[Telegram] Error DB en register_chat: {}", e);
+            return;
+        }
+    };
+
+    let existing = read_chat(&conn, chat_id).unwrap_or(None);
+    let all_chats = read_all_chats(&conn).unwrap_or_default();
+    drop(conn);
+
+    if let Some(_existing) = existing {
+        // Update existing chat name/username
+        let conn = match crate::db::get_conn(&state.db) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let _ = conn.execute(
+            "UPDATE telegram_chats SET name = ?1, username = ?2 WHERE chat_id = ?3",
+            params![name, username, chat_id],
+        );
         return;
     }
 
     // First user ever = admin, rest = pendiente
-    let is_first = config.notifications.telegram_chats.is_empty();
+    let is_first = all_chats.is_empty();
     let role = if is_first {
         UserRole::Admin
     } else {
         UserRole::Pendiente
     };
-
-    let new_chat = TelegramChat {
-        chat_id,
-        name: name.clone(),
-        username: username.clone(),
-        role: role.clone(),
-        permissions: if is_first {
-            UserPermissions {
-                terminal: true,
-                impresion: true,
-                archivos_escritura: true,
-            }
-        } else {
-            UserPermissions::default()
-        },
-        linked_web_user: None,
-        daily_enabled: false,
-        daily_hour: 8,
-        daily_minute: 0,
+    let perms = if is_first {
+        UserPermissions {
+            terminal: true,
+            impresion: true,
+            archivos_escritura: true,
+        }
+    } else {
+        UserPermissions::default()
     };
+    let role_str = role_to_str(&role).to_string();
 
     // Notify admins about new pending user
     if !is_first {
-        let admins: Vec<i64> = config
-            .notifications
-            .telegram_chats
+        let admins: Vec<i64> = all_chats
             .iter()
             .filter(|c| c.role == UserRole::Admin)
             .map(|c| c.chat_id)
@@ -659,17 +818,20 @@ async fn register_chat(state: &AppState, token: &str, msg: &TgMessage) {
             "Nuevo usuario solicita acceso:\n*{}*{}\n\nApruebalo desde la web en Configuracion > Telegram.",
             name, uname
         );
-        drop(config);
         for admin_id in &admins {
             let _ = send_telegram_message(&state.http_client, token, *admin_id, &alert).await;
         }
-        let mut config = state.config.lock().await;
-        config.notifications.telegram_chats.push(new_chat);
-        let _ = save_config(&config).await;
-    } else {
-        config.notifications.telegram_chats.push(new_chat);
-        let _ = save_config(&config).await;
     }
+
+    // Insert new chat
+    let conn = match crate::db::get_conn(&state.db) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let _ = conn.execute(
+        "INSERT OR REPLACE INTO telegram_chats (chat_id, name, username, role, perm_terminal, perm_impresion, perm_archivos_escritura, linked_web_user, daily_enabled, daily_hour, daily_minute) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, 0, 8, 0)",
+        params![chat_id, name, username, role_str, perms.terminal, perms.impresion, perms.archivos_escritura],
+    );
 }
 
 // =====================
@@ -876,8 +1038,6 @@ async fn pipe_terminal_input(state: &AppState, chat_id: i64, input: &str) -> Opt
 // Calendar events (Telegram)
 // =====================
 
-use crate::models::tasks::CalendarEvent;
-
 async fn handle_event_command(state: &AppState, creator: &str, text: &str) -> String {
     let args = text.strip_prefix("/evento ").unwrap_or("").trim();
     // Format: /evento 2026-03-20 14:30 Titulo @persona
@@ -903,36 +1063,41 @@ async fn handle_event_command(state: &AppState, creator: &str, text: &str) -> St
         return "El evento necesita un titulo.".to_string();
     }
 
-    let event = CalendarEvent {
-        id: uuid::Uuid::new_v4().to_string()[..6].to_string(),
-        title: title.clone(),
-        description: String::new(),
-        date: date.clone(),
-        time: time.clone(),
-        created_by: creator.to_string(),
-        invitees: invitees.clone(),
-        accepted: Vec::new(),
-        declined: Vec::new(),
-        remind_before_min: 15,
-        reminded: false,
-        end_time: None,
-        location: None,
-        notify_telegram: true,
-        recurrence: String::new(),
-        recurrence_end: None,
-        created_at: chrono::Utc::now(),
-        category: None,
+    let id = uuid::Uuid::new_v4().to_string()[..6].to_string();
+    let invitees_json = serde_json::to_string(&invitees).unwrap_or_else(|_| "[]".to_string());
+    let created_at = chrono::Utc::now().to_rfc3339();
+
+    let id_clone = id.clone();
+    let title_clone = title.clone();
+    let date_clone = date.clone();
+    let time_clone = time.clone();
+    let creator_str = creator.to_string();
+    let invitees_json_clone = invitees_json.clone();
+
+    let insert_result = crate::db::db_op(&state.db, move |conn| {
+        conn.execute(
+            "INSERT INTO calendar_events (id, title, description, date, time, created_by, invitees, accepted, declined, remind_before_min, reminded, notify_telegram, recurrence, created_at) VALUES (?1, ?2, '', ?3, ?4, ?5, ?6, '[]', '[]', 15, 0, 1, '', ?7)",
+            params![id_clone, title_clone, date_clone, time_clone, creator_str, invitees_json_clone, created_at],
+        )
+        .map_err(|e| format!("DB: {}", e))?;
+        Ok(())
+    })
+    .await;
+
+    if let Err(e) = insert_result {
+        return format!("Error creando evento: {}", e.1);
+    }
+
+    // Notify invitees - read token and chats from DB
+    let (token, chats) = {
+        let conn = match crate::db::get_conn(&state.db) {
+            Ok(c) => c,
+            Err(_) => return format!("📅 Evento *{}* creado\n{} {}\nID: `{}`", title, date, time, id),
+        };
+        let token = read_bot_token(&conn).unwrap_or(None);
+        let chats = read_all_chats(&conn).unwrap_or_default();
+        (token, chats)
     };
-    let id = event.id.clone();
-
-    let mut config = state.config.lock().await;
-    config.tasks.events.push(event);
-    let _ = save_config(&config).await;
-
-    // Notify invitees
-    let token = config.notifications.bot_token.clone();
-    let chats = config.notifications.telegram_chats.clone();
-    drop(config);
 
     if let Some(token) = token {
         let inv_str = if invitees.contains(&"all".to_string()) { "todos".to_string() } else { invitees.join(", ") };
@@ -952,30 +1117,64 @@ async fn handle_event_command(state: &AppState, creator: &str, text: &str) -> St
 }
 
 async fn handle_list_events(state: &AppState, user: &str) -> String {
-    let config = state.config.lock().await;
-    let events: Vec<&CalendarEvent> = config.tasks.events.iter()
-        .filter(|e| {
-            e.created_by == user || e.invitees.contains(&"all".to_string()) ||
-            e.invitees.iter().any(|i| i.to_lowercase() == user.to_lowercase())
-        })
-        .collect();
+    let user_str = user.to_string();
+    let result = crate::db::db_op(&state.db, move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, title, date, time, created_by, invitees, accepted, declined FROM calendar_events"
+        ).map_err(|e| format!("DB: {}", e))?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+            ))
+        }).map_err(|e| format!("DB: {}", e))?;
+
+        let mut events = Vec::new();
+        for r in rows {
+            let (id, title, date, time, created_by, invitees_json, accepted_json, declined_json) = r.map_err(|e| format!("DB row: {}", e))?;
+            let invitees: Vec<String> = serde_json::from_str(&invitees_json).unwrap_or_default();
+            let accepted: Vec<String> = serde_json::from_str(&accepted_json).unwrap_or_default();
+            let declined: Vec<String> = serde_json::from_str(&declined_json).unwrap_or_default();
+
+            let is_relevant = created_by == user_str
+                || invitees.contains(&"all".to_string())
+                || invitees.iter().any(|i| i.to_lowercase() == user_str.to_lowercase());
+
+            if is_relevant {
+                events.push((id, title, date, time, created_by, accepted, declined));
+            }
+        }
+        Ok(events)
+    }).await;
+
+    let events = match result {
+        Ok(e) => e,
+        Err(e) => return format!("Error: {}", e.1),
+    };
 
     if events.is_empty() {
         return "📅 *Mis eventos*\n\nNo tienes eventos. Crea uno con `/evento`".to_string();
     }
 
     let mut msg = format!("📅 *Mis eventos* ({})\n", events.len());
-    for e in &events {
-        let status = if e.accepted.iter().any(|a| a.to_lowercase() == user.to_lowercase()) {
+    for (id, title, date, time, created_by, accepted, declined) in &events {
+        let status = if accepted.iter().any(|a| a.to_lowercase() == user.to_lowercase()) {
             "aceptado"
-        } else if e.declined.iter().any(|d| d.to_lowercase() == user.to_lowercase()) {
+        } else if declined.iter().any(|d| d.to_lowercase() == user.to_lowercase()) {
             "rechazado"
-        } else if e.created_by == user {
+        } else if created_by == user {
             "creador"
         } else {
             "pendiente"
         };
-        msg.push_str(&format!("\n`{}` *{}*\n  {} {} | {}\n", e.id, e.title, e.date, e.time, status));
+        msg.push_str(&format!("\n`{}` *{}*\n  {} {} | {}\n", id, title, date, time, status));
     }
     msg
 }
@@ -986,26 +1185,61 @@ async fn handle_event_rsvp(state: &AppState, user: &str, text: &str, accept: boo
     if id.is_empty() {
         return format!("Uso: `{}<ID>`", cmd);
     }
-    let mut config = state.config.lock().await;
-    let event = config.tasks.events.iter_mut().find(|e| e.id == id);
-    let Some(event) = event else {
-        return format!("Evento `{}` no encontrado.", id);
-    };
-    let title = event.title.clone();
-    if accept {
-        event.declined.retain(|u| u != user);
-        if !event.accepted.contains(&user.to_string()) {
-            event.accepted.push(user.to_string());
+
+    let id_str = id.to_string();
+    let user_str = user.to_string();
+
+    let result = crate::db::db_op(&state.db, move |conn| {
+        // Read current event
+        let row = conn.query_row(
+            "SELECT title, accepted, declined FROM calendar_events WHERE id = ?1",
+            params![id_str],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        ).optional().map_err(|e| format!("DB: {}", e))?;
+
+        let Some((title, accepted_json, declined_json)) = row else {
+            return Ok(format!("Evento `{}` no encontrado.", id_str));
+        };
+
+        let mut accepted: Vec<String> = serde_json::from_str(&accepted_json).unwrap_or_default();
+        let mut declined: Vec<String> = serde_json::from_str(&declined_json).unwrap_or_default();
+
+        if accept {
+            declined.retain(|u| u != &user_str);
+            if !accepted.contains(&user_str) {
+                accepted.push(user_str.clone());
+            }
+        } else {
+            accepted.retain(|u| u != &user_str);
+            if !declined.contains(&user_str) {
+                declined.push(user_str.clone());
+            }
         }
-        let _ = save_config(&config).await;
-        format!("Evento *{}* aceptado.", title)
-    } else {
-        event.accepted.retain(|u| u != user);
-        if !event.declined.contains(&user.to_string()) {
-            event.declined.push(user.to_string());
+
+        let accepted_json = serde_json::to_string(&accepted).unwrap_or_else(|_| "[]".to_string());
+        let declined_json = serde_json::to_string(&declined).unwrap_or_else(|_| "[]".to_string());
+
+        conn.execute(
+            "UPDATE calendar_events SET accepted = ?1, declined = ?2 WHERE id = ?3",
+            params![accepted_json, declined_json, id_str],
+        ).map_err(|e| format!("DB: {}", e))?;
+
+        if accept {
+            Ok(format!("Evento *{}* aceptado.", title))
+        } else {
+            Ok(format!("Evento *{}* rechazado.", title))
         }
-        let _ = save_config(&config).await;
-        format!("Evento *{}* rechazado.", title)
+    }).await;
+
+    match result {
+        Ok(msg) => msg,
+        Err(e) => format!("Error: {}", e.1),
     }
 }
 
@@ -1033,28 +1267,54 @@ async fn handle_link_command(state: &AppState, chat_id: i64, _chat_name: &str, t
     }
 
     let username = link.username;
+    let username_clone = username.clone();
 
-    let mut config = state.config.lock().await;
+    let result = crate::db::db_op(&state.db, move |conn| {
+        // Check web user exists
+        let exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM web_users WHERE username = ?1",
+                params![username_clone],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| format!("DB: {}", e))?
+            > 0;
 
-    // Link web user -> telegram
-    let web_user = config.web_users.iter_mut().find(|u| u.username == username);
-    let Some(web_user) = web_user else {
-        return "Usuario web no encontrado.".to_string();
-    };
-    web_user.linked_telegram = Some(chat_id);
-    let role = web_user.role.clone();
-    let perms = web_user.permissions.clone();
+        if !exists {
+            return Err("Usuario web no encontrado.".to_string());
+        }
 
-    // Link telegram -> web user
-    if let Some(chat) = config.notifications.telegram_chats.iter_mut().find(|c| c.chat_id == chat_id) {
-        chat.linked_web_user = Some(username.clone());
-        chat.role = role;
-        chat.permissions = perms;
+        // Get web user's role and permissions
+        let (role_str, perm_t, perm_i, perm_a): (String, bool, bool, bool) = conn
+            .query_row(
+                "SELECT role, perm_terminal, perm_impresion, perm_archivos_escritura FROM web_users WHERE username = ?1",
+                params![username_clone],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .map_err(|e| format!("DB: {}", e))?;
+
+        // Update web user -> telegram link
+        conn.execute(
+            "UPDATE web_users SET linked_telegram = ?1 WHERE username = ?2",
+            params![chat_id, username_clone],
+        )
+        .map_err(|e| format!("DB: {}", e))?;
+
+        // Update telegram -> web user link + sync role/perms
+        conn.execute(
+            "UPDATE telegram_chats SET linked_web_user = ?1, role = ?2, perm_terminal = ?3, perm_impresion = ?4, perm_archivos_escritura = ?5 WHERE chat_id = ?6",
+            params![username_clone, role_str, perm_t, perm_i, perm_a, chat_id],
+        )
+        .map_err(|e| format!("DB: {}", e))?;
+
+        Ok(())
+    })
+    .await;
+
+    match result {
+        Ok(()) => format!("Cuenta vinculada! Tu Telegram esta conectado con *{}*.", username),
+        Err(e) => e.1,
     }
-
-    let _ = save_config(&config).await;
-
-    format!("Cuenta vinculada! Tu Telegram esta conectado con *{}*.", username)
 }
 
 // =====================
@@ -1067,41 +1327,92 @@ async fn handle_project_command(state: &AppState, creator: &str, text: &str) -> 
         return "Uso: `/proyecto Nombre del proyecto`".to_string();
     }
 
-    let project = Project {
-        id: uuid::Uuid::new_v4().to_string()[..8].to_string(),
-        name: name.to_string(),
-        description: String::new(),
-        created_by: creator.to_string(),
-        members: vec![creator.to_string()],
-        member_tags: std::collections::HashMap::new(),
-        created_at: chrono::Utc::now(),
-    };
+    let id = uuid::Uuid::new_v4().to_string()[..8].to_string();
+    let members_json = serde_json::to_string(&vec![creator.to_string()]).unwrap_or_else(|_| "[]".to_string());
+    let created_at = chrono::Utc::now().to_rfc3339();
 
-    let mut config = state.config.lock().await;
-    let id = project.id.clone();
-    config.tasks.projects.push(project);
-    let _ = save_config(&config).await;
+    let id_clone = id.clone();
+    let name_str = name.to_string();
+    let creator_str = creator.to_string();
 
-    format!("Proyecto *{}* creado (ID: `{}`)", name, id)
+    let result = crate::db::db_op(&state.db, move |conn| {
+        conn.execute(
+            "INSERT INTO projects (id, name, description, created_by, members, member_tags, created_at) VALUES (?1, ?2, '', ?3, ?4, '{}', ?5)",
+            params![id_clone, name_str, creator_str, members_json, created_at],
+        )
+        .map_err(|e| format!("DB: {}", e))?;
+        Ok(())
+    })
+    .await;
+
+    match result {
+        Ok(()) => format!("Proyecto *{}* creado (ID: `{}`)", name, id),
+        Err(e) => format!("Error: {}", e.1),
+    }
 }
 
 async fn handle_list_projects(state: &AppState, user: &str) -> String {
-    let config = state.config.lock().await;
-    let projects = &config.tasks.projects;
+    let user_str = user.to_string();
+    let result = crate::db::db_op(&state.db, move |conn| {
+        let mut stmt = conn
+            .prepare("SELECT id, name, created_by, members FROM projects")
+            .map_err(|e| format!("DB: {}", e))?;
 
-    if projects.is_empty() {
-        return "*Proyectos*\n\nNo hay proyectos. Crea uno con `/proyecto Nombre`".to_string();
-    }
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .map_err(|e| format!("DB: {}", e))?;
 
-    let mut msg = format!("*Proyectos* ({})\n", projects.len());
-    for p in projects {
-        let task_count = config.tasks.tasks.iter().filter(|t| t.project_id.as_deref() == Some(&p.id)).count();
-        let done_count = config.tasks.tasks.iter().filter(|t| t.project_id.as_deref() == Some(&p.id) && t.status == TaskStatus::Completada).count();
-        let is_member = p.members.contains(&user.to_string()) || p.created_by == user;
-        let badge = if is_member { "" } else { " (no eres miembro)" };
-        msg.push_str(&format!("\n`{}` *{}*{}\n  {}/{} tareas completadas\n", p.id, p.name, badge, done_count, task_count));
+        let mut projects = Vec::new();
+        for r in rows {
+            projects.push(r.map_err(|e| format!("DB row: {}", e))?);
+        }
+
+        if projects.is_empty() {
+            return Ok("*Proyectos*\n\nNo hay proyectos. Crea uno con `/proyecto Nombre`".to_string());
+        }
+
+        let mut msg = format!("*Proyectos* ({})\n", projects.len());
+        for (id, name, created_by, members_json) in &projects {
+            let members: Vec<String> = serde_json::from_str(members_json).unwrap_or_default();
+
+            // Count tasks for this project
+            let task_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM tasks WHERE project_id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            let done_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM tasks WHERE project_id = ?1 AND status = 'completada'",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+
+            let is_member = members.contains(&user_str) || created_by == &user_str;
+            let badge = if is_member { "" } else { " (no eres miembro)" };
+            msg.push_str(&format!(
+                "\n`{}` *{}*{}\n  {}/{} tareas completadas\n",
+                id, name, badge, done_count, task_count
+            ));
+        }
+        Ok(msg)
+    })
+    .await;
+
+    match result {
+        Ok(msg) => msg,
+        Err(e) => format!("Error: {}", e.1),
     }
-    msg
 }
 
 async fn handle_task_command(state: &AppState, creator: &str, text: &str) -> String {
@@ -1153,70 +1464,99 @@ async fn handle_task_command(state: &AppState, creator: &str, text: &str) -> Str
         requires_confirmation = true;
     }
 
-    let task = Task {
-        id: uuid::Uuid::new_v4().to_string()[..6].to_string(),
-        project_id,
-        title: title.clone(),
-        description: String::new(),
-        assigned_to: assigned.clone(),
-        status: TaskStatus::Pendiente,
-        created_by: creator.to_string(),
-        due_date: None,
-        due_time: None,
-        requires_confirmation,
-        insistent,
-        reminder_minutes,
-        confirmed_by: Vec::new(),
-        rejected_by: Vec::new(),
-        created_at: chrono::Utc::now(),
-        last_reminder: None,
-    };
+    let id = uuid::Uuid::new_v4().to_string()[..6].to_string();
+    let assigned_json = serde_json::to_string(&assigned).unwrap_or_else(|_| "[]".to_string());
+    let created_at = chrono::Utc::now().to_rfc3339();
 
-    let id = task.id.clone();
-    let mut config = state.config.lock().await;
-    config.tasks.tasks.push(task);
-    let _ = save_config(&config).await;
+    let id_clone = id.clone();
+    let title_clone = title.clone();
+    let creator_str = creator.to_string();
 
-    let assign_str = assigned.join(", ");
-    let flags = [
-        if requires_confirmation { "confirmar" } else { "" },
-        if insistent { "insistente" } else { "" },
-    ].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(", ");
-    let flags_str = if flags.is_empty() { String::new() } else { format!(" ({})", flags) };
+    let result = crate::db::db_op(&state.db, move |conn| {
+        conn.execute(
+            "INSERT INTO tasks (id, project_id, title, description, assigned_to, status, created_by, requires_confirmation, insistent, reminder_minutes, confirmed_by, rejected_by, created_at) VALUES (?1, ?2, ?3, '', ?4, 'pendiente', ?5, ?6, ?7, ?8, '[]', '[]', ?9)",
+            params![id_clone, project_id, title_clone, assigned_json, creator_str, requires_confirmation, insistent, reminder_minutes, created_at],
+        )
+        .map_err(|e| format!("DB: {}", e))?;
+        Ok(())
+    })
+    .await;
 
-    format!("Tarea *{}* creada{}\nID: `{}`\nAsignada a: {}", title, flags_str, id, assign_str)
+    match result {
+        Ok(()) => {
+            let assign_str = assigned.join(", ");
+            let flags = [
+                if requires_confirmation { "confirmar" } else { "" },
+                if insistent { "insistente" } else { "" },
+            ].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(", ");
+            let flags_str = if flags.is_empty() { String::new() } else { format!(" ({})", flags) };
+            format!("Tarea *{}* creada{}\nID: `{}`\nAsignada a: {}", title, flags_str, id, assign_str)
+        }
+        Err(e) => format!("Error: {}", e.1),
+    }
 }
 
 async fn handle_list_tasks(state: &AppState, user: &str) -> String {
-    let config = state.config.lock().await;
-    let my_tasks: Vec<&Task> = config.tasks.tasks.iter()
-        .filter(|t| {
-            t.status != TaskStatus::Completada && t.status != TaskStatus::Rechazada &&
-            (t.assigned_to.contains(&"all".to_string()) || t.assigned_to.iter().any(|a| a.to_lowercase() == user.to_lowercase()) || t.created_by == user)
-        })
-        .collect();
+    let user_str = user.to_string();
+    let result = crate::db::db_op(&state.db, move |conn| {
+        let mut stmt = conn
+            .prepare("SELECT id, title, status, assigned_to, created_by, requires_confirmation, insistent FROM tasks WHERE status NOT IN ('completada', 'rechazada')")
+            .map_err(|e| format!("DB: {}", e))?;
 
-    if my_tasks.is_empty() {
-        return "*Mis tareas*\n\nNo tienes tareas pendientes.".to_string();
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, bool>(5)?,
+                    row.get::<_, bool>(6)?,
+                ))
+            })
+            .map_err(|e| format!("DB: {}", e))?;
+
+        let mut my_tasks = Vec::new();
+        for r in rows {
+            let (id, title, status, assigned_json, created_by, req_conf, insist) = r.map_err(|e| format!("DB row: {}", e))?;
+            let assigned: Vec<String> = serde_json::from_str(&assigned_json).unwrap_or_default();
+            let is_mine = assigned.contains(&"all".to_string())
+                || assigned.iter().any(|a| a.to_lowercase() == user_str.to_lowercase())
+                || created_by == user_str;
+            if is_mine {
+                my_tasks.push((id, title, status, created_by, req_conf, insist));
+            }
+        }
+
+        if my_tasks.is_empty() {
+            return Ok("*Mis tareas*\n\nNo tienes tareas pendientes.".to_string());
+        }
+
+        let mut msg = format!("*Mis tareas* ({})\n", my_tasks.len());
+        for (id, title, status, created_by, req_conf, insist) in &my_tasks {
+            let status_str = match status.as_str() {
+                "pendiente" => "pendiente",
+                "en_progreso" => "en progreso",
+                _ => "?",
+            };
+            let flags = [
+                if *req_conf { "confirmar" } else { "" },
+                if *insist { "insistente" } else { "" },
+            ].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(", ");
+            let flags_str = if flags.is_empty() { String::new() } else { format!(" [{}]", flags) };
+
+            msg.push_str(&format!("\n`{}` *{}*{}\n  Estado: {} | Por: {}\n", id, title, flags_str, status_str, created_by));
+        }
+        msg.push_str("\nUsa `/hecho ID` o `/confirmar ID`");
+        Ok(msg)
+    })
+    .await;
+
+    match result {
+        Ok(msg) => msg,
+        Err(e) => format!("Error: {}", e.1),
     }
-
-    let mut msg = format!("*Mis tareas* ({})\n", my_tasks.len());
-    for t in &my_tasks {
-        let status = match t.status {
-            TaskStatus::Pendiente => "pendiente",
-            TaskStatus::EnProgreso => "en progreso",
-            _ => "?",
-        };
-        let flags = [
-            if t.requires_confirmation { "confirmar" } else { "" },
-            if t.insistent { "insistente" } else { "" },
-        ].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(", ");
-        let flags_str = if flags.is_empty() { String::new() } else { format!(" [{}]", flags) };
-
-        msg.push_str(&format!("\n`{}` *{}*{}\n  Estado: {} | Por: {}\n", t.id, t.title, flags_str, status, t.created_by));
-    }
-    msg.push_str("\nUsa `/hecho ID` o `/confirmar ID`");
-    msg
 }
 
 async fn handle_confirm(state: &AppState, user: &str, text: &str, accept: bool) -> String {
@@ -1226,27 +1566,60 @@ async fn handle_confirm(state: &AppState, user: &str, text: &str, accept: bool) 
         return format!("Uso: `{}<ID>`", cmd);
     }
 
-    let mut config = state.config.lock().await;
-    let task = config.tasks.tasks.iter_mut().find(|t| t.id == id);
+    let id_str = id.to_string();
+    let user_str = user.to_string();
 
-    let Some(task) = task else {
-        return format!("Tarea `{}` no encontrada.", id);
-    };
+    let result = crate::db::db_op(&state.db, move |conn| {
+        let row = conn
+            .query_row(
+                "SELECT title, confirmed_by, rejected_by FROM tasks WHERE id = ?1",
+                params![id_str],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|e| format!("DB: {}", e))?;
 
-    let title = task.title.clone();
-    if accept {
-        if !task.confirmed_by.contains(&user.to_string()) {
-            task.confirmed_by.push(user.to_string());
+        let Some((title, confirmed_json, rejected_json)) = row else {
+            return Ok(format!("Tarea `{}` no encontrada.", id_str));
+        };
+
+        if accept {
+            let mut confirmed: Vec<String> = serde_json::from_str(&confirmed_json).unwrap_or_default();
+            if !confirmed.contains(&user_str) {
+                confirmed.push(user_str);
+            }
+            let confirmed_json = serde_json::to_string(&confirmed).unwrap_or_else(|_| "[]".to_string());
+            conn.execute(
+                "UPDATE tasks SET confirmed_by = ?1 WHERE id = ?2",
+                params![confirmed_json, id_str],
+            )
+            .map_err(|e| format!("DB: {}", e))?;
+            Ok(format!("Tarea *{}* confirmada por ti.", title))
+        } else {
+            let mut rejected: Vec<String> = serde_json::from_str(&rejected_json).unwrap_or_default();
+            if !rejected.contains(&user_str) {
+                rejected.push(user_str);
+            }
+            let rejected_json = serde_json::to_string(&rejected).unwrap_or_else(|_| "[]".to_string());
+            conn.execute(
+                "UPDATE tasks SET rejected_by = ?1, status = 'rechazada' WHERE id = ?2",
+                params![rejected_json, id_str],
+            )
+            .map_err(|e| format!("DB: {}", e))?;
+            Ok(format!("Tarea *{}* rechazada.", title))
         }
-        let _ = save_config(&config).await;
-        format!("Tarea *{}* confirmada por ti.", title)
-    } else {
-        if !task.rejected_by.contains(&user.to_string()) {
-            task.rejected_by.push(user.to_string());
-        }
-        task.status = TaskStatus::Rechazada;
-        let _ = save_config(&config).await;
-        format!("Tarea *{}* rechazada.", title)
+    })
+    .await;
+
+    match result {
+        Ok(msg) => msg,
+        Err(e) => format!("Error: {}", e.1),
     }
 }
 
@@ -1256,72 +1629,150 @@ async fn handle_done(state: &AppState, user: &str, text: &str) -> String {
         return "Uso: `/hecho <ID>`".to_string();
     }
 
-    let mut config = state.config.lock().await;
-    let task = config.tasks.tasks.iter_mut().find(|t| t.id == id);
+    let id_str = id.to_string();
+    let user_str = user.to_string();
 
-    let Some(task) = task else {
-        return format!("Tarea `{}` no encontrada.", id);
-    };
+    let result = crate::db::db_op(&state.db, move |conn| {
+        let row = conn
+            .query_row(
+                "SELECT title, assigned_to, created_by FROM tasks WHERE id = ?1",
+                params![id_str],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|e| format!("DB: {}", e))?;
 
-    // Only creator or assigned can mark done
-    let is_assigned = task.assigned_to.contains(&"all".to_string()) || task.assigned_to.iter().any(|a| a.to_lowercase() == user.to_lowercase());
-    if task.created_by != user && !is_assigned {
-        return "No tienes permiso para completar esta tarea.".to_string();
+        let Some((title, assigned_json, created_by)) = row else {
+            return Ok(format!("Tarea `{}` no encontrada.", id_str));
+        };
+
+        let assigned: Vec<String> = serde_json::from_str(&assigned_json).unwrap_or_default();
+        let is_assigned = assigned.contains(&"all".to_string())
+            || assigned.iter().any(|a| a.to_lowercase() == user_str.to_lowercase());
+
+        if created_by != user_str && !is_assigned {
+            return Ok("No tienes permiso para completar esta tarea.".to_string());
+        }
+
+        conn.execute(
+            "UPDATE tasks SET status = 'completada' WHERE id = ?1",
+            params![id_str],
+        )
+        .map_err(|e| format!("DB: {}", e))?;
+
+        Ok(format!("Tarea *{}* completada!", title))
+    })
+    .await;
+
+    match result {
+        Ok(msg) => msg,
+        Err(e) => format!("Error: {}", e.1),
     }
-
-    let title = task.title.clone();
-    task.status = TaskStatus::Completada;
-    let _ = save_config(&config).await;
-    format!("Tarea *{}* completada!", title)
 }
 
 async fn handle_progress(state: &AppState, user: &str, text: &str) -> String {
     let project_name = text.strip_prefix("/avance").unwrap_or("").trim();
+    let project_name_str = project_name.to_string();
+    let _ = user;
 
-    let config = state.config.lock().await;
+    let result = crate::db::db_op(&state.db, move |conn| {
+        if project_name_str.is_empty() {
+            // Show all projects progress
+            let mut stmt = conn
+                .prepare("SELECT id, name FROM projects")
+                .map_err(|e| format!("DB: {}", e))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(|e| format!("DB: {}", e))?;
+            let mut projects = Vec::new();
+            for r in rows {
+                projects.push(r.map_err(|e| format!("DB row: {}", e))?);
+            }
 
-    if project_name.is_empty() {
-        // Show all projects progress
-        if config.tasks.projects.is_empty() {
-            return "*Avance*\n\nNo hay proyectos.".to_string();
+            if projects.is_empty() {
+                return Ok("*Avance*\n\nNo hay proyectos.".to_string());
+            }
+
+            let mut msg = String::from("*Avance de proyectos*\n");
+            for (id, name) in &projects {
+                let total: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM tasks WHERE project_id = ?1", params![id], |row| row.get(0))
+                    .unwrap_or(0);
+                let done: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM tasks WHERE project_id = ?1 AND status = 'completada'", params![id], |row| row.get(0))
+                    .unwrap_or(0);
+                let pct = if total > 0 { (done as f64 / total as f64 * 100.0) as u64 } else { 0 };
+                let bar = progress_bar(pct as f64);
+                msg.push_str(&format!("\n*{}*\n{} {}% ({}/{})\n", name, bar, pct, done, total));
+            }
+            return Ok(msg);
         }
-        let mut msg = String::from("*Avance de proyectos*\n");
-        for p in &config.tasks.projects {
-            let tasks: Vec<&Task> = config.tasks.tasks.iter().filter(|t| t.project_id.as_deref() == Some(&p.id)).collect();
-            let total = tasks.len();
-            let done = tasks.iter().filter(|t| t.status == TaskStatus::Completada).count();
-            let pct = if total > 0 { (done as f64 / total as f64 * 100.0) as u64 } else { 0 };
-            let bar = progress_bar(pct as f64);
-            msg.push_str(&format!("\n*{}*\n{} {}% ({}/{})\n", p.name, bar, pct, done, total));
-        }
-        return msg;
-    }
 
-    // Find specific project
-    let project = config.tasks.projects.iter().find(|p| p.name.to_lowercase().contains(&project_name.to_lowercase()) || p.id == project_name);
-    let Some(project) = project else {
-        return format!("Proyecto '{}' no encontrado.", project_name);
-    };
+        // Find specific project
+        let project = conn
+            .query_row(
+                "SELECT id, name FROM projects WHERE LOWER(name) LIKE '%' || LOWER(?1) || '%' OR id = ?1",
+                params![project_name_str],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(|e| format!("DB: {}", e))?;
 
-    let tasks: Vec<&Task> = config.tasks.tasks.iter().filter(|t| t.project_id.as_deref() == Some(&project.id)).collect();
-    let total = tasks.len();
-    let done = tasks.iter().filter(|t| t.status == TaskStatus::Completada).count();
-    let pct = if total > 0 { (done as f64 / total as f64 * 100.0) as u64 } else { 0 };
-    let bar = progress_bar(pct as f64);
-
-    let mut msg = format!("*{}*\n{} {}% ({}/{})\n", project.name, bar, pct, done, total);
-    let _ = user; // suppress warning
-
-    for t in &tasks {
-        let icon = match t.status {
-            TaskStatus::Completada => "done",
-            TaskStatus::Rechazada => "x",
-            TaskStatus::EnProgreso => ">>",
-            TaskStatus::Pendiente => "  ",
+        let Some((project_id, project_name)) = project else {
+            return Ok(format!("Proyecto '{}' no encontrado.", project_name_str));
         };
-        msg.push_str(&format!("\n[{}] `{}` {}", icon, t.id, t.title));
+
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tasks WHERE project_id = ?1", params![project_id], |row| row.get(0))
+            .unwrap_or(0);
+        let done: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tasks WHERE project_id = ?1 AND status = 'completada'", params![project_id], |row| row.get(0))
+            .unwrap_or(0);
+        let pct = if total > 0 { (done as f64 / total as f64 * 100.0) as u64 } else { 0 };
+        let bar = progress_bar(pct as f64);
+
+        let mut msg = format!("*{}*\n{} {}% ({}/{})\n", project_name, bar, pct, done, total);
+
+        // List tasks
+        let mut stmt = conn
+            .prepare("SELECT id, title, status FROM tasks WHERE project_id = ?1")
+            .map_err(|e| format!("DB: {}", e))?;
+        let rows = stmt
+            .query_map(params![project_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| format!("DB: {}", e))?;
+
+        for r in rows {
+            let (tid, ttitle, tstatus) = r.map_err(|e| format!("DB row: {}", e))?;
+            let icon = match tstatus.as_str() {
+                "completada" => "done",
+                "rechazada" => "x",
+                "en_progreso" => ">>",
+                _ => "  ",
+            };
+            msg.push_str(&format!("\n[{}] `{}` {}", icon, tid, ttitle));
+        }
+        Ok(msg)
+    })
+    .await;
+
+    match result {
+        Ok(msg) => msg,
+        Err(e) => format!("Error: {}", e.1),
     }
-    msg
 }
 
 // =====================
@@ -1332,124 +1783,221 @@ pub async fn task_reminder_loop(state: AppState) {
     loop {
         tokio::time::sleep(Duration::from_secs(60)).await; // Check every minute
 
-        let mut config = state.config.lock().await;
-        let token = match &config.notifications.bot_token {
-            Some(t) => t.clone(),
-            None => { drop(config); continue; }
+        let conn = match crate::db::get_conn(&state.db) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[Reminders] Error DB: {}", e);
+                continue;
+            }
         };
-        let chats = config.notifications.telegram_chats.clone();
+
+        let token = match read_bot_token(&conn) {
+            Ok(Some(t)) => t,
+            _ => continue,
+        };
+        let chats = read_all_chats(&conn).unwrap_or_default();
 
         let now = chrono::Utc::now();
         let local_now = chrono::Local::now();
         let today = local_now.format("%Y-%m-%d").to_string();
-        let mut to_remind: Vec<(String, Vec<i64>)> = Vec::new(); // (message, chat_ids)
+        let mut to_remind: Vec<(String, Vec<i64>)> = Vec::new();
 
-        for task in &mut config.tasks.tasks {
-            if task.status == TaskStatus::Completada || task.status == TaskStatus::Rechazada {
-                continue;
-            }
-
-            // Check due date
-            let is_due_today = task
-                .due_date
-                .as_ref()
-                .map(|d| d.as_str() == today.as_str())
-                .unwrap_or(false);
-            let is_overdue = task
-                .due_date
-                .as_ref()
-                .map(|d| d.as_str() < today.as_str())
-                .unwrap_or(false);
-
-            // Skip if no reason to remind
-            if !task.requires_confirmation && !task.insistent && !is_due_today && !is_overdue {
-                continue;
-            }
-
-            // Interval: use task's reminder_minutes for insistent, 720 min (12h) for due date only
-            let interval = if task.insistent || task.requires_confirmation {
-                (task.reminder_minutes as i64) * 60
-            } else {
-                720 * 60 // 12 hours for due date reminders
+        // Read tasks that need reminders
+        {
+            let mut stmt = match conn.prepare(
+                "SELECT id, title, status, assigned_to, created_by, due_date, requires_confirmation, insistent, reminder_minutes, confirmed_by, last_reminder FROM tasks WHERE status NOT IN ('completada', 'rechazada')"
+            ) {
+                Ok(s) => s,
+                Err(_) => continue,
             };
 
-            let should_remind = task
-                .last_reminder
-                .map(|lr| (now - lr).num_seconds() >= interval)
-                .unwrap_or(true);
-
-            if !should_remind {
-                continue;
-            }
-
-            // Find chat_ids for assigned users
-            // @all solo aplica a operadores y admins, no observadores
-            let target_ids: Vec<i64> = if task.assigned_to.contains(&"all".to_string()) {
-                chats
-                    .iter()
-                    .filter(|c| {
-                        (c.role == UserRole::Admin || c.role == UserRole::Operador)
-                            && !task.confirmed_by.contains(&c.name)
-                    })
-                    .map(|c| c.chat_id)
-                    .collect()
-            } else {
-                chats
-                    .iter()
-                    .filter(|c| {
-                        (task.assigned_to.iter().any(|a| {
-                            a.to_lowercase() == c.name.to_lowercase()
-                        }) || c.linked_web_user.as_ref().map(|u| {
-                            task.assigned_to.iter().any(|a| a.to_lowercase() == u.to_lowercase())
-                        }).unwrap_or(false))
-                            && !task.confirmed_by.contains(&c.name)
-                    })
-                    .map(|c| c.chat_id)
-                    .collect()
+            let rows = match stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, bool>(6)?,
+                    row.get::<_, bool>(7)?,
+                    row.get::<_, u32>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                ))
+            }) {
+                Ok(r) => r,
+                Err(_) => continue,
             };
 
-            if target_ids.is_empty() {
-                continue;
+            for r in rows {
+                let Ok((id, title, _status, assigned_json, created_by, due_date, requires_confirmation, insistent, reminder_minutes, confirmed_json, last_reminder_str)) = r else {
+                    continue;
+                };
+
+                let assigned: Vec<String> = serde_json::from_str(&assigned_json).unwrap_or_default();
+                let confirmed: Vec<String> = serde_json::from_str(&confirmed_json).unwrap_or_default();
+
+                let is_due_today = due_date.as_ref().map(|d| d.as_str() == today.as_str()).unwrap_or(false);
+                let is_overdue = due_date.as_ref().map(|d| d.as_str() < today.as_str()).unwrap_or(false);
+
+                if !requires_confirmation && !insistent && !is_due_today && !is_overdue {
+                    continue;
+                }
+
+                let interval = if insistent || requires_confirmation {
+                    (reminder_minutes as i64) * 60
+                } else {
+                    720 * 60
+                };
+
+                let last_reminder: Option<chrono::DateTime<chrono::Utc>> = last_reminder_str
+                    .as_ref()
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                    .map(|dt| dt.with_timezone(&chrono::Utc));
+
+                let should_remind = last_reminder
+                    .map(|lr| (now - lr).num_seconds() >= interval)
+                    .unwrap_or(true);
+
+                if !should_remind {
+                    continue;
+                }
+
+                let target_ids: Vec<i64> = if assigned.contains(&"all".to_string()) {
+                    chats
+                        .iter()
+                        .filter(|c| {
+                            (c.role == UserRole::Admin || c.role == UserRole::Operador)
+                                && !confirmed.contains(&c.name)
+                        })
+                        .map(|c| c.chat_id)
+                        .collect()
+                } else {
+                    chats
+                        .iter()
+                        .filter(|c| {
+                            (assigned.iter().any(|a| a.to_lowercase() == c.name.to_lowercase())
+                                || c.linked_web_user.as_ref().map(|u| {
+                                    assigned.iter().any(|a| a.to_lowercase() == u.to_lowercase())
+                                }).unwrap_or(false))
+                                && !confirmed.contains(&c.name)
+                        })
+                        .map(|c| c.chat_id)
+                        .collect()
+                };
+
+                if target_ids.is_empty() {
+                    continue;
+                }
+
+                let urgency = if is_overdue {
+                    "🚨 *TAREA VENCIDA*\n\n"
+                } else if is_due_today {
+                    "⚠️ *Vence hoy*\n\n"
+                } else {
+                    ""
+                };
+                let icon = if insistent { "🔔" } else { "📋" };
+                let due_info = due_date
+                    .as_ref()
+                    .map(|d| format!("\nVence: {}", d))
+                    .unwrap_or_default();
+                let msg = format!(
+                    "{}{} *Recordatorio*\n\nTarea: *{}*\nID: `{}`\nPor: {}{}\n\n`/confirmar {}` o `/rechazar {}`",
+                    urgency, icon, title, id, created_by, due_info, id, id
+                );
+
+                to_remind.push((msg, target_ids));
+
+                // Update last_reminder
+                let now_str = now.to_rfc3339();
+                let _ = conn.execute(
+                    "UPDATE tasks SET last_reminder = ?1 WHERE id = ?2",
+                    params![now_str, id],
+                );
             }
-
-            let urgency = if is_overdue {
-                "🚨 *TAREA VENCIDA*\n\n"
-            } else if is_due_today {
-                "⚠️ *Vence hoy*\n\n"
-            } else {
-                ""
-            };
-            let icon = if task.insistent { "🔔" } else { "📋" };
-            let due_info = task
-                .due_date
-                .as_ref()
-                .map(|d| format!("\nVence: {}", d))
-                .unwrap_or_default();
-            let msg = format!(
-                "{}{} *Recordatorio*\n\nTarea: *{}*\nID: `{}`\nPor: {}{}\n\n`/confirmar {}` o `/rechazar {}`",
-                urgency, icon, task.title, task.id, task.created_by, due_info, task.id, task.id
-            );
-
-            to_remind.push((msg, target_ids));
-            task.last_reminder = Some(now);
         }
 
-        let _ = save_config(&config).await;
-        drop(config);
-
         // Check calendar events
-        let mut config = state.config.lock().await;
-        let local_now = chrono::Local::now();
-        let today = local_now.format("%Y-%m-%d").to_string();
-        let now_min = local_now.format("%H").to_string().parse::<u32>().unwrap_or(0) * 60
-            + local_now.format("%M").to_string().parse::<u32>().unwrap_or(0);
+        let now_min = local_now.hour() * 60 + local_now.minute();
 
-        for event in &mut config.tasks.events {
-            if event.reminded || event.date != today || !event.notify_telegram {
+        // Collect calendar event data into a Vec to avoid borrow conflicts
+        let calendar_events: Vec<(String, String, String, String, String, String, String, u32, bool, bool, String, Option<String>)> = {
+            let mut events = Vec::new();
+            if let Ok(mut stmt) = conn.prepare(
+                "SELECT id, title, description, date, time, created_by, invitees, remind_before_min, reminded, notify_telegram, recurrence, recurrence_end FROM calendar_events WHERE date = ?1"
+            ) {
+                if let Ok(rows) = stmt.query_map(params![today], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, u32>(7)?,
+                        row.get::<_, bool>(8)?,
+                        row.get::<_, bool>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, Option<String>>(11)?,
+                    ))
+                }) {
+                    for r in rows {
+                        if let Ok(event) = r {
+                            events.push(event);
+                        }
+                    }
+                }
+            }
+            events
+        };
+
+        for (id, title, description, date, time, created_by, invitees_json, remind_before_min, reminded, notify_telegram, recurrence, recurrence_end) in &calendar_events {
+            if *reminded || !notify_telegram {
+                // Check recurring advancement for already-reminded events
+                if !recurrence.is_empty() && recurrence != "none" && *reminded {
+                    let parts: Vec<&str> = time.split(':').collect();
+                    if parts.len() == 2 {
+                        if let (Ok(eh), Ok(em)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                            let event_min = eh * 60 + em;
+                            if event_min <= now_min {
+                                if let Ok(parsed_date) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") {
+                                    use chrono::Datelike;
+                                    let next_date = match recurrence.as_str() {
+                                        "daily" => Some(parsed_date + chrono::Duration::days(1)),
+                                        "weekly" => Some(parsed_date + chrono::Duration::weeks(1)),
+                                        "monthly" => {
+                                            let m = if parsed_date.month() == 12 { 1 } else { parsed_date.month() + 1 };
+                                            let y = if parsed_date.month() == 12 { parsed_date.year() + 1 } else { parsed_date.year() };
+                                            chrono::NaiveDate::from_ymd_opt(y, m, parsed_date.day().min(28))
+                                        }
+                                        _ => None,
+                                    };
+
+                                    if let Some(next) = next_date {
+                                        let next_str = next.format("%Y-%m-%d").to_string();
+                                        let within_range = recurrence_end.as_ref()
+                                            .map(|end| next_str.as_str() <= end.as_str())
+                                            .unwrap_or(true);
+
+                                        if within_range {
+                                            let _ = conn.execute(
+                                                "UPDATE calendar_events SET date = ?1, reminded = 0, accepted = '[]', declined = '[]' WHERE id = ?2",
+                                                params![next_str, id],
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 continue;
             }
-            // Parse event time
-            let parts: Vec<&str> = event.time.split(':').collect();
+
+            let parts: Vec<&str> = time.split(':').collect();
             if parts.len() != 2 {
                 continue;
             }
@@ -1458,22 +2006,22 @@ pub async fn task_reminder_loop(state: AppState) {
                 _ => continue,
             };
             let event_min = eh * 60 + em;
-            let remind_at = event_min.saturating_sub(event.remind_before_min);
+            let remind_at = event_min.saturating_sub(*remind_before_min);
 
             if now_min >= remind_at && now_min < event_min {
                 let mins_left = event_min.saturating_sub(now_min);
                 let msg = format!(
                     "📅 *Evento en {} min*\n\n*{}*\nHora: {}\n{}",
-                    mins_left, event.title, event.time,
-                    if event.description.is_empty() { String::new() } else { format!("\n{}", event.description) }
+                    mins_left, title, time,
+                    if description.is_empty() { String::new() } else { format!("\n{}", description) }
                 );
 
-                // Send to creator + invitees
-                let targets: Vec<i64> = if event.invitees.contains(&"all".to_string()) {
+                let invitees: Vec<String> = serde_json::from_str(invitees_json).unwrap_or_default();
+                let targets: Vec<i64> = if invitees.contains(&"all".to_string()) {
                     chats.iter().filter(|c| c.role != UserRole::Pendiente).map(|c| c.chat_id).collect()
                 } else {
                     let mut ids: Vec<i64> = chats.iter()
-                        .filter(|c| event.invitees.iter().any(|i| i.to_lowercase() == c.name.to_lowercase()) || c.name == event.created_by)
+                        .filter(|c| invitees.iter().any(|i| i.to_lowercase() == c.name.to_lowercase()) || c.name == *created_by)
                         .map(|c| c.chat_id)
                         .collect();
                     ids.dedup();
@@ -1481,58 +2029,14 @@ pub async fn task_reminder_loop(state: AppState) {
                 };
 
                 to_remind.push((msg, targets));
-                event.reminded = true;
+                let _ = conn.execute(
+                    "UPDATE calendar_events SET reminded = 1 WHERE id = ?1",
+                    params![id],
+                );
             }
         }
 
-        // Avanzar eventos recurrentes que ya pasaron
-        let mut new_events: Vec<crate::models::tasks::CalendarEvent> = Vec::new();
-        for event in &mut config.tasks.events {
-            if !event.reminded || event.recurrence.is_empty() || event.recurrence == "none" {
-                continue;
-            }
-            // Si el evento ya paso hoy, generar proxima ocurrencia
-            let event_min_total = event.time.split(':')
-                .map(|p| p.parse::<u32>().unwrap_or(0))
-                .collect::<Vec<_>>();
-            if event_min_total.len() != 2 { continue; }
-            let ev_min = event_min_total[0] * 60 + event_min_total[1];
-            if ev_min > now_min { continue; } // aun no paso
-
-            // Calcular proxima fecha
-            if let Ok(date) = chrono::NaiveDate::parse_from_str(&event.date, "%Y-%m-%d") {
-                use chrono::Datelike;
-                let next_date = match event.recurrence.as_str() {
-                    "daily" => Some(date + chrono::Duration::days(1)),
-                    "weekly" => Some(date + chrono::Duration::weeks(1)),
-                    "monthly" => {
-                        let m = if date.month() == 12 { 1 } else { date.month() + 1 };
-                        let y = if date.month() == 12 { date.year() + 1 } else { date.year() };
-                        chrono::NaiveDate::from_ymd_opt(y, m, date.day().min(28))
-                    }
-                    _ => None,
-                };
-
-                if let Some(next) = next_date {
-                    let next_str = next.format("%Y-%m-%d").to_string();
-                    // Verificar que no pase del fin de recurrencia
-                    let within_range = event.recurrence_end.as_ref()
-                        .map(|end| next_str.as_str() <= end.as_str())
-                        .unwrap_or(true);
-
-                    if within_range {
-                        // Actualizar fecha del evento para la proxima ocurrencia
-                        event.date = next_str;
-                        event.reminded = false;
-                        event.accepted.clear();
-                        event.declined.clear();
-                    }
-                }
-            }
-        }
-        config.tasks.events.extend(new_events);
-        let _ = save_config(&config).await;
-        drop(config);
+        drop(conn);
 
         // Send all reminders
         for (msg, ids) in &to_remind {
@@ -1548,9 +2052,13 @@ pub async fn task_reminder_loop(state: AppState) {
 // =====================
 
 async fn handle_printer_temps(state: &AppState) -> String {
-    let config = state.config.lock().await;
-    let printers = config.printers3d.clone();
-    drop(config);
+    let printers = {
+        let conn = match crate::db::get_conn(&state.db) {
+            Ok(c) => c,
+            Err(_) => return "Error de base de datos.".to_string(),
+        };
+        read_printers(&conn).unwrap_or_default()
+    };
 
     if printers.is_empty() {
         return "*Temperaturas*\n\nNo hay impresoras configuradas.".to_string();
@@ -1610,10 +2118,50 @@ fn progress_bar_temp(actual: f64, target: f64) -> String {
     format!("[{}{}]", "█".repeat(filled), "░".repeat(empty))
 }
 
+/// Read printers from DB (for use in notification handlers)
+fn read_printers(conn: &rusqlite::Connection) -> Result<Vec<crate::models::printers3d::Printer3DConfig>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d ORDER BY \"order\"")
+        .map_err(|e| format!("DB: {}", e))?;
+    let rows = stmt
+        .query_map([], |row| {
+            let pt_str: String = row.get(4)?;
+            Ok(crate::models::printers3d::Printer3DConfig {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                ip: row.get(2)?,
+                port: row.get(3)?,
+                printer_type: match pt_str.as_str() {
+                    "octoprint" => crate::models::printers3d::Printer3DType::OctoPrint,
+                    "moonraker" => crate::models::printers3d::Printer3DType::Moonraker,
+                    "creality_stock" => crate::models::printers3d::Printer3DType::CrealityStock,
+                    "flashforge" => crate::models::printers3d::Printer3DType::FlashForge,
+                    _ => crate::models::printers3d::Printer3DType::OctoPrint,
+                },
+                api_key: row.get(5)?,
+                camera_url: row.get(6)?,
+                power_watts: row.get(7)?,
+                electricity_cost_kwh: row.get(8)?,
+                section_id: row.get(9)?,
+                order: row.get(10)?,
+            })
+        })
+        .map_err(|e| format!("DB: {}", e))?;
+    let mut list = Vec::new();
+    for r in rows {
+        list.push(r.map_err(|e| format!("DB row: {}", e))?);
+    }
+    Ok(list)
+}
+
 async fn handle_printer_control(state: &AppState, user: &str, text: &str, command: &str) -> String {
-    let config = state.config.lock().await;
-    let printers = config.printers3d.clone();
-    drop(config);
+    let printers = {
+        let conn = match crate::db::get_conn(&state.db) {
+            Ok(c) => c,
+            Err(_) => return "Error de base de datos.".to_string(),
+        };
+        read_printers(&conn).unwrap_or_default()
+    };
 
     if printers.is_empty() {
         return "No hay impresoras configuradas.".to_string();
@@ -1757,9 +2305,16 @@ async fn handle_printer_control(state: &AppState, user: &str, text: &str, comman
 async fn handle_camera(state: &AppState, token: &str, chat_id: i64, text: &str) {
     let arg = text.strip_prefix("/camara").or_else(|| text.strip_prefix("/foto")).unwrap_or("").trim();
 
-    let config = state.config.lock().await;
-    let printers = config.printers3d.clone();
-    drop(config);
+    let printers = {
+        let conn = match crate::db::get_conn(&state.db) {
+            Ok(c) => c,
+            Err(_) => {
+                let _ = send_telegram_message(&state.http_client, token, chat_id, "Error de base de datos.").await;
+                return;
+            }
+        };
+        read_printers(&conn).unwrap_or_default()
+    };
 
     if printers.is_empty() {
         let _ = send_telegram_message(&state.http_client, token, chat_id, "No hay impresoras configuradas.").await;
@@ -1933,8 +2488,15 @@ async fn handle_schedule_command(state: &AppState, chat_id: i64, text: &str) -> 
 
     if arg.is_empty() {
         // Show current schedule
-        let config = state.config.lock().await;
-        if let Some(chat) = config.notifications.telegram_chats.iter().find(|c| c.chat_id == chat_id) {
+        let chat = {
+            let conn = match crate::db::get_conn(&state.db) {
+                Ok(c) => c,
+                Err(_) => return "Error de base de datos.".to_string(),
+            };
+            read_chat(&conn, chat_id).unwrap_or(None)
+        };
+
+        if let Some(chat) = chat {
             if chat.daily_enabled {
                 return format!("Tu reporte diario esta a las *{:02}:{:02}*\n\nUsa `/horario HH:MM` para cambiar o `/horario off` para desactivar.", chat.daily_hour, chat.daily_minute);
             } else {
@@ -1945,10 +2507,15 @@ async fn handle_schedule_command(state: &AppState, chat_id: i64, text: &str) -> 
     }
 
     if arg == "off" {
-        let mut config = state.config.lock().await;
-        if let Some(chat) = config.notifications.telegram_chats.iter_mut().find(|c| c.chat_id == chat_id) {
-            chat.daily_enabled = false;
-            let _ = save_config(&config).await;
+        let conn = match crate::db::get_conn(&state.db) {
+            Ok(c) => c,
+            Err(_) => return "Error de base de datos.".to_string(),
+        };
+        let updated = conn.execute(
+            "UPDATE telegram_chats SET daily_enabled = 0 WHERE chat_id = ?1",
+            params![chat_id],
+        ).unwrap_or(0);
+        if updated > 0 {
             return "Reporte diario *desactivado*.".to_string();
         }
         return "No estas registrado. Envia /start primero.".to_string();
@@ -1969,12 +2536,16 @@ async fn handle_schedule_command(state: &AppState, chat_id: i64, text: &str) -> 
         _ => return "Minuto invalido (0-59)".to_string(),
     };
 
-    let mut config = state.config.lock().await;
-    if let Some(chat) = config.notifications.telegram_chats.iter_mut().find(|c| c.chat_id == chat_id) {
-        chat.daily_enabled = true;
-        chat.daily_hour = hour;
-        chat.daily_minute = minute;
-        let _ = save_config(&config).await;
+    let conn = match crate::db::get_conn(&state.db) {
+        Ok(c) => c,
+        Err(_) => return "Error de base de datos.".to_string(),
+    };
+    let updated = conn.execute(
+        "UPDATE telegram_chats SET daily_enabled = 1, daily_hour = ?1, daily_minute = ?2 WHERE chat_id = ?3",
+        params![hour, minute, chat_id],
+    ).unwrap_or(0);
+
+    if updated > 0 {
         format!("Reporte diario activado a las *{:02}:{:02}*", hour, minute)
     } else {
         "No estas registrado. Envia /start primero.".to_string()
@@ -2047,9 +2618,15 @@ pub async fn build_status_message(state: &AppState) -> String {
     let active_hosts = hosts.iter().filter(|h| h.is_alive).count();
     drop(hosts);
 
-    let config = state.config.lock().await;
-    let printer_count = config.printers3d.len();
-    drop(config);
+    let printer_count = {
+        let conn = crate::db::get_conn(&state.db);
+        match conn {
+            Ok(c) => {
+                c.query_row("SELECT COUNT(*) FROM printers3d", [], |row| row.get::<_, i64>(0)).unwrap_or(0)
+            }
+            Err(_) => 0,
+        }
+    };
 
     format!(
         "*LabNAS - Reporte*\n\n\
@@ -2200,9 +2777,13 @@ async fn build_network_message(state: &AppState) -> String {
 }
 
 async fn build_printers_message(state: &AppState) -> String {
-    let config = state.config.lock().await;
-    let printers = config.printers3d.clone();
-    drop(config);
+    let printers = {
+        let conn = match crate::db::get_conn(&state.db) {
+            Ok(c) => c,
+            Err(_) => return "Error de base de datos.".to_string(),
+        };
+        read_printers(&conn).unwrap_or_default()
+    };
 
     if printers.is_empty() {
         return "*Impresoras 3D*\n\nNo hay impresoras configuradas.".to_string();
@@ -2471,13 +3052,17 @@ pub async fn daily_notification_loop(state: AppState) {
     loop {
         tokio::time::sleep(Duration::from_secs(30)).await;
 
-        let config = state.config.lock().await;
-        let token = match &config.notifications.bot_token {
-            Some(t) => t.clone(),
-            None => { drop(config); continue; }
+        let (token, chats) = {
+            let conn = match crate::db::get_conn(&state.db) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let token = read_bot_token(&conn).unwrap_or(None);
+            let chats = read_all_chats(&conn).unwrap_or_default();
+            (token, chats)
         };
-        let chats = config.notifications.telegram_chats.clone();
-        drop(config);
+
+        let Some(token) = token else { continue };
 
         let now = chrono::Local::now();
         let today = now.date_naive();

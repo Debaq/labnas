@@ -96,6 +96,12 @@ export interface NotificationConfig {
 
 // --- Printers 3D ---
 
+export interface Printer3DSection {
+  id: string
+  name: string
+  order: number
+}
+
 export interface Printer3DConfig {
   id: string
   name: string
@@ -104,6 +110,10 @@ export interface Printer3DConfig {
   printer_type: 'OctoPrint' | 'Moonraker' | 'CrealityStock' | 'FlashForge'
   api_key: string | null
   camera_url: string | null
+  section_id: string | null
+  order: number
+  power_watts: number | null
+  electricity_cost_kwh: number | null
 }
 
 export interface Printer3DStatus {
@@ -380,4 +390,18 @@ export interface Project {
   members: string[]
   member_tags: Record<string, string[]>
   created_at: string
+}
+
+// --- User Reports ---
+
+export interface UserReport {
+  id: string
+  report_type: 'bug' | 'solicitud'
+  title: string
+  description: string
+  submitted_by: string
+  status: 'pendiente' | 'visto' | 'resuelto'
+  admin_response: string | null
+  created_at: string
+  responded_at: string | null
 }

@@ -3,8 +3,8 @@ use axum::{
     http::{HeaderMap, StatusCode},
     Json,
 };
+use rusqlite::{params, OptionalExtension};
 
-use crate::config::save_config;
 use crate::models::auth::*;
 use crate::models::notifications::{UserPermissions, UserRole};
 use crate::state::{AppState, SessionInfo};
@@ -17,14 +17,35 @@ fn extract_token(headers: &HeaderMap) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+fn role_from_str(s: &str) -> UserRole {
+    match s {
+        "admin" => UserRole::Admin,
+        "operador" => UserRole::Operador,
+        "observador" => UserRole::Observador,
+        _ => UserRole::Pendiente,
+    }
+}
+
+fn role_to_str(role: &UserRole) -> &'static str {
+    match role {
+        UserRole::Admin => "admin",
+        UserRole::Operador => "operador",
+        UserRole::Observador => "observador",
+        UserRole::Pendiente => "pendiente",
+    }
+}
+
 // --- Has Users (publico, sin auth) ---
 
 pub async fn has_users(
     State(state): State<AppState>,
-) -> Json<serde_json::Value> {
-    let config = state.config.lock().await;
-    let has = !config.web_users.is_empty();
-    Json(serde_json::json!({ "has_users": has }))
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let count: i64 = crate::db::db_op(&state.db, |conn| {
+        conn.query_row("SELECT COUNT(*) FROM web_users", [], |row| row.get(0))
+            .map_err(|e| e.to_string())
+    }).await?;
+    let has = count > 0;
+    Ok(Json(serde_json::json!({ "has_users": has })))
 }
 
 // --- Register ---
@@ -44,43 +65,54 @@ pub async fn register(
         return Err((StatusCode::BAD_REQUEST, "Usuario solo puede contener letras, numeros, _ y .".to_string()));
     }
 
-    let mut config = state.config.lock().await;
-
-    if config.web_users.iter().any(|u| u.username == username) {
-        return Err((StatusCode::CONFLICT, "Usuario ya existe".to_string()));
-    }
-
     let password_hash = bcrypt::hash(&req.password, 8)
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Error hasheando contrasena".to_string()))?;
 
-    // First user = admin, rest = observador (auto-approved with print)
-    let is_first = config.web_users.is_empty();
-    let (role, permissions) = if is_first {
-        (UserRole::Admin, UserPermissions {
-            terminal: true,
-            impresion: true,
-            archivos_escritura: true,
-        })
-    } else {
-        (UserRole::Observador, UserPermissions {
-            terminal: false,
-            impresion: true,
-            archivos_escritura: false,
-        })
-    };
+    let username_clone = username.clone();
+    let (role, permissions) = crate::db::db_op_status(&state.db, move |conn| {
+        // Check if user already exists
+        let exists: bool = conn.query_row(
+            "SELECT COUNT(*) FROM web_users WHERE username = ?1",
+            params![&username_clone],
+            |row| row.get::<_, i64>(0),
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        > 0;
 
-    config.web_users.push(WebUser {
-        username: username.clone(),
-        password_hash,
-        role: role.clone(),
-        permissions: permissions.clone(),
-        linked_telegram: None,
-    });
+        if exists {
+            return Err((StatusCode::CONFLICT, "Usuario ya existe".to_string()));
+        }
 
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    drop(config);
+        // First user = admin, rest = observador
+        let user_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM web_users", [], |row| row.get(0),
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        let is_first = user_count == 0;
+        let (role, permissions) = if is_first {
+            (UserRole::Admin, UserPermissions {
+                terminal: true,
+                impresion: true,
+                archivos_escritura: true,
+            })
+        } else {
+            (UserRole::Observador, UserPermissions {
+                terminal: false,
+                impresion: true,
+                archivos_escritura: false,
+            })
+        };
+
+        conn.execute(
+            "INSERT INTO web_users (username, password_hash, role, perm_terminal, perm_impresion, perm_archivos_escritura)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                &username_clone, &password_hash, role_to_str(&role),
+                permissions.terminal, permissions.impresion, permissions.archivos_escritura,
+            ],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        Ok((role, permissions))
+    }).await?;
 
     // Create session
     let token = uuid::Uuid::new_v4().to_string();
@@ -110,32 +142,45 @@ pub async fn login(
 ) -> Result<Json<AuthResponse>, (StatusCode, String)> {
     let username = req.username.trim().to_lowercase();
 
-    let config = state.config.lock().await;
-    let user = config
-        .web_users
-        .iter()
-        .find(|u| u.username == username);
+    let username_clone = username.clone();
+    let user_opt = crate::db::db_op(&state.db, move |conn| {
+        conn.query_row(
+            "SELECT password_hash, role, perm_terminal, perm_impresion, perm_archivos_escritura
+             FROM web_users WHERE username = ?1",
+            params![&username_clone],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, bool>(2)?,
+                    row.get::<_, bool>(3)?,
+                    row.get::<_, bool>(4)?,
+                ))
+            },
+        ).optional().map_err(|e| e.to_string())
+    }).await?;
 
-    let Some(user) = user else {
-        drop(config);
+    let Some((password_hash, role_str, perm_terminal, perm_impresion, perm_archivos)) = user_opt else {
         // Rate limiting: frenar fuerza bruta (mismo delay que password incorrecto)
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         return Err((StatusCode::UNAUTHORIZED, "Usuario o contrasena incorrectos".to_string()));
     };
 
-    let valid = bcrypt::verify(&req.password, &user.password_hash)
+    let valid = bcrypt::verify(&req.password, &password_hash)
         .unwrap_or(false);
 
     if !valid {
-        drop(config);
         // Rate limiting: frenar fuerza bruta
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         return Err((StatusCode::UNAUTHORIZED, "Usuario o contrasena incorrectos".to_string()));
     }
 
-    let role = user.role.clone();
-    let permissions = user.permissions.clone();
-    drop(config);
+    let role = role_from_str(&role_str);
+    let permissions = UserPermissions {
+        terminal: perm_terminal,
+        impresion: perm_impresion,
+        archivos_escritura: perm_archivos,
+    };
 
     let token = uuid::Uuid::new_v4().to_string();
     let mut sessions = state.sessions.lock().await;
@@ -163,17 +208,25 @@ pub async fn me(
     let token = extract_token(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
     let sessions = state.sessions.lock().await;
     let session = sessions.get(&token).ok_or(StatusCode::UNAUTHORIZED)?;
+    let username = session.username.clone();
+    let role = session.role.clone();
+    let permissions = session.permissions.clone();
+    drop(sessions);
 
-    // Get linked telegram from config
-    let config = state.config.lock().await;
-    let linked = config.web_users.iter()
-        .find(|u| u.username == session.username)
-        .and_then(|u| u.linked_telegram);
+    // Get linked telegram from DB
+    let username_clone = username.clone();
+    let linked = crate::db::db_op(&state.db, move |conn| {
+        conn.query_row(
+            "SELECT linked_telegram FROM web_users WHERE username = ?1",
+            params![&username_clone],
+            |row| row.get::<_, Option<i64>>(0),
+        ).optional().map_err(|e| e.to_string())
+    }).await.ok().flatten().flatten();
 
     Ok(Json(MeResponse {
-        username: session.username.clone(),
-        role: session.role.clone(),
-        permissions: session.permissions.clone(),
+        username,
+        role,
+        permissions,
         linked_telegram: linked,
     }))
 }
@@ -216,21 +269,34 @@ pub async fn change_password(
         return Err((StatusCode::BAD_REQUEST, "La nueva contrasena debe tener al menos 4 caracteres".to_string()));
     }
 
-    let mut config = state.config.lock().await;
-    let user = config.web_users.iter_mut()
-        .find(|u| u.username == username)
-        .ok_or((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()))?;
+    // Get current hash
+    let username_clone = username.clone();
+    let current_hash = crate::db::db_op_status(&state.db, move |conn| {
+        conn.query_row(
+            "SELECT password_hash FROM web_users WHERE username = ?1",
+            params![&username_clone],
+            |row| row.get::<_, String>(0),
+        ).optional()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()))
+    }).await?;
 
-    let valid = bcrypt::verify(&req.current_password, &user.password_hash).unwrap_or(false);
+    let valid = bcrypt::verify(&req.current_password, &current_hash).unwrap_or(false);
     if !valid {
         return Err((StatusCode::UNAUTHORIZED, "Contrasena actual incorrecta".to_string()));
     }
 
-    user.password_hash = bcrypt::hash(&req.new_password, 8)
+    let new_hash = bcrypt::hash(&req.new_password, 8)
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Error hasheando".to_string()))?;
 
-    save_config(&config).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let username_clone2 = username.clone();
+    crate::db::db_op(&state.db, move |conn| {
+        conn.execute(
+            "UPDATE web_users SET password_hash = ?1 WHERE username = ?2",
+            params![&new_hash, &username_clone2],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }).await?;
 
     Ok(StatusCode::OK)
 }
@@ -239,32 +305,53 @@ pub async fn change_password(
 
 pub async fn list_users(
     State(state): State<AppState>,
-) -> Json<Vec<MeResponse>> {
-    let config = state.config.lock().await;
-    let users: Vec<MeResponse> = config
-        .web_users
-        .iter()
-        .map(|u| MeResponse {
-            username: u.username.clone(),
-            role: u.role.clone(),
-            permissions: u.permissions.clone(),
-            linked_telegram: u.linked_telegram,
-        })
-        .collect();
-    Json(users)
+) -> Result<Json<Vec<MeResponse>>, (StatusCode, String)> {
+    let users = crate::db::db_op(&state.db, |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT username, role, perm_terminal, perm_impresion, perm_archivos_escritura, linked_telegram
+             FROM web_users"
+        ).map_err(|e| e.to_string())?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(MeResponse {
+                username: row.get(0)?,
+                role: role_from_str(&row.get::<_, String>(1)?),
+                permissions: UserPermissions {
+                    terminal: row.get(2)?,
+                    impresion: row.get(3)?,
+                    archivos_escritura: row.get(4)?,
+                },
+                linked_telegram: row.get(5)?,
+            })
+        }).map_err(|e| e.to_string())?;
+
+        let mut users = Vec::new();
+        for row in rows {
+            users.push(row.map_err(|e| e.to_string())?);
+        }
+        Ok(users)
+    }).await?;
+
+    Ok(Json(users))
 }
 
 /// Lista solo los nombres de usuario (accesible para cualquier usuario autenticado)
 pub async fn list_usernames(
     State(state): State<AppState>,
-) -> Json<Vec<String>> {
-    let config = state.config.lock().await;
-    let names: Vec<String> = config
-        .web_users
-        .iter()
-        .map(|u| u.username.clone())
-        .collect();
-    Json(names)
+) -> Result<Json<Vec<String>>, (StatusCode, String)> {
+    let names = crate::db::db_op(&state.db, |conn| {
+        let mut stmt = conn.prepare("SELECT username FROM web_users")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |row| row.get(0))
+            .map_err(|e| e.to_string())?;
+        let mut names = Vec::new();
+        for row in rows {
+            names.push(row.map_err(|e| e.to_string())?);
+        }
+        Ok(names)
+    }).await?;
+
+    Ok(Json(names))
 }
 
 // --- Set user role (admin) ---
@@ -274,37 +361,50 @@ pub async fn set_user_role(
     Path(username): Path<String>,
     Json(req): Json<SetWebUserRoleRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
+    let role = req.role.clone();
+    let permissions = req.permissions.clone().unwrap_or_else(|| {
+        crate::handlers::notifications::default_permissions_for_role(&role)
+    });
 
-    let user = config
-        .web_users
-        .iter_mut()
-        .find(|u| u.username == username)
-        .ok_or((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()))?;
+    let role_str = role_to_str(&role).to_string();
+    let new_role = role.clone();
+    let new_perms = permissions.clone();
+    let username_clone = username.clone();
 
-    user.role = req.role.clone();
-    if let Some(perms) = req.permissions {
-        user.permissions = perms;
-    } else {
-        // Asignar permisos por defecto segun el rol si no se envian explicitamente
-        user.permissions = crate::handlers::notifications::default_permissions_for_role(&user.role);
-    }
-    let new_role = user.role.clone();
-    let new_perms = user.permissions.clone();
-    let linked_tg = user.linked_telegram;
+    let linked_tg = crate::db::db_op_status(&state.db, move |conn| {
+        // Update web user
+        let rows = conn.execute(
+            "UPDATE web_users SET role = ?1, perm_terminal = ?2, perm_impresion = ?3, perm_archivos_escritura = ?4
+             WHERE username = ?5",
+            params![&role_str, permissions.terminal, permissions.impresion, permissions.archivos_escritura, &username_clone],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // Sincronizar rol al Telegram vinculado
-    if let Some(tg_id) = linked_tg {
-        if let Some(chat) = config.notifications.telegram_chats.iter_mut().find(|c| c.chat_id == tg_id) {
-            chat.role = new_role.clone();
-            chat.permissions = new_perms.clone();
+        if rows == 0 {
+            return Err((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()));
         }
-    }
 
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    drop(config);
+        // Get linked telegram
+        let linked: Option<i64> = conn.query_row(
+            "SELECT linked_telegram FROM web_users WHERE username = ?1",
+            params![&username_clone],
+            |row| row.get(0),
+        ).optional()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .flatten();
+
+        // Sync role to linked telegram chat
+        if let Some(tg_id) = linked {
+            conn.execute(
+                "UPDATE telegram_chats SET role = ?1, perm_terminal = ?2, perm_impresion = ?3, perm_archivos_escritura = ?4
+                 WHERE chat_id = ?5",
+                params![&role_str, new_perms.terminal, new_perms.impresion, new_perms.archivos_escritura, tg_id],
+            ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        }
+
+        Ok(linked)
+    }).await?;
+
+    let _ = linked_tg; // used inside closure
 
     let mut sessions = state.sessions.lock().await;
     for session in sessions.values_mut() {
@@ -323,18 +423,18 @@ pub async fn delete_user(
     State(state): State<AppState>,
     Path(username): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    let before = config.web_users.len();
-    config.web_users.retain(|u| u.username != username);
+    let username_clone = username.clone();
+    crate::db::db_op_status(&state.db, move |conn| {
+        let rows = conn.execute(
+            "DELETE FROM web_users WHERE username = ?1",
+            params![&username_clone],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    if config.web_users.len() == before {
-        return Err((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()));
-    }
-
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    drop(config);
+        if rows == 0 {
+            return Err((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()));
+        }
+        Ok(())
+    }).await?;
 
     // Remove sessions
     let mut sessions = state.sessions.lock().await;
@@ -370,30 +470,60 @@ pub async fn rename_user(
         return Err((StatusCode::BAD_REQUEST, "El nuevo nombre es igual al actual".to_string()));
     }
 
-    let mut config = state.config.lock().await;
+    let old_clone = old_username.clone();
+    let new_clone = new_username.clone();
+    let (role, permissions) = crate::db::db_op_status(&state.db, move |conn| {
+        // Check if new username already exists
+        let exists: bool = conn.query_row(
+            "SELECT COUNT(*) FROM web_users WHERE username = ?1",
+            params![&new_clone],
+            |row| row.get::<_, i64>(0),
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        > 0;
 
-    if config.web_users.iter().any(|u| u.username == new_username) {
-        return Err((StatusCode::CONFLICT, "Ese nombre de usuario ya esta en uso".to_string()));
-    }
-
-    let user = config.web_users.iter_mut()
-        .find(|u| u.username == old_username)
-        .ok_or((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()))?;
-
-    user.username = new_username.clone();
-    let role = user.role.clone();
-    let permissions = user.permissions.clone();
-
-    // Actualizar linked_web_user en telegram chats
-    for chat in &mut config.notifications.telegram_chats {
-        if chat.linked_web_user.as_deref() == Some(&old_username) {
-            chat.linked_web_user = Some(new_username.clone());
+        if exists {
+            return Err((StatusCode::CONFLICT, "Ese nombre de usuario ya esta en uso".to_string()));
         }
-    }
 
-    save_config(&config).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    drop(config);
+        // Get current user data
+        let (password_hash, role_str, perm_t, perm_i, perm_a, linked_tg): (String, String, bool, bool, bool, Option<i64>) =
+            conn.query_row(
+                "SELECT password_hash, role, perm_terminal, perm_impresion, perm_archivos_escritura, linked_telegram
+                 FROM web_users WHERE username = ?1",
+                params![&old_clone],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+            ).optional()
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()))?;
+
+        // Insert new row with new username
+        conn.execute(
+            "INSERT INTO web_users (username, password_hash, role, perm_terminal, perm_impresion, perm_archivos_escritura, linked_telegram)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![&new_clone, &password_hash, &role_str, perm_t, perm_i, perm_a, linked_tg],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        // Delete old row
+        conn.execute(
+            "DELETE FROM web_users WHERE username = ?1",
+            params![&old_clone],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        // Update linked_web_user in telegram_chats
+        conn.execute(
+            "UPDATE telegram_chats SET linked_web_user = ?1 WHERE linked_web_user = ?2",
+            params![&new_clone, &old_clone],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        let role = role_from_str(&role_str);
+        let permissions = UserPermissions {
+            terminal: perm_t,
+            impresion: perm_i,
+            archivos_escritura: perm_a,
+        };
+
+        Ok((role, permissions))
+    }).await?;
 
     // Actualizar todas las sesiones del usuario
     let mut sessions = state.sessions.lock().await;
@@ -453,31 +583,46 @@ pub async fn admin_link_chat(
     Path(chat_id): Path<i64>,
     Json(req): Json<LinkRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
+    let web_username = req.web_username.clone();
 
-    // Verify web user exists
-    let web_user = config.web_users.iter()
-        .find(|u| u.username == req.web_username)
+    crate::db::db_op_status(&state.db, move |conn| {
+        // Verify web user exists and get their role/perms
+        let (role_str, perm_t, perm_i, perm_a): (String, bool, bool, bool) = conn.query_row(
+            "SELECT role, perm_terminal, perm_impresion, perm_archivos_escritura
+             FROM web_users WHERE username = ?1",
+            params![&web_username],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).optional()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Usuario web no encontrado".to_string()))?;
-    let role = web_user.role.clone();
-    let perms = web_user.permissions.clone();
 
-    // Link telegram chat
-    let chat = config.notifications.telegram_chats.iter_mut()
-        .find(|c| c.chat_id == chat_id)
-        .ok_or((StatusCode::NOT_FOUND, "Chat no encontrado".to_string()))?;
+        // Check chat exists
+        let chat_exists: bool = conn.query_row(
+            "SELECT COUNT(*) FROM telegram_chats WHERE chat_id = ?1",
+            params![chat_id],
+            |row| row.get::<_, i64>(0),
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        > 0;
 
-    chat.linked_web_user = Some(req.web_username.clone());
-    chat.role = role;
-    chat.permissions = perms;
+        if !chat_exists {
+            return Err((StatusCode::NOT_FOUND, "Chat no encontrado".to_string()));
+        }
 
-    // Link web user back
-    if let Some(wu) = config.web_users.iter_mut().find(|u| u.username == req.web_username) {
-        wu.linked_telegram = Some(chat_id);
-    }
+        // Link telegram chat
+        conn.execute(
+            "UPDATE telegram_chats SET linked_web_user = ?1, role = ?2, perm_terminal = ?3, perm_impresion = ?4, perm_archivos_escritura = ?5
+             WHERE chat_id = ?6",
+            params![&web_username, &role_str, perm_t, perm_i, perm_a, chat_id],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    save_config(&config).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        // Link web user back
+        conn.execute(
+            "UPDATE web_users SET linked_telegram = ?1 WHERE username = ?2",
+            params![chat_id, &web_username],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        Ok(())
+    }).await?;
 
     Ok(StatusCode::OK)
 }

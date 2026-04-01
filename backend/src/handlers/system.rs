@@ -1,4 +1,5 @@
 use axum::{extract::{Path, State}, http::StatusCode, Json};
+use rusqlite::params;
 use std::time::Duration;
 use sysinfo::{Disks, System};
 use tokio::process::Command;
@@ -43,7 +44,9 @@ pub async fn health_handler(State(state): State<AppState>) -> Json<HealthRespons
     let uptime_str = format!("{}h {}m {}s", hours, mins, secs % 60);
 
     let ip = local_ip_address::local_ip().ok().map(|ip| ip.to_string());
-    let upload_limit_mb = state.config.lock().await.upload_limit_mb;
+    let upload_limit_mb = crate::db::db_op(&state.db, |conn| {
+        Ok(crate::db::get_setting_u32(conn, "upload_limit_mb", 50))
+    }).await.unwrap_or(50);
 
     Json(HealthResponse {
         status: "ok".to_string(),
@@ -266,9 +269,10 @@ pub async fn set_upload_limit(
     if limit == 0 || limit > 500 {
         return Err((StatusCode::BAD_REQUEST, "Limite debe ser entre 1 y 500 MB".to_string()));
     }
-    let mut config = state.config.lock().await;
-    config.upload_limit_mb = limit;
-    crate::config::save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let limit_str = limit.to_string();
+    crate::db::db_op(&state.db, move |conn| {
+        crate::db::set_setting(conn, "upload_limit_mb", &limit_str)
+    }).await?;
     Ok(StatusCode::OK)
 }
 
@@ -424,23 +428,40 @@ pub async fn update_check_loop(state: AppState) {
         if is_newer_version(&latest, CURRENT_VERSION) {
             println!("[LabNAS] Nueva version disponible: {} (actual: {})", latest, current);
 
-            // Notify admins via Telegram
-            let config = state.config.lock().await;
-            let token = config.notifications.bot_token.clone();
-            let chats = config.notifications.telegram_chats.clone();
-            drop(config);
+            // Read token and admin chats from DB (sync scope, no await)
+            let tg_data: Option<(String, Vec<i64>)> = {
+                let conn = match crate::db::get_conn(&state.db) {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+                let token: Option<String> = conn.query_row(
+                    "SELECT bot_token FROM notification_config WHERE id = 1",
+                    [],
+                    |row| row.get(0),
+                ).ok().flatten();
 
-            if let Some(token) = token {
+                token.map(|t| {
+                    let mut stmt = conn.prepare(
+                        "SELECT chat_id FROM telegram_chats WHERE role = 'admin'"
+                    ).unwrap();
+                    let chat_ids: Vec<i64> = stmt.query_map([], |row| row.get(0))
+                        .unwrap()
+                        .filter_map(|r| r.ok())
+                        .collect();
+                    (t, chat_ids)
+                })
+            };
+
+            // Now send notifications (async, conn already dropped)
+            if let Some((token, chat_ids)) = tg_data {
                 let msg = format!(
                     "*Actualizacion disponible*\n\nActual: `{}`\nNueva: `{}`\n\nActualiza desde Configuracion en la web.",
                     current, latest
                 );
-                for chat in &chats {
-                    if chat.role == crate::models::notifications::UserRole::Admin {
-                        let _ = crate::handlers::notifications::send_tg_public(
-                            &state.http_client, &token, chat.chat_id, &msg
-                        ).await;
-                    }
+                for chat_id in &chat_ids {
+                    let _ = crate::handlers::notifications::send_tg_public(
+                        &state.http_client, &token, *chat_id, &msg
+                    ).await;
                 }
             }
         }
@@ -450,20 +471,51 @@ pub async fn update_check_loop(state: AppState) {
 // --- Branding ---
 
 pub async fn get_branding(State(state): State<AppState>) -> Json<crate::config::LabBranding> {
-    let config = state.config.lock().await;
-    Json(config.branding.clone())
+    let branding = crate::db::db_op(&state.db, |conn| {
+        let result = conn.query_row(
+            "SELECT lab_name, institution, logo_url, mission, vision, website, contact_email, location, accent_color FROM branding WHERE id = 1",
+            [],
+            |row| {
+                Ok(crate::config::LabBranding {
+                    lab_name: row.get(0)?,
+                    institution: row.get(1)?,
+                    logo_url: row.get(2)?,
+                    mission: row.get(3)?,
+                    vision: row.get(4)?,
+                    website: row.get(5)?,
+                    contact_email: row.get(6)?,
+                    location: row.get(7)?,
+                    accent_color: row.get(8)?,
+                })
+            },
+        );
+        match result {
+            Ok(b) => Ok(b),
+            Err(_) => Ok(crate::config::LabBranding::default()),
+        }
+    }).await.unwrap_or_else(|_| crate::config::LabBranding::default());
+
+    Json(branding)
 }
 
 pub async fn set_branding(
     State(state): State<AppState>,
     Json(req): Json<crate::config::LabBranding>,
 ) -> Result<Json<crate::config::LabBranding>, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    config.branding = req;
-    crate::config::save_config(&config).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    let branding = config.branding.clone();
-    Ok(Json(branding))
+    let branding = req.clone();
+    crate::db::db_op(&state.db, move |conn| {
+        conn.execute(
+            "INSERT OR REPLACE INTO branding (id, lab_name, institution, logo_url, mission, vision, website, contact_email, location, accent_color)
+             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                branding.lab_name, branding.institution, branding.logo_url,
+                branding.mission, branding.vision, branding.website,
+                branding.contact_email, branding.location, branding.accent_color,
+            ],
+        ).map_err(|e| format!("Error guardando branding: {}", e))?;
+        Ok(())
+    }).await?;
+    Ok(Json(req))
 }
 
 // --- mDNS ---
@@ -476,14 +528,16 @@ pub struct MdnsStatus {
 }
 
 pub async fn get_mdns_status(State(state): State<AppState>) -> Json<MdnsStatus> {
-    let config = state.config.lock().await;
-    let hostname = if config.mdns_hostname.is_empty() {
-        "labnas".to_string()
-    } else {
-        config.mdns_hostname.clone()
-    };
+    let (enabled, hostname) = crate::db::db_op(&state.db, |conn| {
+        let enabled = crate::db::get_setting_bool(conn, "mdns_enabled");
+        let hostname = crate::db::get_setting(conn, "mdns_hostname")
+            .unwrap_or_else(|| "labnas".to_string());
+        let hostname = if hostname.is_empty() { "labnas".to_string() } else { hostname };
+        Ok((enabled, hostname))
+    }).await.unwrap_or((false, "labnas".to_string()));
+
     Json(MdnsStatus {
-        enabled: config.mdns_enabled,
+        enabled,
         hostname: hostname.clone(),
         url: format!("http://{}.local:3001", hostname),
     })
@@ -500,22 +554,23 @@ pub async fn set_mdns(
     State(state): State<AppState>,
     Json(req): Json<SetMdnsRequest>,
 ) -> Result<Json<MdnsStatus>, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    config.mdns_enabled = req.enabled;
-    if let Some(hostname) = req.hostname {
-        let clean = hostname.trim().to_lowercase()
+    let enabled = req.enabled;
+    let clean_hostname = req.hostname.map(|h| {
+        h.trim().to_lowercase()
             .chars().filter(|c| c.is_alphanumeric() || *c == '-')
-            .collect::<String>();
-        if !clean.is_empty() {
-            config.mdns_hostname = clean;
-        }
-    }
-    let hostname = config.mdns_hostname.clone();
-    let enabled = config.mdns_enabled;
+            .collect::<String>()
+    });
 
-    crate::config::save_config(&config).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    drop(config);
+    let hostname = crate::db::db_op(&state.db, move |conn| {
+        crate::db::set_setting(conn, "mdns_enabled", if enabled { "true" } else { "false" })?;
+        if let Some(ref h) = clean_hostname {
+            if !h.is_empty() {
+                crate::db::set_setting(conn, "mdns_hostname", h)?;
+                return Ok(h.clone());
+            }
+        }
+        Ok(crate::db::get_setting(conn, "mdns_hostname").unwrap_or_else(|| "labnas".to_string()))
+    }).await?;
 
     // Restart mDNS service
     let mut mdns = state.mdns_service.lock().await;
@@ -548,22 +603,69 @@ pub async fn set_mdns(
 // --- Servicios del lab ---
 
 pub async fn get_services(State(state): State<AppState>) -> Json<Vec<crate::config::LabService>> {
-    let config = state.config.lock().await;
-    Json(config.services.clone())
+    let services = crate::db::db_op(&state.db, |conn| {
+        let mut stmt = conn.prepare("SELECT port, name, description, icon FROM services ORDER BY port")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |row| {
+            Ok(crate::config::LabService {
+                port: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                icon: row.get(3)?,
+            })
+        }).map_err(|e| e.to_string())?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row.map_err(|e| e.to_string())?);
+        }
+        Ok(result)
+    }).await.unwrap_or_default();
+
+    Json(services)
 }
 
 pub async fn add_service(
     State(state): State<AppState>,
     Json(req): Json<crate::config::LabService>,
 ) -> Result<Json<Vec<crate::config::LabService>>, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    if config.services.iter().any(|s| s.port == req.port) {
-        return Err((StatusCode::CONFLICT, "Ya existe un servicio en ese puerto".to_string()));
-    }
-    config.services.push(req);
-    crate::config::save_config(&config).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    Ok(Json(config.services.clone()))
+    let new_svc = req.clone();
+    crate::db::db_op_status(&state.db, move |conn| {
+        // Check if port already exists
+        let exists: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM services WHERE port = ?1",
+            params![new_svc.port],
+            |row| row.get(0),
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        if exists {
+            return Err((StatusCode::CONFLICT, "Ya existe un servicio en ese puerto".to_string()));
+        }
+        conn.execute(
+            "INSERT INTO services (port, name, description, icon) VALUES (?1, ?2, ?3, ?4)",
+            params![new_svc.port, new_svc.name, new_svc.description, new_svc.icon],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        Ok(())
+    }).await?;
+
+    // Return updated list
+    let services = crate::db::db_op(&state.db, |conn| {
+        let mut stmt = conn.prepare("SELECT port, name, description, icon FROM services ORDER BY port")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |row| {
+            Ok(crate::config::LabService {
+                port: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                icon: row.get(3)?,
+            })
+        }).map_err(|e| e.to_string())?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row.map_err(|e| e.to_string())?);
+        }
+        Ok(result)
+    }).await?;
+
+    Ok(Json(services))
 }
 
 pub async fn update_service(
@@ -571,31 +673,34 @@ pub async fn update_service(
     Path(port): Path<u16>,
     Json(req): Json<crate::config::LabService>,
 ) -> Result<Json<crate::config::LabService>, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    let svc = config.services.iter_mut().find(|s| s.port == port)
-        .ok_or((StatusCode::NOT_FOUND, "Servicio no encontrado".to_string()))?;
-    svc.name = req.name;
-    svc.port = req.port;
-    svc.description = req.description;
-    svc.icon = req.icon;
-    let result = svc.clone();
-    crate::config::save_config(&config).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    Ok(Json(result))
+    let updated = req.clone();
+    crate::db::db_op_status(&state.db, move |conn| {
+        let changed = conn.execute(
+            "UPDATE services SET name = ?1, port = ?2, description = ?3, icon = ?4 WHERE port = ?5",
+            params![updated.name, updated.port, updated.description, updated.icon, port],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        if changed == 0 {
+            return Err((StatusCode::NOT_FOUND, "Servicio no encontrado".to_string()));
+        }
+        Ok(())
+    }).await?;
+    Ok(Json(req))
 }
 
 pub async fn delete_service(
     State(state): State<AppState>,
     Path(port): Path<u16>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    let before = config.services.len();
-    config.services.retain(|s| s.port != port);
-    if config.services.len() == before {
-        return Err((StatusCode::NOT_FOUND, "Servicio no encontrado".to_string()));
-    }
-    crate::config::save_config(&config).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    crate::db::db_op_status(&state.db, move |conn| {
+        let changed = conn.execute(
+            "DELETE FROM services WHERE port = ?1",
+            params![port],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        if changed == 0 {
+            return Err((StatusCode::NOT_FOUND, "Servicio no encontrado".to_string()));
+        }
+        Ok(())
+    }).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

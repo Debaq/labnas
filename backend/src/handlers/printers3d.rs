@@ -6,7 +6,9 @@ use axum::{
 };
 use std::time::Duration;
 
-use crate::config::save_config;
+use rusqlite::params;
+
+use crate::db::{db_op, db_op_status, get_conn};
 use crate::models::printers3d::*;
 use crate::state::AppState;
 
@@ -289,18 +291,62 @@ async fn fetch_flashforge_status(
     }))
 }
 
-/// Busca una impresora por ID en la config y devuelve una copia
+/// Convierte texto del DB al enum Printer3DType
+fn parse_printer_type(s: &str) -> Printer3DType {
+    match s {
+        "OctoPrint" => Printer3DType::OctoPrint,
+        "CrealityStock" => Printer3DType::CrealityStock,
+        "FlashForge" => Printer3DType::FlashForge,
+        _ => Printer3DType::Moonraker,
+    }
+}
+
+/// Convierte enum Printer3DType a texto para el DB
+fn printer_type_str(pt: &Printer3DType) -> &'static str {
+    match pt {
+        Printer3DType::OctoPrint => "OctoPrint",
+        Printer3DType::Moonraker => "Moonraker",
+        Printer3DType::CrealityStock => "CrealityStock",
+        Printer3DType::FlashForge => "FlashForge",
+    }
+}
+
+/// Lee una fila de printers3d y construye Printer3DConfig
+fn row_to_printer(row: &rusqlite::Row) -> rusqlite::Result<Printer3DConfig> {
+    let pt_str: String = row.get(4)?;
+    Ok(Printer3DConfig {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        ip: row.get(2)?,
+        port: row.get(3)?,
+        printer_type: parse_printer_type(&pt_str),
+        api_key: row.get(5)?,
+        camera_url: row.get(6)?,
+        power_watts: row.get(7)?,
+        electricity_cost_kwh: row.get(8)?,
+        section_id: row.get(9)?,
+        order: row.get(10)?,
+    })
+}
+
+/// Busca una impresora por ID en la DB y devuelve una copia
 async fn find_printer(
     state: &AppState,
     id: &str,
 ) -> Result<Printer3DConfig, (StatusCode, String)> {
-    let config = state.config.lock().await;
-    config
-        .printers3d
-        .iter()
-        .find(|p| p.id == id)
-        .cloned()
+    let id = id.to_string();
+    db_op_status(&state.db, move |conn| {
+        use rusqlite::OptionalExtension;
+        conn.query_row(
+            "SELECT id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d WHERE id = ?1",
+            params![id],
+            row_to_printer,
+        )
+        .optional()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
         .ok_or((StatusCode::NOT_FOUND, "Impresora no encontrada".to_string()))
+    })
+    .await
 }
 
 /// Construye la URL base de la impresora
@@ -326,9 +372,20 @@ fn octoprint_request(
 // CRUD básico
 // =====================
 
-pub async fn list_printers(State(state): State<AppState>) -> Json<Vec<Printer3DConfig>> {
-    let config = state.config.lock().await;
-    Json(config.printers3d.clone())
+pub async fn list_printers(State(state): State<AppState>) -> Result<Json<Vec<Printer3DConfig>>, (StatusCode, String)> {
+    let printers = db_op(&state.db, |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d ORDER BY \"order\""
+        ).map_err(|e| format!("DB: {}", e))?;
+        let rows = stmt.query_map([], row_to_printer)
+            .map_err(|e| format!("DB: {}", e))?;
+        let mut list = Vec::new();
+        for row in rows {
+            list.push(row.map_err(|e| format!("DB row: {}", e))?);
+        }
+        Ok(list)
+    }).await?;
+    Ok(Json(printers))
 }
 
 pub async fn add_printer(
@@ -345,13 +402,19 @@ pub async fn add_printer(
         camera_url: req.camera_url,
         power_watts: None,
         electricity_cost_kwh: None,
+        section_id: None,
+        order: 0,
     };
 
-    let mut config = state.config.lock().await;
-    config.printers3d.push(printer.clone());
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let p = printer.clone();
+    let pt = printer_type_str(&p.printer_type).to_string();
+    db_op(&state.db, move |conn| {
+        conn.execute(
+            "INSERT INTO printers3d (id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\") VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![p.id, p.name, p.ip, p.port, pt, p.api_key, p.camera_url, p.power_watts, p.electricity_cost_kwh, p.section_id, p.order],
+        ).map_err(|e| format!("DB: {}", e))?;
+        Ok(())
+    }).await?;
 
     state
         .log_activity("Impresoras 3D", &format!("Agregada: {}", printer.name), "sistema")
@@ -365,24 +428,35 @@ pub async fn update_printer(
     Path(id): Path<String>,
     Json(req): Json<UpdatePrinter3DRequest>,
 ) -> Result<Json<Printer3DConfig>, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    let printer = config
-        .printers3d
-        .iter_mut()
-        .find(|p| p.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Impresora no encontrada".to_string()))?;
+    let updated = db_op_status(&state.db, move |conn| {
+        use rusqlite::OptionalExtension;
+        // Fetch current
+        let mut printer: Printer3DConfig = conn.query_row(
+            "SELECT id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d WHERE id = ?1",
+            params![id],
+            row_to_printer,
+        ).optional()
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            .ok_or((StatusCode::NOT_FOUND, "Impresora no encontrada".to_string()))?;
 
-    if let Some(name) = req.name { printer.name = name; }
-    if let Some(ip) = req.ip { printer.ip = ip; }
-    if let Some(port) = req.port { printer.port = port; }
-    if let Some(printer_type) = req.printer_type { printer.printer_type = printer_type; }
-    if let Some(api_key) = req.api_key { printer.api_key = api_key; }
-    if let Some(camera_url) = req.camera_url { printer.camera_url = camera_url; }
+        if let Some(name) = req.name { printer.name = name; }
+        if let Some(ip) = req.ip { printer.ip = ip; }
+        if let Some(port) = req.port { printer.port = port; }
+        if let Some(printer_type) = req.printer_type { printer.printer_type = printer_type; }
+        if let Some(api_key) = req.api_key { printer.api_key = api_key; }
+        if let Some(camera_url) = req.camera_url { printer.camera_url = camera_url; }
+        if let Some(section_id) = req.section_id { printer.section_id = section_id; }
+        if let Some(power_watts) = req.power_watts { printer.power_watts = power_watts; }
+        if let Some(electricity_cost_kwh) = req.electricity_cost_kwh { printer.electricity_cost_kwh = electricity_cost_kwh; }
 
-    let updated = printer.clone();
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let pt = printer_type_str(&printer.printer_type).to_string();
+        conn.execute(
+            "UPDATE printers3d SET name=?1, ip=?2, port=?3, printer_type=?4, api_key=?5, camera_url=?6, power_watts=?7, electricity_cost_kwh=?8, section_id=?9, \"order\"=?10 WHERE id=?11",
+            params![printer.name, printer.ip, printer.port, pt, printer.api_key, printer.camera_url, printer.power_watts, printer.electricity_cost_kwh, printer.section_id, printer.order, printer.id],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+
+        Ok(printer)
+    }).await?;
 
     Ok(Json(updated))
 }
@@ -391,31 +465,219 @@ pub async fn delete_printer(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    let before = config.printers3d.len();
-    let name = config
-        .printers3d
-        .iter()
-        .find(|p| p.id == id)
-        .map(|p| p.name.clone());
-    config.printers3d.retain(|p| p.id != id);
+    let name = db_op_status(&state.db, move |conn| {
+        use rusqlite::OptionalExtension;
+        let name: Option<String> = conn.query_row(
+            "SELECT name FROM printers3d WHERE id = ?1",
+            params![&id],
+            |row| row.get(0),
+        ).optional()
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
 
-    if config.printers3d.len() == before {
-        return Err((StatusCode::NOT_FOUND, "Impresora no encontrada".to_string()));
-    }
+        let name = name.ok_or((StatusCode::NOT_FOUND, "Impresora no encontrada".to_string()))?;
 
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        conn.execute("DELETE FROM printers3d WHERE id = ?1", params![&id])
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
 
-    if let Some(name) = name {
-        drop(config);
-        state
-            .log_activity("Impresoras 3D", &format!("Eliminada: {}", name), "sistema")
-            .await;
-    }
+        Ok(name)
+    }).await?;
+
+    state
+        .log_activity("Impresoras 3D", &format!("Eliminada: {}", name), "sistema")
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+// =====================
+// Secciones
+// =====================
+
+pub async fn list_sections(State(state): State<AppState>) -> Result<Json<Vec<Printer3DSection>>, (StatusCode, String)> {
+    let sections = db_op(&state.db, |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, \"order\" FROM printer3d_sections ORDER BY \"order\""
+        ).map_err(|e| format!("DB: {}", e))?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Printer3DSection {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                order: row.get(2)?,
+            })
+        }).map_err(|e| format!("DB: {}", e))?;
+        let mut list = Vec::new();
+        for row in rows {
+            list.push(row.map_err(|e| format!("DB row: {}", e))?);
+        }
+        Ok(list)
+    }).await?;
+    Ok(Json(sections))
+}
+
+pub async fn add_section(
+    State(state): State<AppState>,
+    Json(req): Json<AddSectionRequest>,
+) -> Result<(StatusCode, Json<Printer3DSection>), (StatusCode, String)> {
+    let section = db_op(&state.db, move |conn| {
+        let max_order: i32 = conn.query_row(
+            "SELECT COALESCE(MAX(\"order\"), -1) FROM printer3d_sections",
+            [],
+            |row| row.get(0),
+        ).map_err(|e| format!("DB: {}", e))?;
+        let section = Printer3DSection {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: req.name,
+            order: max_order + 1,
+        };
+        conn.execute(
+            "INSERT INTO printer3d_sections (id, name, \"order\") VALUES (?1, ?2, ?3)",
+            params![section.id, section.name, section.order],
+        ).map_err(|e| format!("DB: {}", e))?;
+        Ok(section)
+    }).await?;
+    Ok((StatusCode::CREATED, Json(section)))
+}
+
+pub async fn update_section(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<UpdateSectionRequest>,
+) -> Result<Json<Printer3DSection>, (StatusCode, String)> {
+    let updated = db_op_status(&state.db, move |conn| {
+        use rusqlite::OptionalExtension;
+        let mut section: Printer3DSection = conn.query_row(
+            "SELECT id, name, \"order\" FROM printer3d_sections WHERE id = ?1",
+            params![id],
+            |row| Ok(Printer3DSection { id: row.get(0)?, name: row.get(1)?, order: row.get(2)? }),
+        ).optional()
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            .ok_or((StatusCode::NOT_FOUND, "Seccion no encontrada".to_string()))?;
+
+        if let Some(name) = req.name { section.name = name; }
+        if let Some(order) = req.order { section.order = order; }
+
+        conn.execute(
+            "UPDATE printer3d_sections SET name=?1, \"order\"=?2 WHERE id=?3",
+            params![section.name, section.order, section.id],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+
+        Ok(section)
+    }).await?;
+    Ok(Json(updated))
+}
+
+pub async fn delete_section(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    db_op_status(&state.db, move |conn| {
+        let changes = conn.execute("DELETE FROM printer3d_sections WHERE id = ?1", params![&id])
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+        if changes == 0 {
+            return Err((StatusCode::NOT_FOUND, "Seccion no encontrada".to_string()));
+        }
+        // FK ON DELETE SET NULL ya maneja las impresoras de esta seccion
+        Ok(())
+    }).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn reorder_printer(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ReorderPrinterRequest>,
+) -> Result<Json<Printer3DConfig>, (StatusCode, String)> {
+    let updated = db_op_status(&state.db, move |conn| {
+        let changes = conn.execute(
+            "UPDATE printers3d SET section_id=?1, \"order\"=?2 WHERE id=?3",
+            params![req.section_id, req.order, &id],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+        if changes == 0 {
+            return Err((StatusCode::NOT_FOUND, "Impresora no encontrada".to_string()));
+        }
+        conn.query_row(
+            "SELECT id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d WHERE id = ?1",
+            params![&id],
+            row_to_printer,
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))
+    }).await?;
+    Ok(Json(updated))
+}
+
+pub async fn reorder_sections(
+    State(state): State<AppState>,
+    Json(order): Json<Vec<String>>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    db_op(&state.db, move |conn| {
+        for (i, id) in order.iter().enumerate() {
+            conn.execute(
+                "UPDATE printer3d_sections SET \"order\"=?1 WHERE id=?2",
+                params![i as i32, id],
+            ).map_err(|e| format!("DB: {}", e))?;
+        }
+        Ok(())
+    }).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// =====================
+// Test Home (para impresoras detectadas)
+// =====================
+
+pub async fn test_home(
+    State(state): State<AppState>,
+    Json(req): Json<TestHomeRequest>,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    let client = &state.http_client;
+    let base = format!("http://{}:{}", req.ip, req.port);
+
+    match req.printer_type {
+        Printer3DType::OctoPrint => {
+            let mut r = client
+                .post(format!("{}/api/printer/printhead", base))
+                .json(&serde_json::json!({"command": "home", "axes": ["x","y","z"]}))
+                .timeout(Duration::from_secs(10));
+            if let Some(key) = &req.api_key {
+                r = r.header("X-Api-Key", key);
+            }
+            let resp = r.send().await
+                .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Error: {}", e)))?;
+            if !resp.status().is_success() {
+                let st = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                return Err((StatusCode::BAD_GATEWAY, format!("OctoPrint {}: {}", st, body)));
+            }
+        }
+        Printer3DType::Moonraker => {
+            let resp = client
+                .post(format!("{}/printer/gcode/script", base))
+                .json(&serde_json::json!({"script": "G28"}))
+                .timeout(Duration::from_secs(10))
+                .send()
+                .await
+                .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Error: {}", e)))?;
+            if !resp.status().is_success() {
+                let st = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                return Err((StatusCode::BAD_GATEWAY, format!("Moonraker {}: {}", st, body)));
+            }
+        }
+        Printer3DType::CrealityStock => {
+            creality_ws_command(
+                &req.ip,
+                serde_json::json!({"method": "set", "params": {"autohome": "X Y Z"}}),
+            )
+            .await
+            .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
+        }
+        Printer3DType::FlashForge => {
+            flashforge_command(&req.ip, "G28")
+                .await
+                .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
+        }
+    }
+
+    Ok((StatusCode::OK, "Home enviado".to_string()))
 }
 
 // =====================
@@ -1869,15 +2131,63 @@ pub async fn printer_monitor_loop(state: AppState) {
     loop {
         tokio::time::sleep(Duration::from_secs(30)).await;
 
-        let config = state.config.lock().await;
-        let printers = config.printers3d.clone();
-        let token = config.notifications.bot_token.clone();
-        let chats = config.notifications.telegram_chats.clone();
-        drop(config);
+        let conn = match get_conn(&state.db) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        // Read printers from DB
+        let printers: Vec<Printer3DConfig> = match (|| -> Result<Vec<Printer3DConfig>, rusqlite::Error> {
+            let mut stmt = conn.prepare(
+                "SELECT id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d"
+            )?;
+            let rows = stmt.query_map([], row_to_printer)?;
+            Ok(rows.filter_map(|r| r.ok()).collect())
+        })() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+
+        // Read notification config from DB
+        let token: Option<String> = conn.query_row(
+            "SELECT bot_token FROM notification_config WHERE id = 1",
+            [],
+            |row| row.get(0),
+        ).ok().flatten();
 
         let Some(token) = token else {
             continue;
         };
+
+        let chats: Vec<crate::models::notifications::TelegramChat> = match (|| -> Result<Vec<crate::models::notifications::TelegramChat>, rusqlite::Error> {
+            let mut stmt = conn.prepare("SELECT chat_id, name, username, role FROM telegram_chats")?;
+            let rows = stmt.query_map([], |row| {
+                let role_str: String = row.get(3)?;
+                let role = match role_str.as_str() {
+                    "admin" => crate::models::notifications::UserRole::Admin,
+                    "operador" => crate::models::notifications::UserRole::Operador,
+                    "observador" => crate::models::notifications::UserRole::Observador,
+                    _ => crate::models::notifications::UserRole::Pendiente,
+                };
+                Ok(crate::models::notifications::TelegramChat {
+                    chat_id: row.get(0)?,
+                    name: row.get(1)?,
+                    username: row.get(2)?,
+                    role,
+                    permissions: Default::default(),
+                    linked_web_user: None,
+                    daily_enabled: false,
+                    daily_hour: 8,
+                    daily_minute: 0,
+                })
+            })?;
+            Ok(rows.filter_map(|r| r.ok()).collect())
+        })() {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        drop(conn);
 
         if chats.is_empty() || printers.is_empty() {
             continue;

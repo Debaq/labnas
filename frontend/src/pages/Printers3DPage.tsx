@@ -32,6 +32,10 @@ import {
   Calculator,
   DollarSign,
   Pencil,
+  FolderPlus,
+  GripVertical,
+  ChevronRight,
+  Check,
 } from 'lucide-react'
 import {
   fetchPrinters3D,
@@ -50,6 +54,13 @@ import {
   printFile3D,
   deletePrinterFile,
   cameraSnapshotUrl,
+  fetchPrinter3DSections,
+  addPrinter3DSection,
+  updatePrinter3DSection,
+  deletePrinter3DSection,
+  reorderPrinter3D,
+  reorderPrinter3DSections,
+  testHome3D,
 } from '../api'
 import type {
   Printer3DConfig,
@@ -57,6 +68,7 @@ import type {
   AddPrinter3DRequest,
   DetectPrintersResult,
   PrinterFileInfo,
+  Printer3DSection,
 } from '../types'
 
 function formatTime(seconds: number | null | undefined): string {
@@ -82,7 +94,8 @@ interface HardwareItem {
   qty: number | string
 }
 
-function CostCalculator() {
+function CostCalculatorModal({ printers, onClose }: { printers: Printer3DConfig[]; onClose: () => void }) {
+  const [selectedPrinterId, setSelectedPrinterId] = useState<string>('')
   // Material
   const [materialWeight, setMaterialWeight] = useState<number | string>('')
   const [materialPriceKg, setMaterialPriceKg] = useState<number | string>('')
@@ -90,20 +103,18 @@ function CostCalculator() {
   const [stlVolume, setStlVolume] = useState<number | null>(null)
   const [stlFileName, setStlFileName] = useState('')
 
-  // Parse binary STL and calculate volume in cm³
   function parseSTL(buffer: ArrayBuffer): number {
     const view = new DataView(buffer)
     const numTriangles = view.getUint32(80, true)
     let volume = 0
     for (let i = 0; i < numTriangles; i++) {
-      const offset = 84 + i * 50 + 12 // skip header + normal
+      const offset = 84 + i * 50 + 12
       const x1 = view.getFloat32(offset, true), y1 = view.getFloat32(offset + 4, true), z1 = view.getFloat32(offset + 8, true)
       const x2 = view.getFloat32(offset + 12, true), y2 = view.getFloat32(offset + 16, true), z2 = view.getFloat32(offset + 20, true)
       const x3 = view.getFloat32(offset + 24, true), y3 = view.getFloat32(offset + 28, true), z3 = view.getFloat32(offset + 32, true)
-      // Signed volume of tetrahedron with origin
       volume += (x1 * (y2 * z3 - y3 * z2) - y1 * (x2 * z3 - x3 * z2) + z1 * (x2 * y3 - x3 * y2)) / 6
     }
-    return Math.abs(volume) / 1000 // mm³ to cm³
+    return Math.abs(volume) / 1000
   }
 
   function handleSTLFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -114,7 +125,6 @@ function CostCalculator() {
       const vol = parseSTL(reader.result as ArrayBuffer)
       setStlVolume(vol)
       setStlFileName(file.name)
-      // Auto-calculate weight if density is set
       const d = Number(materialDensity)
       if (d > 0) setMaterialWeight(Math.round(vol * d))
     }
@@ -126,24 +136,29 @@ function CostCalculator() {
   const [printHours, setPrintHours] = useState<number | string>('')
   const [printerWatts, setPrinterWatts] = useState<number | string>('')
   const [kwhPrice, setKwhPrice] = useState<number | string>('')
-
   // Maquina
   const [machineCost, setMachineCost] = useState<number | string>('')
   const [machineLifeHours, setMachineLifeHours] = useState<number | string>('')
-
   // Tiempo de trabajo
   const [designHours, setDesignHours] = useState<number | string>('')
   const [prepHours, setPrepHours] = useState<number | string>('')
   const [postProcessHours, setPostProcessHours] = useState<number | string>('')
   const [hourlyRate, setHourlyRate] = useState<number | string>('')
-
   // Hardware extra
   const [hardwareItems, setHardwareItems] = useState<HardwareItem[]>([])
-
   // Factores
   const [failRate, setFailRate] = useState<number | string>('')
   const [margin, setMargin] = useState<number | string>('')
   const [quantity, setQuantity] = useState<number | string>(1)
+
+  function handleSelectPrinter(id: string) {
+    setSelectedPrinterId(id)
+    const p = printers.find(pr => pr.id === id)
+    if (p) {
+      if (p.power_watts) setPrinterWatts(p.power_watts)
+      if (p.electricity_cost_kwh) setKwhPrice(p.electricity_cost_kwh)
+    }
+  }
 
   function n(v: number | string): number { return Number(v) || 0 }
 
@@ -158,23 +173,21 @@ function CostCalculator() {
   const withMargin = n(margin) > 0 ? failAdjusted * (1 + n(margin) / 100) : failAdjusted
   const totalPerUnit = withMargin
   const totalAll = totalPerUnit * Math.max(n(quantity), 1)
-
   const hasAnyCost = subtotal > 0
 
   function addHardwareItem() {
     setHardwareItems(prev => [...prev, { id: crypto.randomUUID(), name: '', cost: '', qty: 1 }])
   }
-
   function updateHardwareItem(id: string, field: keyof HardwareItem, value: string | number) {
     setHardwareItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item))
   }
-
   function removeHardwareItem(id: string) {
     setHardwareItems(prev => prev.filter(item => item.id !== id))
   }
-
   function resetAll() {
-    setMaterialWeight(''); setMaterialPriceKg('')
+    setSelectedPrinterId('')
+    setMaterialWeight(''); setMaterialPriceKg(''); setMaterialDensity('')
+    setStlVolume(null); setStlFileName('')
     setPrintHours(''); setPrinterWatts(''); setKwhPrice('')
     setMachineCost(''); setMachineLifeHours('')
     setDesignHours(''); setPrepHours(''); setPostProcessHours(''); setHourlyRate('')
@@ -192,19 +205,10 @@ function CostCalculator() {
       <div>
         <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{label}</label>
         <div className="relative">
-          <input
-            type="number"
-            min={0}
-            step="any"
-            value={value}
+          <input type="number" min={0} step="any" value={value}
             onChange={(e) => onChange(e.target.value === '' ? '' : parseFloat(e.target.value))}
-            placeholder={placeholder || '0'}
-            className={inputClass + (unit ? ' pr-10' : '')}
-            style={inputStyle}
-          />
-          {unit && (
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style={{ color: 'var(--text-secondary)', opacity: 0.6 }}>{unit}</span>
-          )}
+            placeholder={placeholder || '0'} className={inputClass + (unit ? ' pr-10' : '')} style={inputStyle} />
+          {unit && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style={{ color: 'var(--text-secondary)', opacity: 0.6 }}>{unit}</span>}
         </div>
         {hint && <span className="block text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>{hint}</span>}
       </div>
@@ -223,7 +227,7 @@ function CostCalculator() {
     )
   }
 
-  function SectionHeader({ title }: { title: string }) {
+  function CalcSectionHeader({ title }: { title: string }) {
     return (
       <div className="flex items-center gap-2 mb-2 mt-1">
         <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent)' }}>{title}</span>
@@ -233,172 +237,161 @@ function CostCalculator() {
   }
 
   return (
-    <div
-      className="rounded-xl p-5"
-      style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
-    >
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Calculator size={18} style={{ color: 'var(--accent)' }} />
-          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Calculadora de costos</h3>
-        </div>
-        {hasAnyCost && (
-          <button onClick={resetAll} className="text-xs px-2 py-1 rounded-lg" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-            Limpiar
-          </button>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6">
-        {/* Columna izquierda: inputs */}
-        <div className="space-y-4">
-          {/* Material */}
-          <div>
-            <SectionHeader title="Material" />
-            {/* STL auto-weight */}
-            <div className="flex items-center gap-2 mb-2">
-              <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer"
-                style={{ color: 'var(--accent)', border: '1px dashed var(--border)' }}>
-                <Upload size={12} /> Cargar STL para estimar peso
-                <input type="file" accept=".stl" className="hidden" onChange={handleSTLFile} />
-              </label>
-              {stlVolume !== null && (
-                <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
-                  {stlFileName}: {stlVolume.toFixed(2)} cm3
-                  {Number(materialDensity) > 0 && ` = ${(stlVolume * Number(materialDensity)).toFixed(0)}g`}
-                </span>
-              )}
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <NumField label="Peso del material" value={materialWeight} onChange={setMaterialWeight} unit="g" hint="Del slicer o STL" />
-              <NumField label="Precio filamento" value={materialPriceKg} onChange={setMaterialPriceKg} unit="$/kg" />
-              <NumField label="Densidad" value={materialDensity} onChange={(v) => {
-                setMaterialDensity(v)
-                if (stlVolume && Number(v) > 0) setMaterialWeight(Math.round(stlVolume * Number(v)))
-              }} unit="g/cm3" hint="PLA=1.24 ABS=1.04" />
-            </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div
+        className="rounded-xl w-full max-w-3xl mx-4 max-h-[90vh] overflow-y-auto"
+        style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between p-5 pb-0">
+          <div className="flex items-center gap-2">
+            <Calculator size={18} style={{ color: 'var(--accent)' }} />
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Calculadora de costos</h3>
           </div>
-
-          {/* Electricidad + Maquina */}
-          <div>
-            <SectionHeader title="Impresora" />
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              <NumField label="Tiempo de impresion" value={printHours} onChange={setPrintHours} unit="h" hint="Estimado del slicer" />
-              <NumField label="Consumo" value={printerWatts} onChange={setPrinterWatts} unit="W" hint="Potencia de la impresora" />
-              <NumField label="Precio electricidad" value={kwhPrice} onChange={setKwhPrice} unit="$/kWh" />
-            </div>
-            <div className="grid grid-cols-2 gap-3 mt-3">
-              <NumField label="Costo de la impresora" value={machineCost} onChange={setMachineCost} unit="$" hint="Precio de compra" />
-              <NumField label="Vida util estimada" value={machineLifeHours} onChange={setMachineLifeHours} unit="h" hint="Horas totales de uso esperado" />
-            </div>
-          </div>
-
-          {/* Tiempo de trabajo */}
-          <div>
-            <SectionHeader title="Mano de obra" />
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <NumField label="Diseno" value={designHours} onChange={setDesignHours} unit="h" hint="Modelado 3D" />
-              <NumField label="Preparacion" value={prepHours} onChange={setPrepHours} unit="h" hint="Slicing, calibracion" />
-              <NumField label="Post-procesado" value={postProcessHours} onChange={setPostProcessHours} unit="h" hint="Lijado, pintura, curado" />
-              <NumField label="Tarifa por hora" value={hourlyRate} onChange={setHourlyRate} unit="$/h" />
-            </div>
-          </div>
-
-          {/* Hardware extra */}
-          <div>
-            <SectionHeader title="Hardware adicional" />
-            <span className="block text-[10px] mb-2" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>Insertos, herrajes, tornillos, electrónica, etc.</span>
-            {hardwareItems.map((item) => (
-              <div key={item.id} className="flex items-center gap-2 mb-2">
-                <input
-                  type="text"
-                  value={item.name}
-                  onChange={(e) => updateHardwareItem(item.id, 'name', e.target.value)}
-                  placeholder="Descripcion"
-                  className="flex-1 px-3 py-1.5 rounded-lg text-sm outline-none"
-                  style={inputStyle}
-                />
-                <input
-                  type="number"
-                  min={0}
-                  step="any"
-                  value={item.cost}
-                  onChange={(e) => updateHardwareItem(item.id, 'cost', e.target.value === '' ? '' : parseFloat(e.target.value))}
-                  placeholder="$/u"
-                  className="w-20 px-2 py-1.5 rounded-lg text-sm outline-none text-right"
-                  style={inputStyle}
-                />
-                <input
-                  type="number"
-                  min={1}
-                  value={item.qty}
-                  onChange={(e) => updateHardwareItem(item.id, 'qty', e.target.value === '' ? '' : parseInt(e.target.value))}
-                  placeholder="Cant"
-                  className="w-16 px-2 py-1.5 rounded-lg text-sm outline-none text-right"
-                  style={inputStyle}
-                />
-                <button onClick={() => removeHardwareItem(item.id)} className="p-1 rounded-lg" style={{ color: 'var(--danger)' }}>
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
-            <button
-              onClick={addHardwareItem}
-              className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg"
-              style={{ color: 'var(--accent)', border: '1px dashed var(--border)' }}
-            >
-              <Plus size={12} /> Agregar item
-            </button>
-          </div>
-
-          {/* Ajustes finales */}
-          <div>
-            <SectionHeader title="Ajustes" />
-            <div className="grid grid-cols-3 gap-3">
-              <NumField label="Tasa de fallo" value={failRate} onChange={setFailRate} unit="%" hint="Impresiones fallidas esperadas" />
-              <NumField label="Margen de ganancia" value={margin} onChange={setMargin} unit="%" />
-              <NumField label="Cantidad" value={quantity} onChange={setQuantity} placeholder="1" hint="Unidades a producir" />
-            </div>
+          <div className="flex items-center gap-2">
+            {hasAnyCost && (
+              <button onClick={resetAll} className="text-xs px-2 py-1 rounded-lg" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                Limpiar
+              </button>
+            )}
+            <button onClick={onClose} style={{ color: 'var(--text-secondary)' }}><X size={20} /></button>
           </div>
         </div>
 
-        {/* Columna derecha: resumen */}
-        <div>
-          <div
-            className="rounded-xl p-4 sticky top-4"
-            style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <DollarSign size={16} style={{ color: 'var(--accent)' }} />
-              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent)' }}>Resumen</span>
+        <div className="p-5">
+          {/* Selector de impresora */}
+          {printers.length > 0 && (
+            <div className="mb-4">
+              <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Impresora (pre-llena consumo y $/kWh)</label>
+              <select
+                value={selectedPrinterId}
+                onChange={(e) => handleSelectPrinter(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
+                style={inputStyle}
+              >
+                <option value="">Ingresar manualmente</option>
+                {printers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
             </div>
+          )}
 
-            {!hasAnyCost ? (
-              <p className="text-xs text-center py-4" style={{ color: 'var(--text-secondary)' }}>
-                Completa los campos que necesites para calcular el costo
-              </p>
-            ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-6">
+            <div className="space-y-4">
+              {/* Material */}
               <div>
-                <div className="space-y-0.5" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '8px', marginBottom: '8px' }}>
-                  <CostLine label="Material" value={materialCost} />
-                  <CostLine label="Electricidad" value={electricityCost} />
-                  <CostLine label="Depreciacion maquina" value={depreciationCost} />
-                  <CostLine label="Mano de obra" value={laborCost} />
-                  <CostLine label="Hardware adicional" value={hardwareCost} />
-                </div>
-
-                <CostLine label="Subtotal" value={subtotal} />
-                {n(failRate) > 0 && <CostLine label={`+ Fallo (${n(failRate)}%)`} value={failAdjusted - subtotal} />}
-                {n(margin) > 0 && <CostLine label={`+ Margen (${n(margin)}%)`} value={withMargin - failAdjusted} />}
-
-                <div className="mt-3 pt-3" style={{ borderTop: '2px solid var(--accent)' }}>
-                  <CostLine label="Costo por unidad" value={totalPerUnit} highlight />
-                  {n(quantity) > 1 && (
-                    <CostLine label={`Total (${n(quantity)} unidades)`} value={totalAll} highlight />
+                <CalcSectionHeader title="Material" />
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer"
+                    style={{ color: 'var(--accent)', border: '1px dashed var(--border)' }}>
+                    <Upload size={12} /> Cargar STL
+                    <input type="file" accept=".stl" className="hidden" onChange={handleSTLFile} />
+                  </label>
+                  {stlVolume !== null && (
+                    <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+                      {stlFileName}: {stlVolume.toFixed(2)} cm3
+                      {Number(materialDensity) > 0 && ` = ${(stlVolume * Number(materialDensity)).toFixed(0)}g`}
+                    </span>
                   )}
                 </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <NumField label="Peso" value={materialWeight} onChange={setMaterialWeight} unit="g" hint="Del slicer o STL" />
+                  <NumField label="Precio filamento" value={materialPriceKg} onChange={setMaterialPriceKg} unit="$/kg" />
+                  <NumField label="Densidad" value={materialDensity} onChange={(v) => {
+                    setMaterialDensity(v)
+                    if (stlVolume && Number(v) > 0) setMaterialWeight(Math.round(stlVolume * Number(v)))
+                  }} unit="g/cm3" hint="PLA=1.24 ABS=1.04" />
+                </div>
               </div>
-            )}
+
+              {/* Impresora */}
+              <div>
+                <CalcSectionHeader title="Impresora" />
+                <div className="grid grid-cols-3 gap-3">
+                  <NumField label="Tiempo" value={printHours} onChange={setPrintHours} unit="h" hint="Del slicer" />
+                  <NumField label="Consumo" value={printerWatts} onChange={setPrinterWatts} unit="W" />
+                  <NumField label="$/kWh" value={kwhPrice} onChange={setKwhPrice} unit="$/kWh" />
+                </div>
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <NumField label="Costo impresora" value={machineCost} onChange={setMachineCost} unit="$" hint="Precio de compra" />
+                  <NumField label="Vida util" value={machineLifeHours} onChange={setMachineLifeHours} unit="h" />
+                </div>
+              </div>
+
+              {/* Mano de obra */}
+              <div>
+                <CalcSectionHeader title="Mano de obra" />
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <NumField label="Diseno" value={designHours} onChange={setDesignHours} unit="h" />
+                  <NumField label="Preparacion" value={prepHours} onChange={setPrepHours} unit="h" />
+                  <NumField label="Post-procesado" value={postProcessHours} onChange={setPostProcessHours} unit="h" />
+                  <NumField label="Tarifa/h" value={hourlyRate} onChange={setHourlyRate} unit="$/h" />
+                </div>
+              </div>
+
+              {/* Hardware */}
+              <div>
+                <CalcSectionHeader title="Hardware adicional" />
+                {hardwareItems.map((item) => (
+                  <div key={item.id} className="flex items-center gap-2 mb-2">
+                    <input type="text" value={item.name} onChange={(e) => updateHardwareItem(item.id, 'name', e.target.value)}
+                      placeholder="Descripcion" className="flex-1 px-3 py-1.5 rounded-lg text-sm outline-none" style={inputStyle} />
+                    <input type="number" min={0} step="any" value={item.cost}
+                      onChange={(e) => updateHardwareItem(item.id, 'cost', e.target.value === '' ? '' : parseFloat(e.target.value))}
+                      placeholder="$/u" className="w-20 px-2 py-1.5 rounded-lg text-sm outline-none text-right" style={inputStyle} />
+                    <input type="number" min={1} value={item.qty}
+                      onChange={(e) => updateHardwareItem(item.id, 'qty', e.target.value === '' ? '' : parseInt(e.target.value))}
+                      placeholder="Cant" className="w-16 px-2 py-1.5 rounded-lg text-sm outline-none text-right" style={inputStyle} />
+                    <button onClick={() => removeHardwareItem(item.id)} className="p-1 rounded-lg" style={{ color: 'var(--danger)' }}><Trash2 size={14} /></button>
+                  </div>
+                ))}
+                <button onClick={addHardwareItem} className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg"
+                  style={{ color: 'var(--accent)', border: '1px dashed var(--border)' }}>
+                  <Plus size={12} /> Agregar item
+                </button>
+              </div>
+
+              {/* Ajustes */}
+              <div>
+                <CalcSectionHeader title="Ajustes" />
+                <div className="grid grid-cols-3 gap-3">
+                  <NumField label="Tasa de fallo" value={failRate} onChange={setFailRate} unit="%" />
+                  <NumField label="Margen" value={margin} onChange={setMargin} unit="%" />
+                  <NumField label="Cantidad" value={quantity} onChange={setQuantity} placeholder="1" />
+                </div>
+              </div>
+            </div>
+
+            {/* Resumen */}
+            <div>
+              <div className="rounded-xl p-4 sticky top-4" style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
+                <div className="flex items-center gap-2 mb-3">
+                  <DollarSign size={16} style={{ color: 'var(--accent)' }} />
+                  <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent)' }}>Resumen</span>
+                </div>
+                {!hasAnyCost ? (
+                  <p className="text-xs text-center py-4" style={{ color: 'var(--text-secondary)' }}>
+                    Completa los campos para calcular
+                  </p>
+                ) : (
+                  <div>
+                    <div className="space-y-0.5" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '8px', marginBottom: '8px' }}>
+                      <CostLine label="Material" value={materialCost} />
+                      <CostLine label="Electricidad" value={electricityCost} />
+                      <CostLine label="Depreciacion" value={depreciationCost} />
+                      <CostLine label="Mano de obra" value={laborCost} />
+                      <CostLine label="Hardware" value={hardwareCost} />
+                    </div>
+                    <CostLine label="Subtotal" value={subtotal} />
+                    {n(failRate) > 0 && <CostLine label={`+ Fallo (${n(failRate)}%)`} value={failAdjusted - subtotal} />}
+                    {n(margin) > 0 && <CostLine label={`+ Margen (${n(margin)}%)`} value={withMargin - failAdjusted} />}
+                    <div className="mt-3 pt-3" style={{ borderTop: '2px solid var(--accent)' }}>
+                      <CostLine label="Costo por unidad" value={totalPerUnit} highlight />
+                      {n(quantity) > 1 && <CostLine label={`Total (${n(quantity)} u.)`} value={totalAll} highlight />}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -428,6 +421,13 @@ export default function Printers3DPage() {
   const [actionFeedback, setActionFeedback] = useState<Record<string, string>>({})
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
+  // Secciones
+  const [sections, setSections] = useState<Printer3DSection[]>([])
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
+  const [editingSectionId, setEditingSectionId] = useState<string | null>(null)
+  const [editingSectionName, setEditingSectionName] = useState('')
+  const [testingHome, setTestingHome] = useState<string | null>(null) // ip:port key
+
   function printerWebUrl(printer: Printer3DConfig): string | null {
     switch (printer.printer_type) {
       case 'OctoPrint': return `http://${printer.ip}:${printer.port}`
@@ -444,14 +444,23 @@ export default function Printers3DPage() {
   const [formType, setFormType] = useState<'OctoPrint' | 'Moonraker' | 'CrealityStock' | 'FlashForge'>('Moonraker')
   const [formApiKey, setFormApiKey] = useState('')
   const [formCameraUrl, setFormCameraUrl] = useState('')
+  const [formSectionId, setFormSectionId] = useState<string | null>(null)
+  const [formPowerWatts, setFormPowerWatts] = useState<number | string>('')
+  const [formElectricityCost, setFormElectricityCost] = useState<number | string>('')
   const [editingPrinterId, setEditingPrinterId] = useState<string | null>(null)
+  const [showCostCalc, setShowCostCalc] = useState(false)
 
   const loadPrinters = useCallback(async () => {
     try {
-      const data = await fetchPrinters3D()
-      setPrinters(data)
+      const [printersData, sectionsData] = await Promise.all([
+        fetchPrinters3D(),
+        fetchPrinter3DSections(),
+      ])
+      setPrinters(printersData)
+      setSections(sectionsData)
     } catch {
       setPrinters([])
+      setSections([])
     } finally {
       setLoading(false)
     }
@@ -653,6 +662,9 @@ export default function Printers3DPage() {
     setFormType('Moonraker')
     setFormApiKey('')
     setFormCameraUrl('')
+    setFormSectionId(null)
+    setFormPowerWatts('')
+    setFormElectricityCost('')
     setEditingPrinterId(null)
   }
 
@@ -663,6 +675,9 @@ export default function Printers3DPage() {
     setFormType(printer.printer_type)
     setFormApiKey(printer.api_key || '')
     setFormCameraUrl(printer.camera_url || '')
+    setFormSectionId(printer.section_id || null)
+    setFormPowerWatts(printer.power_watts ?? '')
+    setFormElectricityCost(printer.electricity_cost_kwh ?? '')
     setEditingPrinterId(printer.id)
     setShowAddModal(true)
   }
@@ -678,9 +693,12 @@ export default function Printers3DPage() {
           printer_type: formType,
           api_key: formApiKey || null,
           camera_url: formCameraUrl || null,
+          section_id: formSectionId,
+          power_watts: Number(formPowerWatts) || null,
+          electricity_cost_kwh: Number(formElectricityCost) || null,
         })
       } else {
-        await addPrinter3D({
+        const created = await addPrinter3D({
           name: formName,
           ip: formIp,
           port: formPort,
@@ -688,6 +706,12 @@ export default function Printers3DPage() {
           api_key: formApiKey || null,
           camera_url: formCameraUrl || null,
         })
+        // Asignar seccion si se selecciono
+        if (formSectionId) {
+          const targetPrinters = printers.filter(p => (p.section_id || null) === formSectionId)
+          const maxOrder = targetPrinters.length > 0 ? Math.max(...targetPrinters.map(p => p.order)) + 1 : 0
+          await reorderPrinter3D(created.id, formSectionId, maxOrder)
+        }
       }
       setShowAddModal(false)
       resetForm()
@@ -695,6 +719,105 @@ export default function Printers3DPage() {
     } catch (err) {
       console.error('Error guardando impresora:', err)
     }
+  }
+
+  // ── Secciones ──
+
+  async function handleAddSection() {
+    const name = prompt('Nombre de la seccion:')
+    if (!name?.trim()) return
+    try {
+      await addPrinter3DSection(name.trim())
+      await loadPrinters()
+    } catch (err) {
+      console.error('Error creando seccion:', err)
+    }
+  }
+
+  async function handleSaveSection(id: string) {
+    if (!editingSectionName.trim()) return
+    try {
+      await updatePrinter3DSection(id, { name: editingSectionName.trim() })
+      setEditingSectionId(null)
+      await loadPrinters()
+    } catch (err) {
+      console.error('Error actualizando seccion:', err)
+    }
+  }
+
+  async function handleDeleteSection(id: string) {
+    if (!confirm('Eliminar esta seccion? Las impresoras se moveran a "Sin seccion".')) return
+    try {
+      await deletePrinter3DSection(id)
+      await loadPrinters()
+    } catch (err) {
+      console.error('Error eliminando seccion:', err)
+    }
+  }
+
+  function toggleSection(id: string) {
+    setCollapsedSections(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function movePrinter(printerId: string, direction: 'up' | 'down') {
+    const printer = printers.find(p => p.id === printerId)
+    if (!printer) return
+    const sectionId = printer.section_id || null
+    const sectionPrinters = printers
+      .filter(p => (p.section_id || null) === sectionId)
+      .sort((a, b) => a.order - b.order)
+    const idx = sectionPrinters.findIndex(p => p.id === printerId)
+    if (direction === 'up' && idx <= 0) return
+    if (direction === 'down' && idx >= sectionPrinters.length - 1) return
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+    const other = sectionPrinters[swapIdx]
+    try {
+      await Promise.all([
+        reorderPrinter3D(printerId, sectionId, other.order),
+        reorderPrinter3D(other.id, sectionId, printer.order),
+      ])
+      await loadPrinters()
+    } catch (err) {
+      console.error('Error reordenando:', err)
+    }
+  }
+
+  async function movePrinterToSection(printerId: string, targetSectionId: string | null) {
+    const targetPrinters = printers.filter(p => (p.section_id || null) === targetSectionId)
+    const maxOrder = targetPrinters.length > 0 ? Math.max(...targetPrinters.map(p => p.order)) + 1 : 0
+    try {
+      await reorderPrinter3D(printerId, targetSectionId, maxOrder)
+      await loadPrinters()
+    } catch (err) {
+      console.error('Error moviendo impresora:', err)
+    }
+  }
+
+  async function moveSectionOrder(sectionId: string, direction: 'up' | 'down') {
+    const sorted = [...sections].sort((a, b) => a.order - b.order)
+    const idx = sorted.findIndex(s => s.id === sectionId)
+    if (direction === 'up' && idx <= 0) return
+    if (direction === 'down' && idx >= sorted.length - 1) return
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+    ;[sorted[idx], sorted[swapIdx]] = [sorted[swapIdx], sorted[idx]]
+    try {
+      await reorderPrinter3DSections(sorted.map(s => s.id))
+      await loadPrinters()
+    } catch (err) {
+      console.error('Error reordenando secciones:', err)
+    }
+  }
+
+  // Helper: obtener impresoras ordenadas por seccion
+  function getPrintersForSection(sectionId: string | null): Printer3DConfig[] {
+    return printers
+      .filter(p => (p.section_id || null) === sectionId)
+      .sort((a, b) => a.order - b.order)
   }
 
   // Barra de progreso de temperatura
@@ -733,7 +856,7 @@ export default function Printers3DPage() {
             <button
               onClick={handleDetect}
               disabled={detecting}
-              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+              className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
               style={{ color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             >
               {detecting ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
@@ -741,12 +864,27 @@ export default function Printers3DPage() {
             </button>
             <button
               onClick={() => { resetForm(); setShowAddModal(true) }}
-              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+              className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
               style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
             >
               <Plus size={12} /> Agregar
             </button>
+            <button
+              onClick={handleAddSection}
+              className="flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium"
+              style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+              title="Nueva seccion"
+            >
+              <FolderPlus size={12} />
+            </button>
           </div>
+          <button
+            onClick={() => setShowCostCalc(true)}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+            style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+          >
+            <Calculator size={12} /> Calculadora de costos
+          </button>
         </div>
 
         {/* Detected banner */}
@@ -759,72 +897,247 @@ export default function Printers3DPage() {
                 <span className="text-[10px] font-semibold" style={{ color: 'var(--accent)' }}>{newDetected.length} detectada{newDetected.length !== 1 ? 's' : ''}</span>
                 <button onClick={() => setDetected([])} style={{ color: 'var(--text-secondary)' }}><X size={12} /></button>
               </div>
-              {newDetected.map((d, i) => (
-                <button key={i} onClick={() => fillFromDetected(d)} className="w-full text-left px-2 py-1.5 rounded-lg text-xs hover:opacity-80"
-                  style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--border)' }}>
-                  <span className="font-mono">{d.ip}</span>
-                  <span className="ml-1.5 text-[10px]" style={{ color: 'var(--accent)' }}>{d.printer_type}</span>
-                </button>
-              ))}
+              {newDetected.map((d, i) => {
+                const homeKey = `${d.ip}:${d.port}`
+                const isHoming = testingHome === homeKey
+                return (
+                  <div key={i} className="flex items-center gap-1 rounded-lg text-xs"
+                    style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--border)' }}>
+                    <button onClick={() => fillFromDetected(d)} className="flex-1 text-left px-2 py-1.5 hover:opacity-80">
+                      <span className="font-mono">{d.ip}</span>
+                      <span className="ml-1.5 text-[10px]" style={{ color: 'var(--accent)' }}>{d.printer_type}</span>
+                      {d.name && <span className="ml-1 text-[10px]" style={{ color: 'var(--text-secondary)' }}>{d.name}</span>}
+                    </button>
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation()
+                        setTestingHome(homeKey)
+                        try {
+                          await testHome3D(d.ip, d.port, d.printer_type)
+                        } catch (err) {
+                          console.error('Error test home:', err)
+                        } finally {
+                          setTestingHome(null)
+                        }
+                      }}
+                      disabled={isHoming}
+                      className="px-2 py-1.5 rounded-r-lg hover:opacity-80 shrink-0"
+                      style={{ color: 'var(--accent)', borderLeft: '1px solid var(--border)' }}
+                      title="Enviar Home para identificar"
+                    >
+                      {isHoming ? <Loader2 size={12} className="animate-spin" /> : <Home size={12} />}
+                    </button>
+                  </div>
+                )
+              })}
             </div>
           )
         })()}
 
-        {/* Printer list */}
+        {/* Printer list grouped by sections */}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin" style={{ color: 'var(--accent)' }} /></div>
-          ) : printers.length === 0 ? (
+          ) : printers.length === 0 && sections.length === 0 ? (
             <div className="text-center py-8 px-4">
               <Box size={28} className="mx-auto mb-2" style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
               <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Sin impresoras</p>
             </div>
-          ) : printers.map(printer => {
-            const status = statuses[printer.id]
-            const isOnline = status?.online ?? false
-            const job = status?.current_job
-            const isPrinting = job && job.state.toLowerCase().includes('print')
-            const isPaused = job && job.state.toLowerCase().includes('paus')
-            const isSelected = selectedPrinterId === printer.id
-            return (
-              <button
-                key={printer.id}
-                onClick={() => setSelectedPrinterId(printer.id)}
-                className="w-full text-left p-3 transition-all duration-150 hover:opacity-90"
-                style={{
-                  backgroundColor: isSelected ? 'var(--accent-alpha)' : 'transparent',
-                  borderBottom: '1px solid var(--border)',
-                  borderLeft: isSelected ? '3px solid var(--accent)' : '3px solid transparent',
-                }}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: isOnline ? 'var(--success)' : 'var(--danger)' }} />
-                  <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{printer.name}</span>
-                </div>
-                {isOnline && job && (isPrinting || isPaused) ? (
-                  <div className="ml-4">
-                    <div className="flex items-center justify-between text-[10px] mb-0.5">
-                      <span className="truncate" style={{ color: isPaused ? 'var(--warning)' : 'var(--accent)' }}>
-                        {isPaused ? 'Pausada' : 'Imprimiendo'}
+          ) : (() => {
+            const sortedSections = [...sections].sort((a, b) => a.order - b.order)
+            const unsectioned = getPrintersForSection(null)
+            const allGroups: { section: Printer3DSection | null; printers: Printer3DConfig[] }[] = [
+              ...sortedSections.map(s => ({ section: s, printers: getPrintersForSection(s.id) })),
+              ...(unsectioned.length > 0 || sortedSections.length > 0 ? [{ section: null, printers: unsectioned }] : []),
+            ]
+
+            function renderPrinterItem(printer: Printer3DConfig, sectionId: string | null) {
+              const status = statuses[printer.id]
+              const isOnline = status?.online ?? false
+              const temps = status?.temperatures
+              const job = status?.current_job
+              const isPrinting = job && job.state.toLowerCase().includes('print')
+              const isPaused = job && job.state.toLowerCase().includes('paus')
+              const isSelected = selectedPrinterId === printer.id
+              const sectionPrinters = getPrintersForSection(sectionId)
+              const idx = sectionPrinters.findIndex(p => p.id === printer.id)
+              return (
+                <div
+                  key={printer.id}
+                  className="group relative"
+                  style={{ borderBottom: '1px solid var(--border)' }}
+                >
+                  <button
+                    onClick={() => setSelectedPrinterId(printer.id)}
+                    className="w-full text-left p-3 pr-8 transition-all duration-150 hover:opacity-90"
+                    style={{
+                      backgroundColor: isSelected ? 'var(--accent-alpha)' : 'transparent',
+                      borderLeft: isSelected ? '3px solid var(--accent)' : '3px solid transparent',
+                    }}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: isOnline ? 'var(--success)' : 'var(--danger)' }} />
+                      <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{printer.name}</span>
+                    </div>
+                    {isOnline && temps && (
+                      <div className="flex items-center gap-2 ml-4 text-[10px] mb-0.5" style={{ color: 'var(--text-secondary)' }}>
+                        <span title="Hotend">
+                          <Thermometer size={9} className="inline mr-0.5" style={{ color: 'var(--danger)' }} />
+                          {temps.hotend_actual.toFixed(0)}°
+                        </span>
+                        <span title="Cama">
+                          <Thermometer size={9} className="inline mr-0.5" style={{ color: 'var(--warning)' }} />
+                          {temps.bed_actual.toFixed(0)}°
+                        </span>
+                      </div>
+                    )}
+                    {isOnline && job && (isPrinting || isPaused) ? (
+                      <div className="ml-4">
+                        <div className="flex items-center justify-between text-[10px] mb-0.5">
+                          <span className="truncate" style={{ color: isPaused ? 'var(--warning)' : 'var(--accent)' }}>
+                            {isPaused ? 'Pausada' : 'Imprimiendo'}
+                          </span>
+                          <span className="font-mono font-bold" style={{ color: 'var(--text-primary)' }}>{job.progress.toFixed(0)}%</span>
+                        </div>
+                        <div className="w-full h-1 rounded-full" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${job.progress}%`, backgroundColor: isPaused ? 'var(--warning)' : 'var(--accent)' }} />
+                        </div>
+                        <div className="flex justify-between text-[9px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                          <span className="truncate mr-2">{job.file_name}</span>
+                          {job.time_remaining != null && <span className="shrink-0">{formatTime(job.time_remaining)}</span>}
+                        </div>
+                      </div>
+                    ) : (
+                      <span className="text-[10px] ml-4" style={{ color: isOnline ? 'var(--success)' : 'var(--text-secondary)' }}>
+                        {isOnline ? 'Libre' : 'Desconectada'}
                       </span>
-                      <span className="font-mono font-bold" style={{ color: 'var(--text-primary)' }}>{job.progress.toFixed(0)}%</span>
-                    </div>
-                    <div className="w-full h-1 rounded-full" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
-                      <div className="h-full rounded-full transition-all duration-500" style={{ width: `${job.progress}%`, backgroundColor: isPaused ? 'var(--warning)' : 'var(--accent)' }} />
-                    </div>
-                    <div className="flex justify-between text-[9px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                      <span className="truncate mr-2">{job.file_name}</span>
-                      {job.time_remaining != null && <span className="shrink-0">{formatTime(job.time_remaining)}</span>}
-                    </div>
+                    )}
+                  </button>
+                  {/* Move controls on hover */}
+                  <div className="absolute right-1 top-1 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {idx > 0 && (
+                      <button onClick={(e) => { e.stopPropagation(); movePrinter(printer.id, 'up') }}
+                        className="p-0.5 rounded hover:opacity-80" style={{ color: 'var(--text-secondary)' }} title="Subir">
+                        <ArrowUp size={11} />
+                      </button>
+                    )}
+                    {idx < sectionPrinters.length - 1 && (
+                      <button onClick={(e) => { e.stopPropagation(); movePrinter(printer.id, 'down') }}
+                        className="p-0.5 rounded hover:opacity-80" style={{ color: 'var(--text-secondary)' }} title="Bajar">
+                        <ArrowDown size={11} />
+                      </button>
+                    )}
+                    {/* Move to section dropdown */}
+                    {(sections.length > 0 || sectionId !== null) && (
+                      <div className="relative group/move">
+                        <button className="p-0.5 rounded hover:opacity-80" style={{ color: 'var(--text-secondary)' }} title="Mover a seccion">
+                          <Move size={11} />
+                        </button>
+                        <div className="absolute right-full top-0 mr-1 hidden group-hover/move:block z-50"
+                          style={{ minWidth: 120 }}>
+                          <div className="rounded-lg py-1 shadow-lg"
+                            style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                            {sectionId !== null && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); movePrinterToSection(printer.id, null) }}
+                                className="w-full text-left px-3 py-1.5 text-[10px] hover:opacity-80"
+                                style={{ color: 'var(--text-primary)' }}
+                              >
+                                Sin seccion
+                              </button>
+                            )}
+                            {sections.filter(s => s.id !== sectionId).map(s => (
+                              <button
+                                key={s.id}
+                                onClick={(e) => { e.stopPropagation(); movePrinterToSection(printer.id, s.id) }}
+                                className="w-full text-left px-3 py-1.5 text-[10px] hover:opacity-80"
+                                style={{ color: 'var(--text-primary)' }}
+                              >
+                                {s.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <span className="text-[10px] ml-4" style={{ color: isOnline ? 'var(--success)' : 'var(--text-secondary)' }}>
-                    {isOnline ? 'Libre' : 'Desconectada'}
-                  </span>
-                )}
-              </button>
+                </div>
+              )
+            }
+
+            return (
+              <>
+                {allGroups.map(({ section, printers: groupPrinters }) => {
+                  if (section === null && sortedSections.length === 0) {
+                    // Sin secciones: lista plana
+                    return groupPrinters.map(p => renderPrinterItem(p, null))
+                  }
+                  const isCollapsed = section ? collapsedSections.has(section.id) : collapsedSections.has('__unsectioned__')
+                  const collapseKey = section?.id || '__unsectioned__'
+                  return (
+                    <div key={collapseKey}>
+                      {/* Section header */}
+                      <div
+                        className="flex items-center gap-1 px-2 py-1.5 group/sec"
+                        style={{ backgroundColor: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border)' }}
+                      >
+                        <button
+                          onClick={() => toggleSection(collapseKey)}
+                          className="flex items-center gap-1 flex-1 min-w-0"
+                        >
+                          {isCollapsed ? <ChevronRight size={12} style={{ color: 'var(--text-secondary)' }} /> : <ChevronDown size={12} style={{ color: 'var(--text-secondary)' }} />}
+                          {editingSectionId === section?.id ? (
+                            <input
+                              autoFocus
+                              value={editingSectionName}
+                              onChange={(e) => setEditingSectionName(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSection(section!.id); if (e.key === 'Escape') setEditingSectionId(null) }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex-1 px-1 py-0 text-[11px] font-semibold uppercase tracking-wider rounded outline-none"
+                              style={{ backgroundColor: 'var(--input-bg)', color: 'var(--accent)', border: '1px solid var(--accent)', maxWidth: 130 }}
+                            />
+                          ) : (
+                            <span className="text-[11px] font-semibold uppercase tracking-wider truncate" style={{ color: 'var(--accent)' }}>
+                              {section?.name || 'Sin seccion'}
+                            </span>
+                          )}
+                          <span className="text-[10px] shrink-0" style={{ color: 'var(--text-secondary)' }}>({groupPrinters.length})</span>
+                        </button>
+                        {section && (
+                          <div className="flex items-center gap-0.5 opacity-0 group-hover/sec:opacity-100 transition-opacity">
+                            {editingSectionId === section.id ? (
+                              <button onClick={() => handleSaveSection(section.id)} className="p-0.5 rounded hover:opacity-80" style={{ color: 'var(--success)' }}>
+                                <Check size={11} />
+                              </button>
+                            ) : (
+                              <button onClick={(e) => { e.stopPropagation(); setEditingSectionId(section.id); setEditingSectionName(section.name) }}
+                                className="p-0.5 rounded hover:opacity-80" style={{ color: 'var(--text-secondary)' }} title="Renombrar">
+                                <Pencil size={11} />
+                              </button>
+                            )}
+                            <button onClick={(e) => { e.stopPropagation(); moveSectionOrder(section.id, 'up') }}
+                              className="p-0.5 rounded hover:opacity-80" style={{ color: 'var(--text-secondary)' }} title="Subir seccion">
+                              <ArrowUp size={11} />
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); moveSectionOrder(section.id, 'down') }}
+                              className="p-0.5 rounded hover:opacity-80" style={{ color: 'var(--text-secondary)' }} title="Bajar seccion">
+                              <ArrowDown size={11} />
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); handleDeleteSection(section.id) }}
+                              className="p-0.5 rounded hover:opacity-80" style={{ color: 'var(--danger)' }} title="Eliminar seccion">
+                              <Trash2 size={11} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      {/* Printers in section */}
+                      {!isCollapsed && groupPrinters.map(p => renderPrinterItem(p, section?.id || null))}
+                    </div>
+                  )
+                })}
+              </>
             )
-          })}
+          })()}
         </div>
       </div>
 
@@ -1377,10 +1690,6 @@ export default function Printers3DPage() {
                 )}
               </div>
 
-            {/* Cost Calculator */}
-            <div className="mt-6">
-              <CostCalculator />
-            </div>
           </>
         )
       })()}
@@ -1483,6 +1792,48 @@ export default function Printers3DPage() {
                   style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
                 />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Consumo (W)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={formPowerWatts}
+                    onChange={(e) => setFormPowerWatts(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                    placeholder="Ej: 350"
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none font-mono"
+                    style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>$/kWh</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={formElectricityCost}
+                    onChange={(e) => setFormElectricityCost(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                    placeholder="Ej: 0.15"
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none font-mono"
+                    style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                  />
+                </div>
+              </div>
+              {sections.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Seccion (opcional)</label>
+                  <select
+                    value={formSectionId || ''}
+                    onChange={(e) => setFormSectionId(e.target.value || null)}
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
+                    style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                  >
+                    <option value="">Sin seccion</option>
+                    {sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-end gap-3 mt-6">
@@ -1504,6 +1855,8 @@ export default function Printers3DPage() {
           </div>
         </div>
       )}
+
+      {showCostCalc && <CostCalculatorModal printers={printers} onClose={() => setShowCostCalc(false)} />}
     </>
   )
 }

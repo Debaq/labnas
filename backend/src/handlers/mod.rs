@@ -12,3 +12,4 @@ pub mod tasks;
 pub mod terminal;
 pub mod inventory;
 pub mod portfolio;
+pub mod reports;

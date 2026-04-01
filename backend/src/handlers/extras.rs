@@ -5,10 +5,10 @@ use axum::{
     Json,
 };
 use chrono::Utc;
+use rusqlite::params;
 use serde::Deserialize;
 use std::time::Instant;
 
-use crate::config::save_config;
 use crate::models::notes::Note;
 use crate::state::AppState;
 
@@ -263,9 +263,45 @@ pub struct UpdateNoteRequest {
     pub is_public: Option<bool>,
 }
 
-pub async fn list_notes(State(state): State<AppState>) -> Json<Vec<Note>> {
-    let config = state.config.lock().await;
-    Json(config.notes.clone())
+pub async fn list_notes(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<Note>>, (StatusCode, String)> {
+    let notes = crate::db::db_op(&state.db, |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, title, content, created_by, updated_by, shared_with, is_public, created_at, updated_at
+             FROM notes"
+        ).map_err(|e| e.to_string())?;
+
+        let rows = stmt.query_map([], |row| {
+            let shared_str: String = row.get(5)?;
+            let shared_with: Vec<String> = serde_json::from_str(&shared_str).unwrap_or_default();
+            let created_str: String = row.get(7)?;
+            let updated_str: String = row.get(8)?;
+            Ok(Note {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                content: row.get(2)?,
+                created_by: row.get(3)?,
+                updated_by: row.get(4)?,
+                shared_with,
+                is_public: row.get(6)?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&created_str)
+                    .map(|d| d.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now()),
+                updated_at: chrono::DateTime::parse_from_rfc3339(&updated_str)
+                    .map(|d| d.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now()),
+            })
+        }).map_err(|e| e.to_string())?;
+
+        let mut notes = Vec::new();
+        for row in rows {
+            notes.push(row.map_err(|e| e.to_string())?);
+        }
+        Ok(notes)
+    }).await?;
+
+    Ok(Json(notes))
 }
 
 pub async fn create_note(
@@ -291,28 +327,52 @@ pub async fn create_note(
         updated_at: now,
     };
 
-    let mut config = state.config.lock().await;
-    config.notes.push(note.clone());
+    let note_clone = note.clone();
+    crate::db::db_op(&state.db, move |conn| {
+        conn.execute(
+            "INSERT INTO notes (id, title, content, created_by, updated_by, shared_with, is_public, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                &note_clone.id, &note_clone.title, &note_clone.content,
+                &note_clone.created_by, &note_clone.updated_by,
+                serde_json::to_string(&note_clone.shared_with).unwrap_or_default(),
+                note_clone.is_public,
+                note_clone.created_at.to_rfc3339(), note_clone.updated_at.to_rfc3339(),
+            ],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }).await?;
 
     // Notificar a usuarios compartidos por Telegram
-    let token = config.notifications.bot_token.clone();
-    let chats = config.notifications.telegram_chats.clone();
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    drop(config);
-
     if !req.shared_with.is_empty() {
-        if let Some(token) = &token {
+        // Read bot_token and chats from DB
+        let tg_data = crate::db::db_op(&state.db, |conn| {
+            let token: Option<String> = conn.query_row(
+                "SELECT bot_token FROM notification_config WHERE id = 1",
+                [],
+                |row| row.get(0),
+            ).ok();
+
+            let mut stmt = conn.prepare("SELECT chat_id, name, linked_web_user FROM telegram_chats")
+                .map_err(|e| e.to_string())?;
+            let chats: Vec<(i64, String, Option<String>)> = stmt.query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            }).map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+
+            Ok((token, chats))
+        }).await;
+
+        if let Ok((Some(token), chats)) = tg_data {
             let msg = format!(
-                "📝 *Nota compartida*\n\n*{}*\nPor: {}",
+                "\u{1f4dd} *Nota compartida*\n\n*{}*\nPor: {}",
                 note.title, username
             );
-            for chat in &chats {
+            for (chat_id, name, linked_web_user) in &chats {
                 let is_target = req.shared_with.iter().any(|u| {
-                    u.to_lowercase() == chat.name.to_lowercase()
-                        || chat
-                            .linked_web_user
+                    u.to_lowercase() == name.to_lowercase()
+                        || linked_web_user
                             .as_ref()
                             .map(|w| w.to_lowercase() == u.to_lowercase())
                             .unwrap_or(false)
@@ -320,8 +380,8 @@ pub async fn create_note(
                 if is_target {
                     let _ = crate::handlers::notifications::send_tg_public(
                         &state.http_client,
-                        token,
-                        chat.chat_id,
+                        &token,
+                        *chat_id,
                         &msg,
                     )
                     .await;
@@ -345,23 +405,52 @@ pub async fn update_note(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let mut config = state.config.lock().await;
-    let note = config
-        .notes
-        .iter_mut()
-        .find(|n| n.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Nota no encontrada".to_string()))?;
+    // Read current note from DB
+    let id_clone = id.clone();
+    let current_note = crate::db::db_op_status(&state.db, move |conn| {
+        conn.query_row(
+            "SELECT id, title, content, created_by, updated_by, shared_with, is_public, created_at, updated_at
+             FROM notes WHERE id = ?1",
+            params![&id_clone],
+            |row| {
+                let shared_str: String = row.get(5)?;
+                let shared_with: Vec<String> = serde_json::from_str(&shared_str).unwrap_or_default();
+                let created_str: String = row.get(7)?;
+                let updated_str: String = row.get(8)?;
+                Ok(Note {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    content: row.get(2)?,
+                    created_by: row.get(3)?,
+                    updated_by: row.get(4)?,
+                    shared_with,
+                    is_public: row.get(6)?,
+                    created_at: chrono::DateTime::parse_from_rfc3339(&created_str)
+                        .map(|d| d.with_timezone(&Utc))
+                        .unwrap_or_else(|_| Utc::now()),
+                    updated_at: chrono::DateTime::parse_from_rfc3339(&updated_str)
+                        .map(|d| d.with_timezone(&Utc))
+                        .unwrap_or_else(|_| Utc::now()),
+                })
+            },
+        ).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => (StatusCode::NOT_FOUND, "Nota no encontrada".to_string()),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        })
+    }).await?;
 
+    // Build updated note
+    let mut updated = current_note;
     if let Some(title) = req.title {
-        note.title = title;
+        updated.title = title;
     }
     if let Some(content) = req.content {
-        note.content = content;
+        updated.content = content;
     }
 
     // Detectar nuevos usuarios compartidos para notificar
     let old_shared: std::collections::HashSet<String> =
-        note.shared_with.iter().map(|s| s.to_lowercase()).collect();
+        updated.shared_with.iter().map(|s| s.to_lowercase()).collect();
     let mut new_users: Vec<String> = Vec::new();
 
     if let Some(shared_with) = req.shared_with {
@@ -370,34 +459,60 @@ pub async fn update_note(
                 new_users.push(u.clone());
             }
         }
-        note.shared_with = shared_with;
+        updated.shared_with = shared_with;
     }
     if let Some(is_public) = req.is_public {
-        note.is_public = is_public;
+        updated.is_public = is_public;
     }
-    note.updated_by = username.clone();
-    note.updated_at = Utc::now();
+    updated.updated_by = username.clone();
+    updated.updated_at = Utc::now();
 
-    let updated = note.clone();
-    let token = config.notifications.bot_token.clone();
-    let chats = config.notifications.telegram_chats.clone();
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    drop(config);
+    // Save to DB
+    let note_for_db = updated.clone();
+    let id_clone2 = id.clone();
+    crate::db::db_op(&state.db, move |conn| {
+        conn.execute(
+            "UPDATE notes SET title = ?1, content = ?2, updated_by = ?3, shared_with = ?4, is_public = ?5, updated_at = ?6
+             WHERE id = ?7",
+            params![
+                &note_for_db.title, &note_for_db.content, &note_for_db.updated_by,
+                serde_json::to_string(&note_for_db.shared_with).unwrap_or_default(),
+                note_for_db.is_public, note_for_db.updated_at.to_rfc3339(),
+                &id_clone2,
+            ],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }).await?;
 
     // Notificar nuevos compartidos
     if !new_users.is_empty() {
-        if let Some(token) = &token {
+        let tg_data = crate::db::db_op(&state.db, |conn| {
+            let token: Option<String> = conn.query_row(
+                "SELECT bot_token FROM notification_config WHERE id = 1",
+                [],
+                |row| row.get(0),
+            ).ok();
+
+            let mut stmt = conn.prepare("SELECT chat_id, name, linked_web_user FROM telegram_chats")
+                .map_err(|e| e.to_string())?;
+            let chats: Vec<(i64, String, Option<String>)> = stmt.query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            }).map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+
+            Ok((token, chats))
+        }).await;
+
+        if let Ok((Some(token), chats)) = tg_data {
             let msg = format!(
-                "📝 *Nota compartida*\n\n*{}*\nPor: {}",
+                "\u{1f4dd} *Nota compartida*\n\n*{}*\nPor: {}",
                 updated.title, username
             );
-            for chat in &chats {
+            for (chat_id, name, linked_web_user) in &chats {
                 let is_target = new_users.iter().any(|u| {
-                    u.to_lowercase() == chat.name.to_lowercase()
-                        || chat
-                            .linked_web_user
+                    u.to_lowercase() == name.to_lowercase()
+                        || linked_web_user
                             .as_ref()
                             .map(|w| w.to_lowercase() == u.to_lowercase())
                             .unwrap_or(false)
@@ -405,8 +520,8 @@ pub async fn update_note(
                 if is_target {
                     let _ = crate::handlers::notifications::send_tg_public(
                         &state.http_client,
-                        token,
-                        chat.chat_id,
+                        &token,
+                        *chat_id,
                         &msg,
                     )
                     .await;
@@ -422,14 +537,17 @@ pub async fn delete_note(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    let before = config.notes.len();
-    config.notes.retain(|n| n.id != id);
-    if config.notes.len() == before {
-        return Err((StatusCode::NOT_FOUND, "Nota no encontrada".to_string()));
-    }
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    crate::db::db_op_status(&state.db, move |conn| {
+        let rows = conn.execute(
+            "DELETE FROM notes WHERE id = ?1",
+            params![&id],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        if rows == 0 {
+            return Err((StatusCode::NOT_FOUND, "Nota no encontrada".to_string()));
+        }
+        Ok(())
+    }).await?;
+
     Ok(StatusCode::NO_CONTENT)
 }

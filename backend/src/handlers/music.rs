@@ -298,13 +298,18 @@ async fn spawn_player(state: &AppState, video_id: &str) {
         format!("--input-ipc-server={}", MPV_SOCKET),
     ];
 
-    // Args extra de mpv desde la config del admin
+    // Args extra de mpv desde la DB
     {
-        let cfg = state.config.lock().await;
-        for arg in &cfg.mpv_extra_args {
-            let trimmed = arg.trim();
-            if !trimmed.is_empty() {
-                args.push(trimmed.to_string());
+        if let Ok(conn) = crate::db::get_conn(&state.db) {
+            if let Some(args_json) = crate::db::get_setting(&conn, "mpv_extra_args") {
+                if let Ok(extra_args) = serde_json::from_str::<Vec<String>>(&args_json) {
+                    for arg in &extra_args {
+                        let trimmed = arg.trim();
+                        if !trimmed.is_empty() {
+                            args.push(trimmed.to_string());
+                        }
+                    }
+                }
             }
         }
     }
@@ -819,20 +824,26 @@ pub async fn toggle_repeat(
 /// GET /api/music/mpv-args - Obtener args extra de mpv
 pub async fn get_mpv_args(
     State(state): State<AppState>,
-) -> Json<Vec<String>> {
-    let cfg = state.config.lock().await;
-    Json(cfg.mpv_extra_args.clone())
+) -> Result<Json<Vec<String>>, (StatusCode, String)> {
+    let args = crate::db::db_op(&state.db, |conn| {
+        let json = crate::db::get_setting(conn, "mpv_extra_args").unwrap_or_else(|| "[]".to_string());
+        let parsed: Vec<String> = serde_json::from_str(&json).unwrap_or_default();
+        Ok(parsed)
+    }).await?;
+    Ok(Json(args))
 }
 
 /// POST /api/music/mpv-args - Guardar args extra de mpv
 pub async fn set_mpv_args(
     State(state): State<AppState>,
     Json(args): Json<Vec<String>>,
-) -> Json<Vec<String>> {
-    let mut cfg = state.config.lock().await;
-    cfg.mpv_extra_args = args.clone();
-    let _ = crate::config::save_config(&cfg).await;
-    Json(args)
+) -> Result<Json<Vec<String>>, (StatusCode, String)> {
+    let args_clone = args.clone();
+    crate::db::db_op(&state.db, move |conn| {
+        let json = serde_json::to_string(&args_clone).unwrap_or_else(|_| "[]".to_string());
+        crate::db::set_setting(conn, "mpv_extra_args", &json)
+    }).await?;
+    Ok(Json(args))
 }
 
 /// POST /api/music/video - Activar/desactivar video + pantalla
@@ -1160,11 +1171,10 @@ pub async fn set_lastfm_key(
         return Err((StatusCode::BAD_REQUEST, "API key vacia".to_string()));
     }
 
-    let mut config = state.config.lock().await;
-    config.lastfm_api_key = Some(req.key.trim().to_string());
-    crate::config::save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let key = req.key.trim().to_string();
+    crate::db::db_op(&state.db, move |conn| {
+        crate::db::set_setting(conn, "lastfm_api_key", &key)
+    }).await?;
 
     Ok((StatusCode::OK, "API key de Last.fm guardada".to_string()))
 }
@@ -1178,15 +1188,10 @@ pub async fn radio(
     use std::time::Duration;
 
     // 1. Obtener API key
-    let config = state.config.lock().await;
-    let api_key = config
-        .lastfm_api_key
-        .clone()
-        .ok_or((
-            StatusCode::BAD_REQUEST,
-            "API key de Last.fm no configurada. Configurala en Ajustes.".to_string(),
-        ))?;
-    drop(config);
+    let api_key = crate::db::db_op(&state.db, |conn| {
+        crate::db::get_setting(conn, "lastfm_api_key")
+            .ok_or("API key de Last.fm no configurada. Configurala en Ajustes.".to_string())
+    }).await.map_err(|(_status, msg)| (StatusCode::BAD_REQUEST, msg))?;
 
     // 2. Limpiar titulo y separar artista del titulo (YouTube pone "Artista - Cancion")
     let clean_artist = clean_track_title(&req.artist);
@@ -1336,15 +1341,10 @@ pub async fn lucky(
 ) -> Result<Json<MusicState>, (StatusCode, String)> {
     use std::time::Duration;
 
-    let config = state.config.lock().await;
-    let api_key = config
-        .lastfm_api_key
-        .clone()
-        .ok_or((
-            StatusCode::BAD_REQUEST,
-            "API key de Last.fm no configurada. Configurala en Ajustes.".to_string(),
-        ))?;
-    drop(config);
+    let api_key = crate::db::db_op(&state.db, |conn| {
+        crate::db::get_setting(conn, "lastfm_api_key")
+            .ok_or("API key de Last.fm no configurada. Configurala en Ajustes.".to_string())
+    }).await.map_err(|(_status, msg)| (StatusCode::BAD_REQUEST, msg))?;
 
     // Limpiar titulo, separar artista, y pedir muchas similares para tener variedad
     let clean_artist = clean_track_title(&req.artist);
@@ -1526,10 +1526,10 @@ pub async fn music_monitor_loop(state: AppState) {
 }
 
 // ══════════════════════════════════════════
-// Playlists (persisted in config)
+// Playlists (persisted in DB)
 // ══════════════════════════════════════════
 
-use crate::config::save_config;
+use rusqlite::params;
 use axum::http::HeaderMap;
 
 async fn get_session_username(state: &AppState, headers: &HeaderMap) -> String {
@@ -1551,10 +1551,36 @@ fn now_iso() -> String {
     chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string()
 }
 
+/// Helper para leer una fila de playlist
+fn row_to_playlist(row: &rusqlite::Row) -> rusqlite::Result<Playlist> {
+    let tracks_json: String = row.get(4)?;
+    let tracks: Vec<PlaylistTrack> = serde_json::from_str(&tracks_json).unwrap_or_default();
+    Ok(Playlist {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        description: row.get(2)?,
+        created_by: row.get(3)?,
+        tracks,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+    })
+}
+
 /// GET /api/music/playlists
-pub async fn list_playlists(State(state): State<AppState>) -> Json<Vec<Playlist>> {
-    let config = state.config.lock().await;
-    Json(config.playlists.playlists.clone())
+pub async fn list_playlists(State(state): State<AppState>) -> Result<Json<Vec<Playlist>>, (StatusCode, String)> {
+    let playlists = crate::db::db_op(&state.db, |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, created_by, tracks, created_at, updated_at FROM playlists ORDER BY created_at"
+        ).map_err(|e| format!("DB: {}", e))?;
+        let rows = stmt.query_map([], row_to_playlist)
+            .map_err(|e| format!("DB: {}", e))?;
+        let mut list = Vec::new();
+        for row in rows {
+            list.push(row.map_err(|e| format!("DB row: {}", e))?);
+        }
+        Ok(list)
+    }).await?;
+    Ok(Json(playlists))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1584,9 +1610,15 @@ pub async fn create_playlist(
         created_at: now.clone(),
         updated_at: now,
     };
-    let mut config = state.config.lock().await;
-    config.playlists.playlists.push(playlist.clone());
-    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let pl = playlist.clone();
+    crate::db::db_op(&state.db, move |conn| {
+        let tracks_json = serde_json::to_string(&pl.tracks).unwrap_or_else(|_| "[]".to_string());
+        conn.execute(
+            "INSERT INTO playlists (id, name, description, created_by, tracks, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![pl.id, pl.name, pl.description, pl.created_by, tracks_json, pl.created_at, pl.updated_at],
+        ).map_err(|e| format!("DB: {}", e))?;
+        Ok(())
+    }).await?;
     Ok(Json(playlist))
 }
 
@@ -1602,14 +1634,28 @@ pub async fn update_playlist(
     Path(id): Path<String>,
     Json(req): Json<UpdatePlaylistReq>,
 ) -> Result<Json<Playlist>, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    let pl = config.playlists.playlists.iter_mut().find(|p| p.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
-    if let Some(name) = req.name { pl.name = name; }
-    if let Some(desc) = req.description { pl.description = desc; }
-    pl.updated_at = now_iso();
-    let result = pl.clone();
-    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let now = now_iso();
+    let result = crate::db::db_op_status(&state.db, move |conn| {
+        use rusqlite::OptionalExtension;
+        let mut pl: Playlist = conn.query_row(
+            "SELECT id, name, description, created_by, tracks, created_at, updated_at FROM playlists WHERE id = ?1",
+            params![id],
+            row_to_playlist,
+        ).optional()
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
+
+        if let Some(name) = req.name { pl.name = name; }
+        if let Some(desc) = req.description { pl.description = desc; }
+        pl.updated_at = now;
+
+        conn.execute(
+            "UPDATE playlists SET name=?1, description=?2, updated_at=?3 WHERE id=?4",
+            params![pl.name, pl.description, pl.updated_at, pl.id],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+
+        Ok(pl)
+    }).await?;
     Ok(Json(result))
 }
 
@@ -1618,13 +1664,14 @@ pub async fn delete_playlist(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    let before = config.playlists.playlists.len();
-    config.playlists.playlists.retain(|p| p.id != id);
-    if config.playlists.playlists.len() == before {
-        return Err((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()));
-    }
-    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    crate::db::db_op_status(&state.db, move |conn| {
+        let changes = conn.execute("DELETE FROM playlists WHERE id = ?1", params![&id])
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+        if changes == 0 {
+            return Err((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()));
+        }
+        Ok(())
+    }).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1647,20 +1694,35 @@ pub async fn add_track_to_playlist(
     Json(req): Json<AddTrackReq>,
 ) -> Result<Json<Playlist>, (StatusCode, String)> {
     let username = get_session_username(&state, &headers).await;
-    let mut config = state.config.lock().await;
-    let pl = config.playlists.playlists.iter_mut().find(|p| p.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
-    pl.tracks.push(PlaylistTrack {
-        id: req.id,
-        title: req.title,
-        artist: req.artist,
-        thumbnail: req.thumbnail,
-        duration: req.duration,
-        added_by: username,
-    });
-    pl.updated_at = now_iso();
-    let result = pl.clone();
-    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let now = now_iso();
+    let result = crate::db::db_op_status(&state.db, move |conn| {
+        use rusqlite::OptionalExtension;
+        let mut pl: Playlist = conn.query_row(
+            "SELECT id, name, description, created_by, tracks, created_at, updated_at FROM playlists WHERE id = ?1",
+            params![id],
+            row_to_playlist,
+        ).optional()
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
+
+        pl.tracks.push(PlaylistTrack {
+            id: req.id,
+            title: req.title,
+            artist: req.artist,
+            thumbnail: req.thumbnail,
+            duration: req.duration,
+            added_by: username,
+        });
+        pl.updated_at = now;
+
+        let tracks_json = serde_json::to_string(&pl.tracks).unwrap_or_else(|_| "[]".to_string());
+        conn.execute(
+            "UPDATE playlists SET tracks=?1, updated_at=?2 WHERE id=?3",
+            params![tracks_json, pl.updated_at, pl.id],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+
+        Ok(pl)
+    }).await?;
     Ok(Json(result))
 }
 
@@ -1669,16 +1731,31 @@ pub async fn remove_track_from_playlist(
     State(state): State<AppState>,
     Path((id, index)): Path<(String, usize)>,
 ) -> Result<Json<Playlist>, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    let pl = config.playlists.playlists.iter_mut().find(|p| p.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
-    if index >= pl.tracks.len() {
-        return Err((StatusCode::BAD_REQUEST, "Indice fuera de rango".to_string()));
-    }
-    pl.tracks.remove(index);
-    pl.updated_at = now_iso();
-    let result = pl.clone();
-    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let now = now_iso();
+    let result = crate::db::db_op_status(&state.db, move |conn| {
+        use rusqlite::OptionalExtension;
+        let mut pl: Playlist = conn.query_row(
+            "SELECT id, name, description, created_by, tracks, created_at, updated_at FROM playlists WHERE id = ?1",
+            params![id],
+            row_to_playlist,
+        ).optional()
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
+
+        if index >= pl.tracks.len() {
+            return Err((StatusCode::BAD_REQUEST, "Indice fuera de rango".to_string()));
+        }
+        pl.tracks.remove(index);
+        pl.updated_at = now;
+
+        let tracks_json = serde_json::to_string(&pl.tracks).unwrap_or_else(|_| "[]".to_string());
+        conn.execute(
+            "UPDATE playlists SET tracks=?1, updated_at=?2 WHERE id=?3",
+            params![tracks_json, pl.updated_at, pl.id],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+
+        Ok(pl)
+    }).await?;
     Ok(Json(result))
 }
 
@@ -1694,17 +1771,32 @@ pub async fn move_track_in_playlist(
     Path(id): Path<String>,
     Json(req): Json<MoveTrackReq>,
 ) -> Result<Json<Playlist>, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    let pl = config.playlists.playlists.iter_mut().find(|p| p.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
-    if req.from >= pl.tracks.len() || req.to >= pl.tracks.len() {
-        return Err((StatusCode::BAD_REQUEST, "Indice fuera de rango".to_string()));
-    }
-    let track = pl.tracks.remove(req.from);
-    pl.tracks.insert(req.to, track);
-    pl.updated_at = now_iso();
-    let result = pl.clone();
-    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let now = now_iso();
+    let result = crate::db::db_op_status(&state.db, move |conn| {
+        use rusqlite::OptionalExtension;
+        let mut pl: Playlist = conn.query_row(
+            "SELECT id, name, description, created_by, tracks, created_at, updated_at FROM playlists WHERE id = ?1",
+            params![id],
+            row_to_playlist,
+        ).optional()
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
+
+        if req.from >= pl.tracks.len() || req.to >= pl.tracks.len() {
+            return Err((StatusCode::BAD_REQUEST, "Indice fuera de rango".to_string()));
+        }
+        let track = pl.tracks.remove(req.from);
+        pl.tracks.insert(req.to, track);
+        pl.updated_at = now;
+
+        let tracks_json = serde_json::to_string(&pl.tracks).unwrap_or_else(|_| "[]".to_string());
+        conn.execute(
+            "UPDATE playlists SET tracks=?1, updated_at=?2 WHERE id=?3",
+            params![tracks_json, pl.updated_at, pl.id],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+
+        Ok(pl)
+    }).await?;
     Ok(Json(result))
 }
 
@@ -1715,9 +1807,16 @@ pub async fn load_playlist(
     Path(id): Path<String>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
     let username = get_session_username(&state, &headers).await;
-    let config = state.config.lock().await;
-    let pl = config.playlists.playlists.iter().find(|p| p.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
+    let pl = crate::db::db_op_status(&state.db, move |conn| {
+        use rusqlite::OptionalExtension;
+        conn.query_row(
+            "SELECT id, name, description, created_by, tracks, created_at, updated_at FROM playlists WHERE id = ?1",
+            params![id],
+            row_to_playlist,
+        ).optional()
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))
+    }).await?;
 
     let tracks: Vec<MusicTrack> = pl.tracks.iter().map(|t| MusicTrack {
         id: t.id.clone(),
@@ -1728,7 +1827,6 @@ pub async fn load_playlist(
         added_by: Some(username.clone()),
     }).collect();
     let count = tracks.len();
-    drop(config);
 
     let mut music = state.music.lock().await;
     music.queue.extend(tracks);
@@ -1796,8 +1894,14 @@ pub async fn save_queue_as_playlist(
         updated_at: now,
     };
 
-    let mut config = state.config.lock().await;
-    config.playlists.playlists.push(playlist.clone());
-    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let pl = playlist.clone();
+    crate::db::db_op(&state.db, move |conn| {
+        let tracks_json = serde_json::to_string(&pl.tracks).unwrap_or_else(|_| "[]".to_string());
+        conn.execute(
+            "INSERT INTO playlists (id, name, description, created_by, tracks, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![pl.id, pl.name, pl.description, pl.created_by, tracks_json, pl.created_at, pl.updated_at],
+        ).map_err(|e| format!("DB: {}", e))?;
+        Ok(())
+    }).await?;
     Ok(Json(playlist))
 }

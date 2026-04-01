@@ -3,7 +3,7 @@ use crate::models::email::EmailConfig;
 use crate::models::network::KnownDevice;
 use crate::models::notes::Note;
 use crate::models::notifications::NotificationConfig;
-use crate::models::printers3d::Printer3DConfig;
+use crate::models::printers3d::{Printer3DConfig, Printer3DSection};
 use crate::handlers::music::PlaylistsConfig;
 use crate::models::inventory::InventoryConfig;
 use crate::models::portfolio::PortfolioConfig;
@@ -16,6 +16,8 @@ use std::path::PathBuf;
 pub struct LabNasConfig {
     #[serde(default)]
     pub printers3d: Vec<Printer3DConfig>,
+    #[serde(default)]
+    pub printer3d_sections: Vec<Printer3DSection>,
     #[serde(default)]
     pub notifications: NotificationConfig,
     #[serde(default)]
@@ -149,7 +151,7 @@ pub fn resolve_home() -> String {
     std::env::var("HOME").unwrap_or_else(|_| "/root".to_string())
 }
 
-fn config_path() -> PathBuf {
+pub fn config_path() -> PathBuf {
     // Override explícito
     if let Ok(p) = std::env::var("LABNAS_CONFIG") {
         return PathBuf::from(p);

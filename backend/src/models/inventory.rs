@@ -74,6 +74,7 @@ pub struct InventoryItem {
     // Custom fields
     #[serde(default)]
     pub custom_fields: HashMap<String, String>,
+    #[serde(default = "chrono::Utc::now")]
     pub created_at: DateTime<Utc>,
 }
 
@@ -98,6 +99,7 @@ pub struct PrintHistoryEntry {
     pub success: bool,
     #[serde(default)]
     pub notes: String,
+    #[serde(default = "chrono::Utc::now")]
     pub created_at: DateTime<Utc>,
 }
 

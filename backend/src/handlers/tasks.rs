@@ -4,46 +4,176 @@ use axum::{
     Json,
 };
 use chrono::Utc;
+use rusqlite::params;
+use rusqlite::OptionalExtension;
 use serde::Deserialize;
 
 use std::collections::HashMap;
 
-use crate::config::save_config;
+use crate::db::db_op;
 use crate::models::notifications::UserRole;
 use crate::models::tasks::*;
 use crate::state::AppState;
 
+// ---- helpers para leer Task / Project / CalendarEvent / EventCategory desde rows ----
+
+fn row_to_task(row: &rusqlite::Row) -> Result<Task, rusqlite::Error> {
+    let status_str: String = row.get("status")?;
+    let status = match status_str.as_str() {
+        "enprogreso" => TaskStatus::EnProgreso,
+        "completada" => TaskStatus::Completada,
+        "rechazada" => TaskStatus::Rechazada,
+        _ => TaskStatus::Pendiente,
+    };
+    let assigned_to: String = row.get("assigned_to")?;
+    let confirmed_by: String = row.get("confirmed_by")?;
+    let rejected_by: String = row.get("rejected_by")?;
+    let created_at_str: String = row.get("created_at")?;
+    let last_reminder_str: Option<String> = row.get("last_reminder")?;
+
+    Ok(Task {
+        id: row.get("id")?,
+        project_id: row.get("project_id")?,
+        title: row.get("title")?,
+        description: row.get("description")?,
+        assigned_to: serde_json::from_str(&assigned_to).unwrap_or_default(),
+        status,
+        created_by: row.get("created_by")?,
+        due_date: row.get("due_date")?,
+        due_time: row.get("due_time")?,
+        requires_confirmation: row.get::<_, i32>("requires_confirmation")? != 0,
+        insistent: row.get::<_, i32>("insistent")? != 0,
+        reminder_minutes: row.get::<_, u32>("reminder_minutes")?,
+        confirmed_by: serde_json::from_str(&confirmed_by).unwrap_or_default(),
+        rejected_by: serde_json::from_str(&rejected_by).unwrap_or_default(),
+        created_at: chrono::DateTime::parse_from_rfc3339(&created_at_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now()),
+        last_reminder: last_reminder_str.and_then(|s| {
+            chrono::DateTime::parse_from_rfc3339(&s)
+                .map(|dt| dt.with_timezone(&Utc))
+                .ok()
+        }),
+    })
+}
+
+fn row_to_project(row: &rusqlite::Row) -> Result<Project, rusqlite::Error> {
+    let members_str: String = row.get("members")?;
+    let tags_str: String = row.get("member_tags")?;
+    let created_at_str: String = row.get("created_at")?;
+
+    Ok(Project {
+        id: row.get("id")?,
+        name: row.get("name")?,
+        description: row.get("description")?,
+        created_by: row.get("created_by")?,
+        members: serde_json::from_str(&members_str).unwrap_or_default(),
+        member_tags: serde_json::from_str(&tags_str).unwrap_or_default(),
+        created_at: chrono::DateTime::parse_from_rfc3339(&created_at_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now()),
+    })
+}
+
+fn row_to_event(row: &rusqlite::Row) -> Result<CalendarEvent, rusqlite::Error> {
+    let invitees_str: String = row.get("invitees")?;
+    let accepted_str: String = row.get("accepted")?;
+    let declined_str: String = row.get("declined")?;
+    let created_at_str: String = row.get("created_at")?;
+
+    Ok(CalendarEvent {
+        id: row.get("id")?,
+        title: row.get("title")?,
+        description: row.get("description")?,
+        date: row.get("date")?,
+        time: row.get("time")?,
+        end_time: row.get("end_time")?,
+        location: row.get("location")?,
+        created_by: row.get("created_by")?,
+        invitees: serde_json::from_str(&invitees_str).unwrap_or_default(),
+        accepted: serde_json::from_str(&accepted_str).unwrap_or_default(),
+        declined: serde_json::from_str(&declined_str).unwrap_or_default(),
+        remind_before_min: row.get::<_, u32>("remind_before_min")?,
+        reminded: row.get::<_, i32>("reminded")? != 0,
+        notify_telegram: row.get::<_, i32>("notify_telegram")? != 0,
+        recurrence: row.get("recurrence")?,
+        recurrence_end: row.get("recurrence_end")?,
+        created_at: chrono::DateTime::parse_from_rfc3339(&created_at_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now()),
+        category: row.get("category")?,
+    })
+}
+
+fn task_status_str(s: &TaskStatus) -> &'static str {
+    match s {
+        TaskStatus::Pendiente => "pendiente",
+        TaskStatus::EnProgreso => "enprogreso",
+        TaskStatus::Completada => "completada",
+        TaskStatus::Rechazada => "rechazada",
+    }
+}
+
 // ---- Notificaciones Telegram para tareas ----
 
 async fn notify_task_assigned(state: &AppState, task: &Task) {
-    let config = state.config.lock().await;
-    let token = match &config.notifications.bot_token {
-        Some(t) => t.clone(),
-        None => return,
+    let pool = state.db.clone();
+    let (token, chats) = match crate::db::db_op(&pool, |conn| {
+        let token: Option<String> = conn
+            .query_row(
+                "SELECT bot_token FROM notification_config WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| format!("bot_token: {}", e))?
+            .flatten();
+
+        let mut stmt = conn
+            .prepare("SELECT chat_id, name, username, role, linked_web_user FROM telegram_chats")
+            .map_err(|e| format!("telegram_chats: {}", e))?;
+        let chats: Vec<(i64, String, Option<String>, String, Option<String>)> = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })
+            .map_err(|e| format!("telegram_chats query: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok((token, chats))
+    })
+    .await
+    {
+        Ok((Some(t), c)) => (t, c),
+        _ => return,
     };
-    let chats = config.notifications.telegram_chats.clone();
-    drop(config);
 
     // @all solo aplica a operadores y admins, no observadores
     let target_ids: Vec<i64> = if task.assigned_to.contains(&"all".to_string()) {
         chats
             .iter()
-            .filter(|c| c.role == UserRole::Admin || c.role == UserRole::Operador)
-            .map(|c| c.chat_id)
+            .filter(|c| c.3 == "admin" || c.3 == "operador")
+            .map(|c| c.0)
             .collect()
     } else {
         chats
             .iter()
             .filter(|c| {
                 task.assigned_to.iter().any(|a| {
-                    a.to_lowercase() == c.name.to_lowercase()
-                        || c.linked_web_user
+                    a.to_lowercase() == c.1.to_lowercase()
+                        || c.4
                             .as_ref()
                             .map(|u| u.to_lowercase() == a.to_lowercase())
                             .unwrap_or(false)
                 })
             })
-            .map(|c| c.chat_id)
+            .map(|c| c.0)
             .collect()
     };
 
@@ -72,25 +202,46 @@ async fn notify_task_assigned(state: &AppState, task: &Task) {
 }
 
 async fn notify_task_completed(state: &AppState, task: &Task, completed_by: &str) {
-    let config = state.config.lock().await;
-    let token = match &config.notifications.bot_token {
-        Some(t) => t.clone(),
-        None => return,
+    let pool = state.db.clone();
+    let (token, chats) = match crate::db::db_op(&pool, |conn| {
+        let token: Option<String> = conn
+            .query_row(
+                "SELECT bot_token FROM notification_config WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| format!("bot_token: {}", e))?
+            .flatten();
+
+        let mut stmt = conn
+            .prepare("SELECT chat_id, name, linked_web_user FROM telegram_chats")
+            .map_err(|e| format!("telegram_chats: {}", e))?;
+        let chats: Vec<(i64, String, Option<String>)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .map_err(|e| format!("telegram_chats query: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok((token, chats))
+    })
+    .await
+    {
+        Ok((Some(t), c)) => (t, c),
+        _ => return,
     };
-    let chats = config.notifications.telegram_chats.clone();
-    drop(config);
 
     // Notificar al creador
     let creator_id: Option<i64> = chats
         .iter()
         .find(|c| {
-            c.name.to_lowercase() == task.created_by.to_lowercase()
-                || c.linked_web_user
+            c.1.to_lowercase() == task.created_by.to_lowercase()
+                || c.2
                     .as_ref()
                     .map(|u| u.to_lowercase() == task.created_by.to_lowercase())
                     .unwrap_or(false)
         })
-        .map(|c| c.chat_id);
+        .map(|c| c.0);
 
     if let Some(id) = creator_id {
         let msg = format!(
@@ -120,9 +271,20 @@ fn extract_username(_state: &AppState, sessions: &std::collections::HashMap<Stri
 
 // ---- Proyectos ----
 
-pub async fn list_projects(State(state): State<AppState>) -> Json<Vec<Project>> {
-    let config = state.config.lock().await;
-    Json(config.tasks.projects.clone())
+pub async fn list_projects(State(state): State<AppState>) -> Result<Json<Vec<Project>>, (StatusCode, String)> {
+    let projects = db_op(&state.db, |conn| {
+        let mut stmt = conn
+            .prepare("SELECT id, name, description, created_by, members, member_tags, created_at FROM projects ORDER BY created_at")
+            .map_err(|e| format!("list_projects: {}", e))?;
+        let rows = stmt
+            .query_map([], |row| row_to_project(row))
+            .map_err(|e| format!("list_projects query: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect::<Vec<_>>();
+        Ok(rows)
+    })
+    .await?;
+    Ok(Json(projects))
 }
 
 #[derive(Deserialize)]
@@ -152,11 +314,17 @@ pub async fn create_project(
         created_at: Utc::now(),
     };
 
-    let mut config = state.config.lock().await;
-    config.tasks.projects.push(project.clone());
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let p = project.clone();
+    db_op(&state.db, move |conn| {
+        let members_json = serde_json::to_string(&p.members).unwrap_or_else(|_| "[]".into());
+        let tags_json = serde_json::to_string(&p.member_tags).unwrap_or_else(|_| "{}".into());
+        conn.execute(
+            "INSERT INTO projects (id, name, description, created_by, members, member_tags, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![p.id, p.name, p.description, p.created_by, members_json, tags_json, p.created_at.to_rfc3339()],
+        ).map_err(|e| format!("create_project: {}", e))?;
+        Ok(())
+    })
+    .await?;
 
     state
         .log_activity("proyecto_creado", &format!("Proyecto: {}", req.name), &username)
@@ -175,27 +343,37 @@ pub async fn delete_project(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let mut config = state.config.lock().await;
-    let project = config
-        .tasks
-        .projects
-        .iter()
-        .find(|p| p.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Proyecto no encontrado".to_string()))?;
+    let uname = username.clone();
+    let name = db_op(&state.db, move |conn| {
+        let (created_by, name): (String, String) = conn
+            .query_row(
+                "SELECT created_by, name FROM projects WHERE id = ?1",
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|_| "Proyecto no encontrado".to_string())?;
 
-    // Solo el creador o admin puede eliminar
-    if project.created_by != username && role != UserRole::Admin {
-        return Err((StatusCode::FORBIDDEN, "Sin permisos para eliminar este proyecto".to_string()));
-    }
+        // Solo el creador o admin puede eliminar
+        if created_by != uname && role != UserRole::Admin {
+            return Err("Sin permisos para eliminar este proyecto".to_string());
+        }
 
-    let name = project.name.clone();
-    config.tasks.projects.retain(|p| p.id != id);
+        conn.execute("DELETE FROM projects WHERE id = ?1", params![id])
+            .map_err(|e| format!("delete_project: {}", e))?;
 
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        Ok(name)
+    })
+    .await
+    .map_err(|(_status, msg)| {
+        if msg.contains("no encontrado") {
+            (StatusCode::NOT_FOUND, msg)
+        } else if msg.contains("permisos") {
+            (StatusCode::FORBIDDEN, msg)
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, msg)
+        }
+    })?;
 
-    drop(config);
     state
         .log_activity("proyecto_eliminado", &format!("Proyecto: {}", name), &username)
         .await;
@@ -222,37 +400,55 @@ pub async fn update_project(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let mut config = state.config.lock().await;
-    let project = config
-        .tasks
-        .projects
-        .iter_mut()
-        .find(|p| p.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Proyecto no encontrado".to_string()))?;
+    let uname = username.clone();
+    let updated = db_op(&state.db, move |conn| {
+        // Leer proyecto actual
+        let mut project = conn
+            .query_row(
+                "SELECT id, name, description, created_by, members, member_tags, created_at FROM projects WHERE id = ?1",
+                params![id],
+                |row| row_to_project(row),
+            )
+            .map_err(|_| "Proyecto no encontrado".to_string())?;
 
-    if project.created_by != username && role != UserRole::Admin {
-        return Err((StatusCode::FORBIDDEN, "Sin permisos para modificar este proyecto".to_string()));
-    }
+        if project.created_by != uname && role != UserRole::Admin {
+            return Err("Sin permisos para modificar este proyecto".to_string());
+        }
 
-    if let Some(name) = req.name {
-        project.name = name;
-    }
-    if let Some(description) = req.description {
-        project.description = description;
-    }
-    if let Some(members) = req.members {
-        project.members = members;
-    }
-    if let Some(member_tags) = req.member_tags {
-        project.member_tags = member_tags;
-    }
+        if let Some(name) = req.name {
+            project.name = name;
+        }
+        if let Some(description) = req.description {
+            project.description = description;
+        }
+        if let Some(members) = req.members {
+            project.members = members;
+        }
+        if let Some(member_tags) = req.member_tags {
+            project.member_tags = member_tags;
+        }
 
-    let updated = project.clone();
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let members_json = serde_json::to_string(&project.members).unwrap_or_else(|_| "[]".into());
+        let tags_json = serde_json::to_string(&project.member_tags).unwrap_or_else(|_| "{}".into());
+        conn.execute(
+            "UPDATE projects SET name = ?1, description = ?2, members = ?3, member_tags = ?4 WHERE id = ?5",
+            params![project.name, project.description, members_json, tags_json, project.id],
+        )
+        .map_err(|e| format!("update_project: {}", e))?;
 
-    drop(config);
+        Ok(project)
+    })
+    .await
+    .map_err(|(_status, msg)| {
+        if msg.contains("no encontrado") {
+            (StatusCode::NOT_FOUND, msg)
+        } else if msg.contains("permisos") {
+            (StatusCode::FORBIDDEN, msg)
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, msg)
+        }
+    })?;
+
     state
         .log_activity("proyecto_actualizado", &format!("Proyecto: {}", updated.name), &username)
         .await;
@@ -271,28 +467,43 @@ pub struct TasksQuery {
 pub async fn list_tasks(
     State(state): State<AppState>,
     Query(query): Query<TasksQuery>,
-) -> Json<Vec<Task>> {
-    let config = state.config.lock().await;
-    let mut tasks = config.tasks.tasks.clone();
+) -> Result<Json<Vec<Task>>, (StatusCode, String)> {
+    let tasks = db_op(&state.db, move |conn| {
+        let mut sql = "SELECT id, project_id, title, description, assigned_to, status, created_by, due_date, due_time, requires_confirmation, insistent, reminder_minutes, confirmed_by, rejected_by, created_at, last_reminder FROM tasks".to_string();
+        let mut conditions = Vec::new();
+        let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
-    if let Some(project_id) = &query.project {
-        tasks.retain(|t| t.project_id.as_deref() == Some(project_id.as_str()));
-    }
-
-    if let Some(status_str) = &query.status {
-        let target_status = match status_str.as_str() {
-            "pendiente" => Some(TaskStatus::Pendiente),
-            "enprogreso" => Some(TaskStatus::EnProgreso),
-            "completada" => Some(TaskStatus::Completada),
-            "rechazada" => Some(TaskStatus::Rechazada),
-            _ => None,
-        };
-        if let Some(status) = target_status {
-            tasks.retain(|t| t.status == status);
+        if let Some(ref project_id) = query.project {
+            conditions.push("project_id = ?".to_string());
+            param_values.push(Box::new(project_id.clone()));
         }
-    }
 
-    Json(tasks)
+        if let Some(ref status_str) = query.status {
+            let valid = matches!(status_str.as_str(), "pendiente" | "enprogreso" | "completada" | "rechazada");
+            if valid {
+                conditions.push("status = ?".to_string());
+                param_values.push(Box::new(status_str.clone()));
+            }
+        }
+
+        if !conditions.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&conditions.join(" AND "));
+        }
+
+        sql.push_str(" ORDER BY created_at");
+
+        let mut stmt = conn.prepare(&sql).map_err(|e| format!("list_tasks: {}", e))?;
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|p| p.as_ref()).collect();
+        let rows = stmt
+            .query_map(params_refs.as_slice(), |row| row_to_task(row))
+            .map_err(|e| format!("list_tasks query: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect::<Vec<_>>();
+        Ok(rows)
+    })
+    .await?;
+    Ok(Json(tasks))
 }
 
 #[derive(Deserialize)]
@@ -347,13 +558,27 @@ pub async fn create_task(
         last_reminder: None,
     };
 
-    let mut config = state.config.lock().await;
-    config.tasks.tasks.push(task.clone());
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let t = task.clone();
+    db_op(&state.db, move |conn| {
+        let assigned_json = serde_json::to_string(&t.assigned_to).unwrap_or_else(|_| "[]".into());
+        let confirmed_json = serde_json::to_string(&t.confirmed_by).unwrap_or_else(|_| "[]".into());
+        let rejected_json = serde_json::to_string(&t.rejected_by).unwrap_or_else(|_| "[]".into());
+        conn.execute(
+            "INSERT INTO tasks (id, project_id, title, description, assigned_to, status, created_by, due_date, due_time, requires_confirmation, insistent, reminder_minutes, confirmed_by, rejected_by, created_at, last_reminder) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+            params![
+                t.id, t.project_id, t.title, t.description,
+                assigned_json, task_status_str(&t.status), t.created_by,
+                t.due_date, t.due_time,
+                t.requires_confirmation as i32, t.insistent as i32, t.reminder_minutes,
+                confirmed_json, rejected_json,
+                t.created_at.to_rfc3339(),
+                t.last_reminder.map(|dt| dt.to_rfc3339()),
+            ],
+        ).map_err(|e| format!("create_task: {}", e))?;
+        Ok(())
+    })
+    .await?;
 
-    drop(config);
     state
         .log_activity("tarea_creada", &format!("Tarea: {}", req.title), &username)
         .await;
@@ -390,66 +615,86 @@ pub async fn update_task(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let mut config = state.config.lock().await;
-    let task = config
-        .tasks
-        .tasks
-        .iter_mut()
-        .find(|t| t.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Tarea no encontrada".to_string()))?;
+    let uname = username.clone();
+    let updated = db_op(&state.db, move |conn| {
+        let mut task = conn
+            .query_row(
+                "SELECT id, project_id, title, description, assigned_to, status, created_by, due_date, due_time, requires_confirmation, insistent, reminder_minutes, confirmed_by, rejected_by, created_at, last_reminder FROM tasks WHERE id = ?1",
+                params![id],
+                |row| row_to_task(row),
+            )
+            .map_err(|_| "Tarea no encontrada".to_string())?;
 
-    // Solo el creador, asignados o admin pueden actualizar
-    let is_assigned = task.assigned_to.contains(&"all".to_string())
-        || task.assigned_to.iter().any(|a| a.to_lowercase() == username.to_lowercase());
-    if task.created_by != username && !is_assigned && role != UserRole::Admin {
-        return Err((StatusCode::FORBIDDEN, "Sin permisos para modificar esta tarea".to_string()));
-    }
+        // Solo el creador, asignados o admin pueden actualizar
+        let is_assigned = task.assigned_to.contains(&"all".to_string())
+            || task.assigned_to.iter().any(|a| a.to_lowercase() == uname.to_lowercase());
+        if task.created_by != uname && !is_assigned && role != UserRole::Admin {
+            return Err("Sin permisos para modificar esta tarea".to_string());
+        }
 
-    if let Some(title) = req.title {
-        task.title = title;
-    }
-    if let Some(status_str) = &req.status {
-        task.status = match status_str.as_str() {
-            "pendiente" => TaskStatus::Pendiente,
-            "enprogreso" => TaskStatus::EnProgreso,
-            "completada" => TaskStatus::Completada,
-            "rechazada" => TaskStatus::Rechazada,
-            _ => {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    "Estado invalido".to_string(),
-                ))
-            }
-        };
-    }
-    if let Some(project_id) = req.project_id {
-        task.project_id = project_id;
-    }
-    if let Some(assigned_to) = req.assigned_to {
-        task.assigned_to = assigned_to;
-    }
-    if let Some(due_date) = req.due_date {
-        task.due_date = due_date;
-    }
-    if let Some(due_time) = req.due_time {
-        task.due_time = due_time;
-    }
-    if let Some(requires_confirmation) = req.requires_confirmation {
-        task.requires_confirmation = requires_confirmation;
-    }
-    if let Some(insistent) = req.insistent {
-        task.insistent = insistent;
-    }
-    if let Some(reminder_minutes) = req.reminder_minutes {
-        task.reminder_minutes = reminder_minutes;
-    }
+        if let Some(title) = req.title {
+            task.title = title;
+        }
+        if let Some(status_str) = &req.status {
+            task.status = match status_str.as_str() {
+                "pendiente" => TaskStatus::Pendiente,
+                "enprogreso" => TaskStatus::EnProgreso,
+                "completada" => TaskStatus::Completada,
+                "rechazada" => TaskStatus::Rechazada,
+                _ => return Err("Estado invalido".to_string()),
+            };
+        }
+        if let Some(project_id) = req.project_id {
+            task.project_id = project_id;
+        }
+        if let Some(assigned_to) = req.assigned_to {
+            task.assigned_to = assigned_to;
+        }
+        if let Some(due_date) = req.due_date {
+            task.due_date = due_date;
+        }
+        if let Some(due_time) = req.due_time {
+            task.due_time = due_time;
+        }
+        if let Some(requires_confirmation) = req.requires_confirmation {
+            task.requires_confirmation = requires_confirmation;
+        }
+        if let Some(insistent) = req.insistent {
+            task.insistent = insistent;
+        }
+        if let Some(reminder_minutes) = req.reminder_minutes {
+            task.reminder_minutes = reminder_minutes;
+        }
 
-    let updated = task.clone();
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let assigned_json = serde_json::to_string(&task.assigned_to).unwrap_or_else(|_| "[]".into());
+        let confirmed_json = serde_json::to_string(&task.confirmed_by).unwrap_or_else(|_| "[]".into());
+        let rejected_json = serde_json::to_string(&task.rejected_by).unwrap_or_else(|_| "[]".into());
+        conn.execute(
+            "UPDATE tasks SET title = ?1, status = ?2, project_id = ?3, assigned_to = ?4, due_date = ?5, due_time = ?6, requires_confirmation = ?7, insistent = ?8, reminder_minutes = ?9, confirmed_by = ?10, rejected_by = ?11 WHERE id = ?12",
+            params![
+                task.title, task_status_str(&task.status), task.project_id,
+                assigned_json, task.due_date, task.due_time,
+                task.requires_confirmation as i32, task.insistent as i32, task.reminder_minutes,
+                confirmed_json, rejected_json,
+                task.id,
+            ],
+        ).map_err(|e| format!("update_task: {}", e))?;
 
-    drop(config);
+        Ok(task)
+    })
+    .await
+    .map_err(|(_status, msg)| {
+        if msg.contains("no encontrada") {
+            (StatusCode::NOT_FOUND, msg)
+        } else if msg.contains("permisos") {
+            (StatusCode::FORBIDDEN, msg)
+        } else if msg.contains("invalido") {
+            (StatusCode::BAD_REQUEST, msg)
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, msg)
+        }
+    })?;
+
     state
         .log_activity(
             "tarea_actualizada",
@@ -479,56 +724,83 @@ pub async fn confirm_task(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let mut config = state.config.lock().await;
-    let task = config
-        .tasks
-        .tasks
-        .iter_mut()
-        .find(|t| t.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Tarea no encontrada".to_string()))?;
+    let uname = username.clone();
+    let (updated, created_event_opt) = db_op(&state.db, move |conn| {
+        let mut task = conn
+            .query_row(
+                "SELECT id, project_id, title, description, assigned_to, status, created_by, due_date, due_time, requires_confirmation, insistent, reminder_minutes, confirmed_by, rejected_by, created_at, last_reminder FROM tasks WHERE id = ?1",
+                params![id],
+                |row| row_to_task(row),
+            )
+            .map_err(|_| "Tarea no encontrada".to_string())?;
 
-    if !task.confirmed_by.contains(&username) {
-        task.confirmed_by.push(username.clone());
-    }
-    // Quitar de rechazados si estaba
-    task.rejected_by.retain(|u| u != &username);
+        if !task.confirmed_by.contains(&uname) {
+            task.confirmed_by.push(uname.clone());
+        }
+        // Quitar de rechazados si estaba
+        task.rejected_by.retain(|u| u != &uname);
 
-    // Capturar datos antes de soltar el borrow mutable
-    let updated = task.clone();
+        let confirmed_json = serde_json::to_string(&task.confirmed_by).unwrap_or_else(|_| "[]".into());
+        let rejected_json = serde_json::to_string(&task.rejected_by).unwrap_or_else(|_| "[]".into());
+        conn.execute(
+            "UPDATE tasks SET confirmed_by = ?1, rejected_by = ?2 WHERE id = ?3",
+            params![confirmed_json, rejected_json, task.id],
+        ).map_err(|e| format!("confirm_task: {}", e))?;
 
-    // Si la tarea tiene fecha y hora, crear evento automaticamente
-    let mut created_event = false;
-    if let (Some(date), Some(time)) = (updated.due_date.clone(), updated.due_time.clone()) {
-        let event = CalendarEvent {
-            id: uuid::Uuid::new_v4().to_string()[..6].to_string(),
-            title: updated.title.clone(),
-            description: format!("Actividad desde tarea ({})", updated.id),
-            date,
-            time,
-            end_time: None,
-            location: None,
-            created_by: updated.created_by.clone(),
-            invitees: updated.assigned_to.clone(),
-            accepted: vec![username.clone()],
-            declined: Vec::new(),
-            remind_before_min: 15,
-            reminded: false,
-            notify_telegram: true,
-            recurrence: String::new(),
-            recurrence_end: None,
-            created_at: Utc::now(),
-            category: None,
-        };
-        config.tasks.events.push(event);
-        created_event = true;
-    }
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        // Si la tarea tiene fecha y hora, crear evento automaticamente
+        let mut created_event: Option<CalendarEvent> = None;
+        if let (Some(date), Some(time)) = (task.due_date.clone(), task.due_time.clone()) {
+            let event = CalendarEvent {
+                id: uuid::Uuid::new_v4().to_string()[..6].to_string(),
+                title: task.title.clone(),
+                description: format!("Actividad desde tarea ({})", task.id),
+                date,
+                time,
+                end_time: None,
+                location: None,
+                created_by: task.created_by.clone(),
+                invitees: task.assigned_to.clone(),
+                accepted: vec![uname.clone()],
+                declined: Vec::new(),
+                remind_before_min: 15,
+                reminded: false,
+                notify_telegram: true,
+                recurrence: String::new(),
+                recurrence_end: None,
+                created_at: Utc::now(),
+                category: None,
+            };
 
-    drop(config);
+            let invitees_json = serde_json::to_string(&event.invitees).unwrap_or_else(|_| "[]".into());
+            let accepted_json = serde_json::to_string(&event.accepted).unwrap_or_else(|_| "[]".into());
+            let declined_json = serde_json::to_string(&event.declined).unwrap_or_else(|_| "[]".into());
+            conn.execute(
+                "INSERT INTO calendar_events (id, title, description, date, time, end_time, location, created_by, invitees, accepted, declined, remind_before_min, reminded, notify_telegram, recurrence, recurrence_end, created_at, category) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                params![
+                    event.id, event.title, event.description, event.date, event.time,
+                    event.end_time, event.location, event.created_by,
+                    invitees_json, accepted_json, declined_json,
+                    event.remind_before_min, event.reminded as i32, event.notify_telegram as i32,
+                    event.recurrence, event.recurrence_end,
+                    event.created_at.to_rfc3339(), event.category,
+                ],
+            ).map_err(|e| format!("confirm_task event: {}", e))?;
 
-    if created_event {
+            created_event = Some(event);
+        }
+
+        Ok((task, created_event))
+    })
+    .await
+    .map_err(|(_status, msg)| {
+        if msg.contains("no encontrada") {
+            (StatusCode::NOT_FOUND, msg)
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, msg)
+        }
+    })?;
+
+    if created_event_opt.is_some() {
         state
             .log_activity(
                 "tarea_confirmada_agendada",
@@ -561,26 +833,40 @@ pub async fn reject_task(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let mut config = state.config.lock().await;
-    let task = config
-        .tasks
-        .tasks
-        .iter_mut()
-        .find(|t| t.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Tarea no encontrada".to_string()))?;
+    let uname = username.clone();
+    let updated = db_op(&state.db, move |conn| {
+        let mut task = conn
+            .query_row(
+                "SELECT id, project_id, title, description, assigned_to, status, created_by, due_date, due_time, requires_confirmation, insistent, reminder_minutes, confirmed_by, rejected_by, created_at, last_reminder FROM tasks WHERE id = ?1",
+                params![id],
+                |row| row_to_task(row),
+            )
+            .map_err(|_| "Tarea no encontrada".to_string())?;
 
-    if !task.rejected_by.contains(&username) {
-        task.rejected_by.push(username.clone());
-    }
-    // Quitar de confirmados si estaba
-    task.confirmed_by.retain(|u| u != &username);
+        if !task.rejected_by.contains(&uname) {
+            task.rejected_by.push(uname.clone());
+        }
+        // Quitar de confirmados si estaba
+        task.confirmed_by.retain(|u| u != &uname);
 
-    let updated = task.clone();
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let confirmed_json = serde_json::to_string(&task.confirmed_by).unwrap_or_else(|_| "[]".into());
+        let rejected_json = serde_json::to_string(&task.rejected_by).unwrap_or_else(|_| "[]".into());
+        conn.execute(
+            "UPDATE tasks SET confirmed_by = ?1, rejected_by = ?2 WHERE id = ?3",
+            params![confirmed_json, rejected_json, task.id],
+        ).map_err(|e| format!("reject_task: {}", e))?;
 
-    drop(config);
+        Ok(task)
+    })
+    .await
+    .map_err(|(_status, msg)| {
+        if msg.contains("no encontrada") {
+            (StatusCode::NOT_FOUND, msg)
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, msg)
+        }
+    })?;
+
     state
         .log_activity(
             "tarea_rechazada",
@@ -602,29 +888,42 @@ pub async fn done_task(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let mut config = state.config.lock().await;
-    let task = config
-        .tasks
-        .tasks
-        .iter_mut()
-        .find(|t| t.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Tarea no encontrada".to_string()))?;
+    let uname = username.clone();
+    let updated = db_op(&state.db, move |conn| {
+        let mut task = conn
+            .query_row(
+                "SELECT id, project_id, title, description, assigned_to, status, created_by, due_date, due_time, requires_confirmation, insistent, reminder_minutes, confirmed_by, rejected_by, created_at, last_reminder FROM tasks WHERE id = ?1",
+                params![id],
+                |row| row_to_task(row),
+            )
+            .map_err(|_| "Tarea no encontrada".to_string())?;
 
-    // Solo asignados o creador pueden marcar completada
-    let is_assigned = task.assigned_to.contains(&"all".to_string())
-        || task.assigned_to.iter().any(|a| a.to_lowercase() == username.to_lowercase());
-    if task.created_by != username && !is_assigned {
-        return Err((StatusCode::FORBIDDEN, "Sin permisos para completar esta tarea".to_string()));
-    }
+        // Solo asignados o creador pueden marcar completada
+        let is_assigned = task.assigned_to.contains(&"all".to_string())
+            || task.assigned_to.iter().any(|a| a.to_lowercase() == uname.to_lowercase());
+        if task.created_by != uname && !is_assigned {
+            return Err("Sin permisos para completar esta tarea".to_string());
+        }
 
-    task.status = TaskStatus::Completada;
-    let updated = task.clone();
+        task.status = TaskStatus::Completada;
+        conn.execute(
+            "UPDATE tasks SET status = ?1 WHERE id = ?2",
+            params![task_status_str(&task.status), task.id],
+        ).map_err(|e| format!("done_task: {}", e))?;
 
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        Ok(task)
+    })
+    .await
+    .map_err(|(_status, msg)| {
+        if msg.contains("no encontrada") {
+            (StatusCode::NOT_FOUND, msg)
+        } else if msg.contains("permisos") {
+            (StatusCode::FORBIDDEN, msg)
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, msg)
+        }
+    })?;
 
-    drop(config);
     state
         .log_activity(
             "tarea_completada",
@@ -649,27 +948,37 @@ pub async fn delete_task(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let mut config = state.config.lock().await;
-    let task = config
-        .tasks
-        .tasks
-        .iter()
-        .find(|t| t.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Tarea no encontrada".to_string()))?;
+    let uname = username.clone();
+    let title = db_op(&state.db, move |conn| {
+        let (created_by, title): (String, String) = conn
+            .query_row(
+                "SELECT created_by, title FROM tasks WHERE id = ?1",
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|_| "Tarea no encontrada".to_string())?;
 
-    // Solo el creador o admin puede eliminar
-    if task.created_by != username && role != UserRole::Admin {
-        return Err((StatusCode::FORBIDDEN, "Sin permisos para eliminar esta tarea".to_string()));
-    }
+        // Solo el creador o admin puede eliminar
+        if created_by != uname && role != UserRole::Admin {
+            return Err("Sin permisos para eliminar esta tarea".to_string());
+        }
 
-    let title = task.title.clone();
-    config.tasks.tasks.retain(|t| t.id != id);
+        conn.execute("DELETE FROM tasks WHERE id = ?1", params![id])
+            .map_err(|e| format!("delete_task: {}", e))?;
 
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        Ok(title)
+    })
+    .await
+    .map_err(|(_status, msg)| {
+        if msg.contains("no encontrada") {
+            (StatusCode::NOT_FOUND, msg)
+        } else if msg.contains("permisos") {
+            (StatusCode::FORBIDDEN, msg)
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, msg)
+        }
+    })?;
 
-    drop(config);
     state
         .log_activity("tarea_eliminada", &format!("Tarea: {}", title), &username)
         .await;
@@ -698,58 +1007,86 @@ pub async fn schedule_task(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let mut config = state.config.lock().await;
-    let task = config
-        .tasks
-        .tasks
-        .iter_mut()
-        .find(|t| t.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Tarea no encontrada".to_string()))?;
+    let uname = username.clone();
+    let event = db_op(&state.db, move |conn| {
+        let mut task = conn
+            .query_row(
+                "SELECT id, project_id, title, description, assigned_to, status, created_by, due_date, due_time, requires_confirmation, insistent, reminder_minutes, confirmed_by, rejected_by, created_at, last_reminder FROM tasks WHERE id = ?1",
+                params![id],
+                |row| row_to_task(row),
+            )
+            .map_err(|_| "Tarea no encontrada".to_string())?;
 
-    // Usar fecha/hora de la tarea si existen, o los del request
-    let date = req.date.or_else(|| task.due_date.clone())
-        .ok_or((StatusCode::BAD_REQUEST, "Se requiere fecha".to_string()))?;
-    let time = req.time.or_else(|| task.due_time.clone())
-        .ok_or((StatusCode::BAD_REQUEST, "Se requiere hora".to_string()))?;
+        // Usar fecha/hora de la tarea si existen, o los del request
+        let date = req.date.or_else(|| task.due_date.clone())
+            .ok_or("Se requiere fecha".to_string())?;
+        let time = req.time.or_else(|| task.due_time.clone())
+            .ok_or("Se requiere hora".to_string())?;
 
-    // Actualizar la tarea con fecha/hora si no los tenia
-    if task.due_date.is_none() {
-        task.due_date = Some(date.clone());
-    }
-    if task.due_time.is_none() {
-        task.due_time = Some(time.clone());
-    }
+        // Actualizar la tarea con fecha/hora si no los tenia
+        if task.due_date.is_none() {
+            task.due_date = Some(date.clone());
+        }
+        if task.due_time.is_none() {
+            task.due_time = Some(time.clone());
+        }
 
-    let event = CalendarEvent {
-        id: uuid::Uuid::new_v4().to_string()[..6].to_string(),
-        title: task.title.clone(),
-        description: format!("Actividad desde tarea ({})", task.id),
-        date,
-        time,
-        end_time: None,
-        location: None,
-        created_by: task.created_by.clone(),
-        invitees: task.assigned_to.clone(),
-        accepted: vec![username.clone()],
-        declined: Vec::new(),
-        remind_before_min: 15,
-        reminded: false,
-        notify_telegram: true,
-        recurrence: String::new(),
-        recurrence_end: None,
-        created_at: Utc::now(),
-        category: None,
-    };
+        conn.execute(
+            "UPDATE tasks SET due_date = ?1, due_time = ?2 WHERE id = ?3",
+            params![task.due_date, task.due_time, task.id],
+        ).map_err(|e| format!("schedule_task update: {}", e))?;
 
-    config.tasks.events.push(event.clone());
-    save_config(&config)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let event = CalendarEvent {
+            id: uuid::Uuid::new_v4().to_string()[..6].to_string(),
+            title: task.title.clone(),
+            description: format!("Actividad desde tarea ({})", task.id),
+            date,
+            time,
+            end_time: None,
+            location: None,
+            created_by: task.created_by.clone(),
+            invitees: task.assigned_to.clone(),
+            accepted: vec![uname],
+            declined: Vec::new(),
+            remind_before_min: 15,
+            reminded: false,
+            notify_telegram: true,
+            recurrence: String::new(),
+            recurrence_end: None,
+            created_at: Utc::now(),
+            category: None,
+        };
 
-    let title = event.title.clone();
-    drop(config);
+        let invitees_json = serde_json::to_string(&event.invitees).unwrap_or_else(|_| "[]".into());
+        let accepted_json = serde_json::to_string(&event.accepted).unwrap_or_else(|_| "[]".into());
+        let declined_json = serde_json::to_string(&event.declined).unwrap_or_else(|_| "[]".into());
+        conn.execute(
+            "INSERT INTO calendar_events (id, title, description, date, time, end_time, location, created_by, invitees, accepted, declined, remind_before_min, reminded, notify_telegram, recurrence, recurrence_end, created_at, category) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            params![
+                event.id, event.title, event.description, event.date, event.time,
+                event.end_time, event.location, event.created_by,
+                invitees_json, accepted_json, declined_json,
+                event.remind_before_min, event.reminded as i32, event.notify_telegram as i32,
+                event.recurrence, event.recurrence_end,
+                event.created_at.to_rfc3339(), event.category,
+            ],
+        ).map_err(|e| format!("schedule_task event: {}", e))?;
+
+        Ok(event)
+    })
+    .await
+    .map_err(|(_status, msg)| {
+        if msg.contains("no encontrada") {
+            (StatusCode::NOT_FOUND, msg)
+        } else if msg.contains("requiere") {
+            (StatusCode::BAD_REQUEST, msg)
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, msg)
+        }
+    })?;
+
     state
-        .log_activity("tarea_agendada", &format!("Agendada: {}", title), &username)
+        .log_activity("tarea_agendada", &format!("Agendada: {}", event.title), &username)
         .await;
 
     Ok(Json(event))
@@ -802,9 +1139,20 @@ pub struct UpdateEventRequest {
 
 fn default_event_rem() -> u32 { 15 }
 
-pub async fn list_events(State(state): State<AppState>) -> Json<Vec<CalendarEvent>> {
-    let config = state.config.lock().await;
-    Json(config.tasks.events.clone())
+pub async fn list_events(State(state): State<AppState>) -> Result<Json<Vec<CalendarEvent>>, (StatusCode, String)> {
+    let events = db_op(&state.db, |conn| {
+        let mut stmt = conn
+            .prepare("SELECT id, title, description, date, time, end_time, location, created_by, invitees, accepted, declined, remind_before_min, reminded, notify_telegram, recurrence, recurrence_end, created_at, category FROM calendar_events ORDER BY date, time")
+            .map_err(|e| format!("list_events: {}", e))?;
+        let rows = stmt
+            .query_map([], |row| row_to_event(row))
+            .map_err(|e| format!("list_events query: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect::<Vec<_>>();
+        Ok(rows)
+    })
+    .await?;
+    Ok(Json(events))
 }
 
 pub async fn create_event(
@@ -840,10 +1188,27 @@ pub async fn create_event(
         created_at: Utc::now(),
         category: req.category,
     };
-    let mut config = state.config.lock().await;
-    config.tasks.events.push(event.clone());
-    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    drop(config);
+
+    let e = event.clone();
+    db_op(&state.db, move |conn| {
+        let invitees_json = serde_json::to_string(&e.invitees).unwrap_or_else(|_| "[]".into());
+        let accepted_json = serde_json::to_string(&e.accepted).unwrap_or_else(|_| "[]".into());
+        let declined_json = serde_json::to_string(&e.declined).unwrap_or_else(|_| "[]".into());
+        conn.execute(
+            "INSERT INTO calendar_events (id, title, description, date, time, end_time, location, created_by, invitees, accepted, declined, remind_before_min, reminded, notify_telegram, recurrence, recurrence_end, created_at, category) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            params![
+                e.id, e.title, e.description, e.date, e.time,
+                e.end_time, e.location, e.created_by,
+                invitees_json, accepted_json, declined_json,
+                e.remind_before_min, e.reminded as i32, e.notify_telegram as i32,
+                e.recurrence, e.recurrence_end,
+                e.created_at.to_rfc3339(), e.category,
+            ],
+        ).map_err(|e| format!("create_event: {}", e))?;
+        Ok(())
+    })
+    .await?;
+
     state.log_activity("evento", &event.title, &username).await;
     Ok(Json(event))
 }
@@ -859,25 +1224,54 @@ pub async fn update_event(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let mut config = state.config.lock().await;
-    let event = config.tasks.events.iter_mut().find(|e| e.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Evento no encontrado".to_string()))?;
+    let result = db_op(&state.db, move |conn| {
+        let mut event = conn
+            .query_row(
+                "SELECT id, title, description, date, time, end_time, location, created_by, invitees, accepted, declined, remind_before_min, reminded, notify_telegram, recurrence, recurrence_end, created_at, category FROM calendar_events WHERE id = ?1",
+                params![id],
+                |row| row_to_event(row),
+            )
+            .map_err(|_| "Evento no encontrado".to_string())?;
 
-    if let Some(title) = req.title { event.title = title; }
-    if let Some(date) = req.date { event.date = date; }
-    if let Some(time) = req.time { event.time = time; }
-    if let Some(end_time) = req.end_time { event.end_time = end_time; }
-    if let Some(description) = req.description { event.description = description; }
-    if let Some(location) = req.location { event.location = location; }
-    if let Some(invitees) = req.invitees { event.invitees = invitees; }
-    if let Some(remind) = req.remind_before_min { event.remind_before_min = remind; }
-    if let Some(notify) = req.notify_telegram { event.notify_telegram = notify; }
-    if let Some(recurrence) = req.recurrence { event.recurrence = recurrence; }
-    if let Some(recurrence_end) = req.recurrence_end { event.recurrence_end = recurrence_end; }
-    if let Some(category) = req.category { event.category = category; }
+        if let Some(title) = req.title { event.title = title; }
+        if let Some(date) = req.date { event.date = date; }
+        if let Some(time) = req.time { event.time = time; }
+        if let Some(end_time) = req.end_time { event.end_time = end_time; }
+        if let Some(description) = req.description { event.description = description; }
+        if let Some(location) = req.location { event.location = location; }
+        if let Some(invitees) = req.invitees { event.invitees = invitees; }
+        if let Some(remind) = req.remind_before_min { event.remind_before_min = remind; }
+        if let Some(notify) = req.notify_telegram { event.notify_telegram = notify; }
+        if let Some(recurrence) = req.recurrence { event.recurrence = recurrence; }
+        if let Some(recurrence_end) = req.recurrence_end { event.recurrence_end = recurrence_end; }
+        if let Some(category) = req.category { event.category = category; }
 
-    let result = event.clone();
-    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let invitees_json = serde_json::to_string(&event.invitees).unwrap_or_else(|_| "[]".into());
+        let accepted_json = serde_json::to_string(&event.accepted).unwrap_or_else(|_| "[]".into());
+        let declined_json = serde_json::to_string(&event.declined).unwrap_or_else(|_| "[]".into());
+        conn.execute(
+            "UPDATE calendar_events SET title = ?1, description = ?2, date = ?3, time = ?4, end_time = ?5, location = ?6, invitees = ?7, accepted = ?8, declined = ?9, remind_before_min = ?10, notify_telegram = ?11, recurrence = ?12, recurrence_end = ?13, category = ?14 WHERE id = ?15",
+            params![
+                event.title, event.description, event.date, event.time,
+                event.end_time, event.location,
+                invitees_json, accepted_json, declined_json,
+                event.remind_before_min, event.notify_telegram as i32,
+                event.recurrence, event.recurrence_end, event.category,
+                event.id,
+            ],
+        ).map_err(|e| format!("update_event: {}", e))?;
+
+        Ok(event)
+    })
+    .await
+    .map_err(|(_status, msg)| {
+        if msg.contains("no encontrado") {
+            (StatusCode::NOT_FOUND, msg)
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, msg)
+        }
+    })?;
+
     Ok(Json(result))
 }
 
@@ -891,21 +1285,36 @@ pub async fn delete_event(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let mut config = state.config.lock().await;
-    let event = config
-        .tasks
-        .events
-        .iter()
-        .find(|e| e.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Evento no encontrado".to_string()))?;
+    db_op(&state.db, move |conn| {
+        let created_by: String = conn
+            .query_row(
+                "SELECT created_by FROM calendar_events WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .map_err(|_| "Evento no encontrado".to_string())?;
 
-    // Solo el creador o admin puede eliminar
-    if event.created_by != username && role != UserRole::Admin {
-        return Err((StatusCode::FORBIDDEN, "Sin permisos para eliminar este evento".to_string()));
-    }
+        // Solo el creador o admin puede eliminar
+        if created_by != username && role != UserRole::Admin {
+            return Err("Sin permisos para eliminar este evento".to_string());
+        }
 
-    config.tasks.events.retain(|e| e.id != id);
-    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        conn.execute("DELETE FROM calendar_events WHERE id = ?1", params![id])
+            .map_err(|e| format!("delete_event: {}", e))?;
+
+        Ok(())
+    })
+    .await
+    .map_err(|(_status, msg)| {
+        if msg.contains("no encontrado") {
+            (StatusCode::NOT_FOUND, msg)
+        } else if msg.contains("permisos") {
+            (StatusCode::FORBIDDEN, msg)
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, msg)
+        }
+    })?;
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -927,15 +1336,38 @@ pub async fn accept_event(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let mut config = state.config.lock().await;
-    let event = config.tasks.events.iter_mut().find(|e| e.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Evento no encontrado".to_string()))?;
-    event.declined.retain(|u| u != &username);
-    if !event.accepted.contains(&username) {
-        event.accepted.push(username);
-    }
-    let result = event.clone();
-    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let result = db_op(&state.db, move |conn| {
+        let mut event = conn
+            .query_row(
+                "SELECT id, title, description, date, time, end_time, location, created_by, invitees, accepted, declined, remind_before_min, reminded, notify_telegram, recurrence, recurrence_end, created_at, category FROM calendar_events WHERE id = ?1",
+                params![id],
+                |row| row_to_event(row),
+            )
+            .map_err(|_| "Evento no encontrado".to_string())?;
+
+        event.declined.retain(|u| u != &username);
+        if !event.accepted.contains(&username) {
+            event.accepted.push(username);
+        }
+
+        let accepted_json = serde_json::to_string(&event.accepted).unwrap_or_else(|_| "[]".into());
+        let declined_json = serde_json::to_string(&event.declined).unwrap_or_else(|_| "[]".into());
+        conn.execute(
+            "UPDATE calendar_events SET accepted = ?1, declined = ?2 WHERE id = ?3",
+            params![accepted_json, declined_json, event.id],
+        ).map_err(|e| format!("accept_event: {}", e))?;
+
+        Ok(event)
+    })
+    .await
+    .map_err(|(_status, msg)| {
+        if msg.contains("no encontrado") {
+            (StatusCode::NOT_FOUND, msg)
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, msg)
+        }
+    })?;
+
     Ok(Json(result))
 }
 
@@ -951,15 +1383,38 @@ pub async fn decline_event(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let mut config = state.config.lock().await;
-    let event = config.tasks.events.iter_mut().find(|e| e.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Evento no encontrado".to_string()))?;
-    event.accepted.retain(|u| u != &username);
-    if !event.declined.contains(&username) {
-        event.declined.push(username);
-    }
-    let result = event.clone();
-    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let result = db_op(&state.db, move |conn| {
+        let mut event = conn
+            .query_row(
+                "SELECT id, title, description, date, time, end_time, location, created_by, invitees, accepted, declined, remind_before_min, reminded, notify_telegram, recurrence, recurrence_end, created_at, category FROM calendar_events WHERE id = ?1",
+                params![id],
+                |row| row_to_event(row),
+            )
+            .map_err(|_| "Evento no encontrado".to_string())?;
+
+        event.accepted.retain(|u| u != &username);
+        if !event.declined.contains(&username) {
+            event.declined.push(username);
+        }
+
+        let accepted_json = serde_json::to_string(&event.accepted).unwrap_or_else(|_| "[]".into());
+        let declined_json = serde_json::to_string(&event.declined).unwrap_or_else(|_| "[]".into());
+        conn.execute(
+            "UPDATE calendar_events SET accepted = ?1, declined = ?2 WHERE id = ?3",
+            params![accepted_json, declined_json, event.id],
+        ).map_err(|e| format!("decline_event: {}", e))?;
+
+        Ok(event)
+    })
+    .await
+    .map_err(|(_status, msg)| {
+        if msg.contains("no encontrado") {
+            (StatusCode::NOT_FOUND, msg)
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, msg)
+        }
+    })?;
+
     Ok(Json(result))
 }
 
@@ -967,9 +1422,26 @@ pub async fn decline_event(
 
 use crate::models::tasks::EventCategory;
 
-pub async fn list_categories(State(state): State<AppState>) -> Json<Vec<EventCategory>> {
-    let config = state.config.lock().await;
-    Json(config.tasks.event_categories.clone())
+pub async fn list_categories(State(state): State<AppState>) -> Result<Json<Vec<EventCategory>>, (StatusCode, String)> {
+    let cats = db_op(&state.db, |conn| {
+        let mut stmt = conn
+            .prepare("SELECT id, name, color FROM event_categories ORDER BY name")
+            .map_err(|e| format!("list_categories: {}", e))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(EventCategory {
+                    id: row.get("id")?,
+                    name: row.get("name")?,
+                    color: row.get("color")?,
+                })
+            })
+            .map_err(|e| format!("list_categories query: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect::<Vec<_>>();
+        Ok(rows)
+    })
+    .await?;
+    Ok(Json(cats))
 }
 
 #[derive(Debug, Deserialize)]
@@ -990,9 +1462,17 @@ pub async fn create_category(
         name: req.name.trim().to_string(),
         color: req.color.trim().to_string(),
     };
-    let mut config = state.config.lock().await;
-    config.tasks.event_categories.push(cat.clone());
-    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    let c = cat.clone();
+    db_op(&state.db, move |conn| {
+        conn.execute(
+            "INSERT INTO event_categories (id, name, color) VALUES (?1, ?2, ?3)",
+            params![c.id, c.name, c.color],
+        ).map_err(|e| format!("create_category: {}", e))?;
+        Ok(())
+    })
+    .await?;
+
     Ok(Json(cat))
 }
 
@@ -1001,13 +1481,40 @@ pub async fn update_category(
     Path(id): Path<String>,
     Json(req): Json<CreateCategoryRequest>,
 ) -> Result<Json<EventCategory>, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    let cat = config.tasks.event_categories.iter_mut().find(|c| c.id == id)
-        .ok_or((StatusCode::NOT_FOUND, "Categoria no encontrada".to_string()))?;
-    if !req.name.trim().is_empty() { cat.name = req.name.trim().to_string(); }
-    if !req.color.trim().is_empty() { cat.color = req.color.trim().to_string(); }
-    let result = cat.clone();
-    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let result = db_op(&state.db, move |conn| {
+        let mut cat: EventCategory = conn
+            .query_row(
+                "SELECT id, name, color FROM event_categories WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok(EventCategory {
+                        id: row.get("id")?,
+                        name: row.get("name")?,
+                        color: row.get("color")?,
+                    })
+                },
+            )
+            .map_err(|_| "Categoria no encontrada".to_string())?;
+
+        if !req.name.trim().is_empty() { cat.name = req.name.trim().to_string(); }
+        if !req.color.trim().is_empty() { cat.color = req.color.trim().to_string(); }
+
+        conn.execute(
+            "UPDATE event_categories SET name = ?1, color = ?2 WHERE id = ?3",
+            params![cat.name, cat.color, cat.id],
+        ).map_err(|e| format!("update_category: {}", e))?;
+
+        Ok(cat)
+    })
+    .await
+    .map_err(|(_status, msg)| {
+        if msg.contains("no encontrada") {
+            (StatusCode::NOT_FOUND, msg)
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, msg)
+        }
+    })?;
+
     Ok(Json(result))
 }
 
@@ -1015,17 +1522,38 @@ pub async fn delete_category(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let mut config = state.config.lock().await;
-    let before = config.tasks.event_categories.len();
-    config.tasks.event_categories.retain(|c| c.id != id);
-    if config.tasks.event_categories.len() == before {
-        return Err((StatusCode::NOT_FOUND, "Categoria no encontrada".to_string()));
-    }
-    for event in &mut config.tasks.events {
-        if event.category.as_deref() == Some(&id) {
-            event.category = None;
+    db_op(&state.db, move |conn| {
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM event_categories WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("delete_category: {}", e))?;
+
+        if count == 0 {
+            return Err("Categoria no encontrada".to_string());
         }
-    }
-    save_config(&config).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+        // Limpiar la categoria de los eventos que la usan
+        conn.execute(
+            "UPDATE calendar_events SET category = NULL WHERE category = ?1",
+            params![id],
+        ).map_err(|e| format!("delete_category clear: {}", e))?;
+
+        conn.execute("DELETE FROM event_categories WHERE id = ?1", params![id])
+            .map_err(|e| format!("delete_category: {}", e))?;
+
+        Ok(())
+    })
+    .await
+    .map_err(|(_status, msg)| {
+        if msg.contains("no encontrada") {
+            (StatusCode::NOT_FOUND, msg)
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, msg)
+        }
+    })?;
+
     Ok(StatusCode::NO_CONTENT)
 }

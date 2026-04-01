@@ -9,6 +9,14 @@ pub enum Printer3DType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Printer3DSection {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub order: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Printer3DConfig {
     pub id: String,
     pub name: String,
@@ -24,6 +32,10 @@ pub struct Printer3DConfig {
     /// Costo electricidad $/kWh
     #[serde(default)]
     pub electricity_cost_kwh: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section_id: Option<String>,
+    #[serde(default)]
+    pub order: i32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -69,6 +81,9 @@ pub struct UpdatePrinter3DRequest {
     pub printer_type: Option<Printer3DType>,
     pub api_key: Option<Option<String>>,
     pub camera_url: Option<Option<String>>,
+    pub section_id: Option<Option<String>>,
+    pub power_watts: Option<Option<f64>>,
+    pub electricity_cost_kwh: Option<Option<f64>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -118,4 +133,30 @@ pub struct PrinterFileInfo {
     pub name: String,
     pub size: Option<u64>,
     pub date: Option<u64>,
+}
+
+// Secciones
+#[derive(Debug, Deserialize)]
+pub struct AddSectionRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateSectionRequest {
+    pub name: Option<String>,
+    pub order: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReorderPrinterRequest {
+    pub section_id: Option<String>,
+    pub order: i32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TestHomeRequest {
+    pub ip: String,
+    pub port: u16,
+    pub printer_type: Printer3DType,
+    pub api_key: Option<String>,
 }
