@@ -233,7 +233,7 @@ export default function PrintingPage() {
       if (orientation) changedOptions['orientation-requested'] = orientation
       if (pageSet) changedOptions['page-set'] = pageSet
       if (numberUp !== '1') changedOptions['number-up'] = numberUp
-      if (Number(copies) > 1 && !collate) changedOptions['collate'] = 'false'
+      if (Number(copies) > 1 && collate) changedOptions['collate'] = 'true'
       if (outputOrder) changedOptions['outputorder'] = outputOrder
       if (fitToPage) changedOptions['fit-to-page'] = 'true'
 
