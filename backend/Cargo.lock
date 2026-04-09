@@ -1077,7 +1077,7 @@ dependencies = [
 
 [[package]]
 name = "labnas-backend"
-version = "2.5.3"
+version = "2.6.1"
 dependencies = [
  "axum",
  "bcrypt",

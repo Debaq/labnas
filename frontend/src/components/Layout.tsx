@@ -45,7 +45,7 @@ export default function Layout() {
 
   useEffect(() => {
     getBranding().then(b => {
-      if (b.lab_name) { setLabName(b.lab_name); document.title = b.lab_name }
+      if (b.lab_name) { setLabName(b.lab_name); document.title = `${b.lab_name} - LabNAS` }
       if (b.logo_url) {
         setLogoUrl(b.logo_url)
         localStorage.setItem('labnas_logo_url', b.logo_url)
