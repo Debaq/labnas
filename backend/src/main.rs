@@ -191,6 +191,10 @@ async fn main() {
         .route("/api/printing/printers/{name}/stats/reset", post(handlers::printing::reset_printer_stats))
         .route("/api/printing/user-costs", get(handlers::printing::get_all_user_costs))
         .route("/api/printing/my-costs", get(handlers::printing::get_my_costs))
+        // Duplex manual
+        .route("/api/printing/duplex/prepare", post(handlers::printing::duplex_prepare))
+        .route("/api/printing/duplex/print", post(handlers::printing::duplex_print_step))
+        .route("/api/printing/duplex/{temp_id}", delete(handlers::printing::duplex_cleanup))
         // Notifications (Telegram)
         .route("/api/notifications/telegram", get(handlers::notifications::get_config))
         .route("/api/notifications/telegram/token", post(handlers::notifications::set_bot_token))

@@ -234,6 +234,23 @@ export interface AllUserCostsResponse {
   general_pages: number
 }
 
+// --- Duplex Manual ---
+
+export interface DuplexPrepareResponse {
+  temp_id: string
+  filename: string
+  page_count: number
+}
+
+export interface DuplexPrintStepRequest {
+  temp_id: string
+  printer: string
+  copies?: number
+  page_set: 'odd' | 'even'
+  output_order?: string
+  options?: Record<string, string>
+}
+
 // --- Inventory ---
 
 export interface InventoryCategory {

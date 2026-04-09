@@ -115,3 +115,27 @@ pub struct AllUserCostsResponse {
     pub general_jobs: u64,
     pub general_pages: u64,
 }
+
+// ── Impresion duplex manual ──
+
+/// Respuesta al preparar un archivo para impresion duplex
+#[derive(Debug, Clone, Serialize)]
+pub struct DuplexPrepareResponse {
+    pub temp_id: String,
+    pub filename: String,
+    pub page_count: u64,
+}
+
+/// Solicitud para ejecutar un paso de impresion duplex
+#[derive(Debug, Deserialize)]
+pub struct DuplexPrintStepRequest {
+    pub temp_id: String,
+    pub printer: String,
+    pub copies: Option<u32>,
+    /// "odd" o "even"
+    pub page_set: String,
+    /// "reverse" para paginas pares
+    pub output_order: Option<String>,
+    #[serde(default)]
+    pub options: HashMap<String, String>,
+}

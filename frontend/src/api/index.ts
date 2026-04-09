@@ -731,6 +731,38 @@ export async function fetchMyCosts(): Promise<import('../types').AllUserCostsRes
   return res.json()
 }
 
+// --- Duplex Manual ---
+
+export async function duplexPrepare(file: File): Promise<import('../types').DuplexPrepareResponse> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await api('/api/printing/duplex/prepare', {
+    method: 'POST',
+    body: formData,
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText)
+    throw new Error(text || 'Error al preparar archivo para duplex')
+  }
+  return res.json()
+}
+
+export async function duplexPrintStep(req: import('../types').DuplexPrintStepRequest): Promise<void> {
+  const res = await api('/api/printing/duplex/print', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText)
+    throw new Error(text || 'Error al imprimir paso duplex')
+  }
+}
+
+export async function duplexCleanup(tempId: string): Promise<void> {
+  await api(`/api/printing/duplex/${encodeURIComponent(tempId)}`, { method: 'DELETE' })
+}
+
 // --- Tasks & Projects ---
 
 export async function fetchProjects(): Promise<Project[]> {

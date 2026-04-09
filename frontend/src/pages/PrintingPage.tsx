@@ -19,6 +19,7 @@ import {
   ChevronDown,
   ChevronRight,
   DollarSign,
+  BookOpen,
 } from 'lucide-react'
 import {
   fetchCupsPrinters,
@@ -36,6 +37,7 @@ import {
   fetchMyCosts,
 } from '../api'
 import { useAuth } from '../auth/AuthContext'
+import DuplexWizard from '../components/DuplexWizard'
 import type { CupsPrinter, CupsPrintJob, PrinterOption, PrinterStatsResponse, AllUserCostsResponse } from '../types'
 
 export default function PrintingPage() {
@@ -77,6 +79,9 @@ export default function PrintingPage() {
   const [collate, setCollate] = useState(true)
   const [outputOrder, setOutputOrder] = useState('')
   const [fitToPage, setFitToPage] = useState(false)
+
+  // Duplex wizard
+  const [showDuplexWizard, setShowDuplexWizard] = useState(false)
 
   // Drag & drop
   const [dragOver, setDragOver] = useState(false)
@@ -565,6 +570,18 @@ export default function PrintingPage() {
         />
       </div>
 
+      {/* Duplex button */}
+      <div className="flex justify-center -mt-3">
+        <button
+          onClick={() => setShowDuplexWizard(true)}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-80"
+          style={{ color: 'var(--accent)', border: '1px solid var(--accent-alpha)', backgroundColor: 'var(--accent-alpha)' }}
+        >
+          <BookOpen size={16} />
+          Asistente de doble cara manual
+        </button>
+      </div>
+
       {/* Print Queue */}
       <div>
         <h2 className="text-base font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
@@ -754,6 +771,19 @@ export default function PrintingPage() {
           </div>
         )}
       </div>
+
+      {/* Duplex Wizard */}
+      {showDuplexWizard && (
+        <DuplexWizard
+          printers={printers}
+          defaultPrinter={selectedPrinter}
+          onClose={() => setShowDuplexWizard(false)}
+          onComplete={() => {
+            setShowDuplexWizard(false)
+            loadData()
+          }}
+        />
+      )}
 
       {/* Print Options Modal */}
       {showModal && selectedFile && (
