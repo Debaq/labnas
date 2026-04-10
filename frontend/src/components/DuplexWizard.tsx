@@ -11,9 +11,12 @@ import {
   ArrowDown,
   ArrowUp,
   Layers,
+  Settings2,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
-import { duplexPrepare, duplexPrintStep, duplexCleanup } from '../api'
-import type { CupsPrinter, DuplexPrepareResponse } from '../types'
+import { duplexPrepare, duplexPrintStep, duplexCleanup, fetchPrinterOptions } from '../api'
+import type { CupsPrinter, DuplexPrepareResponse, PrinterOption } from '../types'
 
 interface DuplexWizardProps {
   printers: CupsPrinter[]
@@ -35,6 +38,15 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
   const [totalCopies, setTotalCopies] = useState(1)
   const [batchSize, setBatchSize] = useState(5)
 
+  // Opciones avanzadas
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [printerOptions, setPrinterOptions] = useState<PrinterOption[]>([])
+  const [optionValues, setOptionValues] = useState<Record<string, string>>({})
+  const [optionsLoading, setOptionsLoading] = useState(false)
+  const [orientation, setOrientation] = useState('')
+  const [numberUp, setNumberUp] = useState('1')
+  const [fitToPage, setFitToPage] = useState(false)
+
   // Estado de lotes
   const [currentBatch, setCurrentBatch] = useState(1)
   const [totalBatches, setTotalBatches] = useState(1)
@@ -55,6 +67,35 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
       }
     }
   }, [])
+
+  // Opciones que el wizard controla internamente (no mostrar al usuario)
+  const hiddenOptionKeys = ['page-set', 'outputorder', 'collate', 'orientation-requested', 'number-up', 'fit-to-page']
+  const filteredPrinterOptions = printerOptions.filter(opt => !hiddenOptionKeys.includes(opt.key))
+
+  async function loadPrinterOptions(printerName: string) {
+    setOptionsLoading(true)
+    try {
+      const opts = await fetchPrinterOptions(printerName)
+      setPrinterOptions(opts)
+      const defaults: Record<string, string> = {}
+      for (const opt of opts) {
+        defaults[opt.key] = opt.default_value
+      }
+      setOptionValues(defaults)
+    } catch {
+      setPrinterOptions([])
+      setOptionValues({})
+    } finally {
+      setOptionsLoading(false)
+    }
+  }
+
+  // Cargar opciones al cambiar impresora (solo si estamos en configure)
+  useEffect(() => {
+    if (step === 'configure' && printer) {
+      loadPrinterOptions(printer)
+    }
+  }, [printer, step])
 
   const handleFileSelect = useCallback(async (selectedFile: File) => {
     setError(null)
@@ -93,6 +134,22 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
     calculateBatches()
   }, [calculateBatches])
 
+  function buildOptions(): Record<string, string> {
+    const opts: Record<string, string> = {}
+    // Opciones dinamicas de la impresora que difieren del default
+    for (const opt of printerOptions) {
+      const current = optionValues[opt.key]
+      if (current && current !== opt.default_value) {
+        opts[opt.key] = current
+      }
+    }
+    // Opciones estandar
+    if (orientation) opts['orientation-requested'] = orientation
+    if (numberUp !== '1') opts['number-up'] = numberUp
+    if (fitToPage) opts['fit-to-page'] = 'true'
+    return opts
+  }
+
   const startPrinting = () => {
     setCurrentBatch(1)
     setCompletedCopies(0)
@@ -114,6 +171,7 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
         printer,
         copies,
         page_set: 'odd',
+        options: buildOptions(),
       })
       setStep('flip')
     } catch (err: any) {
@@ -135,6 +193,7 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
         copies: currentBatchCopies,
         page_set: 'even',
         output_order: 'reverse',
+        options: buildOptions(),
       })
 
       const newCompleted = completedCopies + currentBatchCopies
@@ -382,6 +441,106 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
                 </div>
               </div>
             )}
+
+            {/* Configuracion avanzada */}
+            <div>
+              <button
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                className="flex items-center gap-2 text-xs font-medium hover:opacity-80 transition-opacity"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                {showAdvanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                <Settings2 size={14} style={{ color: 'var(--accent)' }} />
+                Configuracion avanzada
+              </button>
+
+              {showAdvanced && (
+                <div className="mt-3 space-y-3 rounded-lg p-3" style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
+                  {/* Opciones estandar */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Orientacion</label>
+                      <select
+                        value={orientation}
+                        onChange={(e) => setOrientation(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
+                        style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                      >
+                        <option value="">Automatica</option>
+                        <option value="3">Vertical (retrato)</option>
+                        <option value="4">Horizontal (paisaje)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Paginas por hoja</label>
+                      <select
+                        value={numberUp}
+                        onChange={(e) => setNumberUp(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
+                        style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                      >
+                        <option value="1">1 (normal)</option>
+                        <option value="2">2 en 1</option>
+                        <option value="4">4 en 1</option>
+                        <option value="6">6 en 1</option>
+                        <option value="9">9 en 1</option>
+                        <option value="16">16 en 1</option>
+                      </select>
+                    </div>
+                  </div>
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={fitToPage}
+                      onChange={(e) => setFitToPage(e.target.checked)}
+                      className="mt-0.5"
+                      style={{ accentColor: 'var(--accent)' }}
+                    />
+                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                      Ajustar a pagina
+                      <span className="block text-[10px] mt-0.5" style={{ opacity: 0.7 }}>Escala el contenido para que entre en la hoja</span>
+                    </span>
+                  </label>
+
+                  {/* Opciones dinamicas de la impresora */}
+                  {optionsLoading ? (
+                    <div className="flex items-center justify-center py-3">
+                      <Loader2 size={14} className="animate-spin" style={{ color: 'var(--accent)' }} />
+                      <span className="text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>Cargando opciones...</span>
+                    </div>
+                  ) : filteredPrinterOptions.length > 0 && (
+                    <>
+                      <div className="flex items-center gap-2 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+                        <span className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>
+                          Opciones de la impresora
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        {filteredPrinterOptions.map((opt) => (
+                          <div key={opt.key}>
+                            <label className="block text-xs font-medium mb-1 truncate" title={opt.display_name} style={{ color: 'var(--text-secondary)' }}>
+                              {opt.display_name}
+                            </label>
+                            <select
+                              value={optionValues[opt.key] || opt.default_value}
+                              onChange={(e) => setOptionValues(prev => ({ ...prev, [opt.key]: e.target.value }))}
+                              className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
+                              style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                            >
+                              {opt.values.map((v) => (
+                                <option key={v} value={v}>
+                                  {v}{v === opt.default_value ? ' *' : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Boton iniciar */}
             <button
