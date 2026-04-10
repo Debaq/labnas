@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import {
   X,
   Loader2,
@@ -27,6 +27,12 @@ interface DuplexWizardProps {
 
 type WizardStep = 'upload' | 'configure' | 'printing-odd' | 'flip' | 'printing-even' | 'batch-done' | 'complete'
 
+interface PrinterAllocation {
+  name: string
+  copies: number
+  completed: number
+}
+
 export default function DuplexWizard({ printers, defaultPrinter, onClose, onComplete }: DuplexWizardProps) {
   const [step, setStep] = useState<WizardStep>('upload')
   const [prepareData, setPrepareData] = useState<DuplexPrepareResponse | null>(null)
@@ -34,9 +40,8 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
   const [error, setError] = useState<string | null>(null)
 
   // Configuracion
-  const [printer, setPrinter] = useState(defaultPrinter)
-  const [totalCopies, setTotalCopies] = useState(1)
-  const [batchSize, setBatchSize] = useState(5)
+  const [selectedPrinterNames, setSelectedPrinterNames] = useState<string[]>([defaultPrinter])
+  const [totalCopiesInput, setTotalCopiesInput] = useState(1)
 
   // Opciones avanzadas
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -47,17 +52,49 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
   const [numberUp, setNumberUp] = useState('1')
   const [fitToPage, setFitToPage] = useState(false)
 
-  // Estado de lotes
-  const [currentBatch, setCurrentBatch] = useState(1)
-  const [totalBatches, setTotalBatches] = useState(1)
-  const [currentBatchCopies, setCurrentBatchCopies] = useState(1)
-  const [completedCopies, setCompletedCopies] = useState(0)
-
   // Estado de impresion
+  const [allocations, setAllocations] = useState<PrinterAllocation[]>([])
+  const [currentRound, setCurrentRound] = useState(1)
+  const [activeThisRound, setActiveThisRound] = useState<string[]>([])
   const [printingStep, setPrintingStep] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cleanupRef = useRef<string | null>(null)
+  const failedRef = useRef<string[]>([])
+
+  // Valores derivados
+  const multiPrinter = allocations.length > 1
+  const totalCopies = allocations.length > 0
+    ? allocations.reduce((s, a) => s + a.copies, 0)
+    : totalCopiesInput
+  const completedCopies = allocations.reduce((s, a) => s + a.completed, 0)
+  const totalRounds = allocations.length > 0
+    ? Math.max(...allocations.map(a => a.copies))
+    : 1
+
+  const getPrinterDesc = (name: string) =>
+    printers.find(p => p.name === name)?.description || name
+
+  // Distribucion para preview en configuracion
+  const configAllocations = useMemo(() => {
+    const n = selectedPrinterNames.length
+    if (n === 0) return []
+    const total = totalCopiesInput
+    const base = Math.floor(total / n)
+    const extra = total % n
+    return selectedPrinterNames.map((name, i) => ({
+      name,
+      copies: base + (i < extra ? 1 : 0),
+    }))
+  }, [selectedPrinterNames, totalCopiesInput])
+
+  const configTotalRounds = useMemo(() => {
+    const active = configAllocations.filter(a => a.copies > 0)
+    if (active.length === 0) return 1
+    return Math.max(...active.map(a => a.copies))
+  }, [configAllocations])
+
+  const configActivePrinters = configAllocations.filter(a => a.copies > 0).length
 
   // Cleanup al desmontar
   useEffect(() => {
@@ -68,7 +105,7 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
     }
   }, [])
 
-  // Opciones que el wizard controla internamente (no mostrar al usuario)
+  // Opciones que el wizard controla internamente
   const hiddenOptionKeys = ['page-set', 'outputorder', 'collate', 'orientation-requested', 'number-up', 'fit-to-page']
   const filteredPrinterOptions = printerOptions.filter(opt => !hiddenOptionKeys.includes(opt.key))
 
@@ -90,17 +127,26 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
     }
   }
 
-  // Cargar opciones al cambiar impresora (solo si estamos en configure)
+  // Cargar opciones al cambiar impresora seleccionada
   useEffect(() => {
-    if (step === 'configure' && printer) {
-      loadPrinterOptions(printer)
+    if (step === 'configure' && selectedPrinterNames.length > 0) {
+      loadPrinterOptions(selectedPrinterNames[0])
     }
-  }, [printer, step])
+  }, [selectedPrinterNames, step])
+
+  const togglePrinter = (name: string) => {
+    setSelectedPrinterNames(prev => {
+      if (prev.includes(name)) {
+        if (prev.length === 1) return prev
+        return prev.filter(n => n !== name)
+      }
+      return [...prev, name]
+    })
+  }
 
   const handleFileSelect = useCallback(async (selectedFile: File) => {
     setError(null)
     setPreparing(true)
-
     try {
       const data = await duplexPrepare(selectedFile)
       setPrepareData(data)
@@ -125,25 +171,14 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
     if (f) handleFileSelect(f)
   }
 
-  const calculateBatches = useCallback(() => {
-    const batches = Math.ceil(totalCopies / batchSize)
-    setTotalBatches(batches)
-  }, [totalCopies, batchSize])
-
-  useEffect(() => {
-    calculateBatches()
-  }, [calculateBatches])
-
   function buildOptions(): Record<string, string> {
     const opts: Record<string, string> = {}
-    // Opciones dinamicas de la impresora que difieren del default
     for (const opt of printerOptions) {
       const current = optionValues[opt.key]
       if (current && current !== opt.default_value) {
         opts[opt.key] = current
       }
     }
-    // Opciones estandar
     if (orientation) opts['orientation-requested'] = orientation
     if (numberUp !== '1') opts['number-up'] = numberUp
     if (fitToPage) opts['fit-to-page'] = 'true'
@@ -151,33 +186,50 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
   }
 
   const startPrinting = () => {
-    setCurrentBatch(1)
-    setCompletedCopies(0)
+    const allocs = configAllocations
+      .filter(a => a.copies > 0)
+      .map(a => ({ ...a, completed: 0 }))
+    setAllocations(allocs)
+    setCurrentRound(1)
+    failedRef.current = []
 
-    const copiesThisBatch = Math.min(batchSize, totalCopies)
-    setCurrentBatchCopies(copiesThisBatch)
+    const active = allocs.map(a => a.name)
+    setActiveThisRound(active)
     setStep('printing-odd')
-    printOddPages(copiesThisBatch)
+    printOddPages(active)
   }
 
-  const printOddPages = async (copies: number) => {
+  const printOddPages = async (printerNames?: string[]) => {
     if (!prepareData) return
     setPrintingStep(true)
     setError(null)
 
-    try {
-      await duplexPrintStep({
-        temp_id: prepareData.temp_id,
-        printer,
-        copies,
-        page_set: 'odd',
-        options: buildOptions(),
-      })
+    const toSend = failedRef.current.length > 0
+      ? failedRef.current
+      : printerNames || activeThisRound
+
+    const opts = buildOptions()
+    const results = await Promise.allSettled(
+      toSend.map(name =>
+        duplexPrintStep({
+          temp_id: prepareData.temp_id,
+          printer: name,
+          copies: 1,
+          page_set: 'odd',
+          options: opts,
+        })
+      )
+    )
+
+    const failed = toSend.filter((_, i) => results[i].status === 'rejected')
+    failedRef.current = failed
+    setPrintingStep(false)
+
+    if (failed.length > 0) {
+      const names = failed.map(n => getPrinterDesc(n)).join(', ')
+      setError(`Error al imprimir en: ${names}`)
+    } else {
       setStep('flip')
-    } catch (err: any) {
-      setError(err.message || 'Error al imprimir paginas impares')
-    } finally {
-      setPrintingStep(false)
     }
   }
 
@@ -186,43 +238,59 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
     setPrintingStep(true)
     setError(null)
 
-    try {
-      await duplexPrintStep({
-        temp_id: prepareData.temp_id,
-        printer,
-        copies: currentBatchCopies,
-        page_set: 'even',
-        output_order: 'reverse',
-        options: buildOptions(),
+    const toSend = failedRef.current.length > 0
+      ? failedRef.current
+      : activeThisRound
+
+    const opts = buildOptions()
+    const results = await Promise.allSettled(
+      toSend.map(name =>
+        duplexPrintStep({
+          temp_id: prepareData.temp_id,
+          printer: name,
+          copies: 1,
+          page_set: 'even',
+          output_order: 'reverse',
+          options: opts,
+        })
+      )
+    )
+
+    const failed = toSend.filter((_, i) => results[i].status === 'rejected')
+    failedRef.current = failed
+    setPrintingStep(false)
+
+    if (failed.length > 0) {
+      const names = failed.map(n => getPrinterDesc(n)).join(', ')
+      setError(`Error al imprimir en: ${names}`)
+    } else {
+      let allDone = false
+      setAllocations(prev => {
+        const updated = prev.map(a =>
+          activeThisRound.includes(a.name) ? { ...a, completed: a.completed + 1 } : a
+        )
+        allDone = updated.every(a => a.completed >= a.copies)
+        return updated
       })
 
-      const newCompleted = completedCopies + currentBatchCopies
-      setCompletedCopies(newCompleted)
-
-      if (newCompleted >= totalCopies) {
-        // Todas las copias hechas
+      if (allDone) {
         setStep('complete')
       } else {
-        // Mas lotes pendientes
         setStep('batch-done')
       }
-    } catch (err: any) {
-      setError(err.message || 'Error al imprimir paginas pares')
-    } finally {
-      setPrintingStep(false)
     }
   }
 
-  const startNextBatch = () => {
-    const nextBatch = currentBatch + 1
-    setCurrentBatch(nextBatch)
+  const startNextRound = () => {
+    setCurrentRound(prev => prev + 1)
+    failedRef.current = []
 
-    const remaining = totalCopies - completedCopies
-    const copiesThisBatch = Math.min(batchSize, remaining)
-    setCurrentBatchCopies(copiesThisBatch)
-
+    const active = allocations
+      .filter(a => a.completed < a.copies)
+      .map(a => a.name)
+    setActiveThisRound(active)
     setStep('printing-odd')
-    printOddPages(copiesThisBatch)
+    printOddPages(active)
   }
 
   const handleClose = () => {
@@ -252,6 +320,10 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
     'batch-done': 4,
     complete: 5,
   }
+
+  const roundLabel = multiPrinter
+    ? `Ronda ${currentRound} de ${totalRounds} (${activeThisRound.length} ${activeThisRound.length === 1 ? 'impresora' : 'impresoras'})`
+    : `Copia ${currentRound} de ${totalCopies}`
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -305,7 +377,7 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
                 <button
                   onClick={() => {
                     setError(null)
-                    if (step === 'printing-odd') printOddPages(currentBatchCopies)
+                    if (step === 'printing-odd') printOddPages()
                     else printEvenPages()
                   }}
                   className="mt-2 flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg"
@@ -376,68 +448,84 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
               </div>
             </div>
 
-            {/* Selector de impresora */}
+            {/* Selector de impresoras */}
             <div>
               <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                Impresora
+                {printers.length > 1 ? 'Impresoras' : 'Impresora'}
               </label>
-              <select
-                value={printer}
-                onChange={(e) => setPrinter(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
-                style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
-              >
-                {printers.map((p) => (
-                  <option key={p.name} value={p.name}>
-                    {p.description} {p.is_default ? '(default)' : ''}
-                  </option>
-                ))}
-              </select>
+              {printers.length > 1 ? (
+                <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--input-border)' }}>
+                  {printers.map((p, idx) => (
+                    <label
+                      key={p.name}
+                      className="flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors duration-150"
+                      style={{
+                        backgroundColor: selectedPrinterNames.includes(p.name) ? 'var(--accent-alpha)' : 'var(--input-bg)',
+                        borderBottom: idx < printers.length - 1 ? '1px solid var(--input-border)' : undefined,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedPrinterNames.includes(p.name)}
+                        onChange={() => togglePrinter(p.name)}
+                        style={{ accentColor: 'var(--accent)' }}
+                      />
+                      <span className="text-sm truncate" style={{ color: 'var(--text-primary)' }}>
+                        {p.description} {p.is_default ? '(default)' : ''}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <div
+                  className="px-3 py-2 rounded-lg text-sm"
+                  style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                >
+                  {printers[0]?.description || defaultPrinter}
+                </div>
+              )}
             </div>
 
             {/* Copias */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                  Copias totales
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={totalCopies}
-                  onChange={(e) => setTotalCopies(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
-                  className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-                  style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                  Copias por lote
-                </label>
-                <select
-                  value={batchSize}
-                  onChange={(e) => setBatchSize(parseInt(e.target.value))}
-                  className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
-                  style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
-                >
-                  <option value={1}>1 copia</option>
-                  <option value={3}>3 copias</option>
-                  <option value={5}>5 copias</option>
-                  <option value={10}>10 copias</option>
-                </select>
-              </div>
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
+                Copias totales
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={totalCopiesInput}
+                onChange={(e) => setTotalCopiesInput(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
+                className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+              />
             </div>
 
-            {/* Info de lotes */}
-            {totalCopies > 1 && (
+            {/* Info de distribucion */}
+            {(totalCopiesInput > 1 || selectedPrinterNames.length > 1) && (
               <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
-                <div className="flex items-center gap-2">
-                  <Layers size={14} style={{ color: 'var(--accent)' }} />
-                  <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                    Se imprimiran en <strong style={{ color: 'var(--text-primary)' }}>{totalBatches} {totalBatches === 1 ? 'lote' : 'lotes'}</strong>.
-                    {totalBatches > 1 && ' Imprimir por lotes reduce el riesgo si hay un atasco de papel.'}
-                  </span>
+                <div className="flex items-start gap-2">
+                  <Layers size={14} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--accent)' }} />
+                  <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                    {configActivePrinters > 1 ? (
+                      <>
+                        <p>
+                          {configAllocations.filter(a => a.copies > 0).map(a =>
+                            `${getPrinterDesc(a.name)}: ${a.copies}`
+                          ).join(' · ')}
+                        </p>
+                        <p className="mt-1">
+                          {configTotalRounds} {configTotalRounds === 1 ? 'ronda' : 'rondas'} de impresion
+                          — en cada ronda se imprimen hasta {configActivePrinters} copias en paralelo.
+                        </p>
+                      </>
+                    ) : (
+                      <p>
+                        Cada copia se imprime por separado para asegurar que las paginas queden correctamente alineadas.
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -502,41 +590,43 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
                     </span>
                   </label>
 
-                  {/* Opciones dinamicas de la impresora */}
-                  {optionsLoading ? (
-                    <div className="flex items-center justify-center py-3">
-                      <Loader2 size={14} className="animate-spin" style={{ color: 'var(--accent)' }} />
-                      <span className="text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>Cargando opciones...</span>
-                    </div>
-                  ) : filteredPrinterOptions.length > 0 && (
-                    <>
-                      <div className="flex items-center gap-2 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
-                        <span className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>
-                          Opciones de la impresora
-                        </span>
+                  {/* Opciones dinamicas de la impresora (solo con 1 impresora seleccionada) */}
+                  {selectedPrinterNames.length === 1 && (
+                    optionsLoading ? (
+                      <div className="flex items-center justify-center py-3">
+                        <Loader2 size={14} className="animate-spin" style={{ color: 'var(--accent)' }} />
+                        <span className="text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>Cargando opciones...</span>
                       </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        {filteredPrinterOptions.map((opt) => (
-                          <div key={opt.key}>
-                            <label className="block text-xs font-medium mb-1 truncate" title={opt.display_name} style={{ color: 'var(--text-secondary)' }}>
-                              {opt.display_name}
-                            </label>
-                            <select
-                              value={optionValues[opt.key] || opt.default_value}
-                              onChange={(e) => setOptionValues(prev => ({ ...prev, [opt.key]: e.target.value }))}
-                              className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
-                              style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
-                            >
-                              {opt.values.map((v) => (
-                                <option key={v} value={v}>
-                                  {v}{v === opt.default_value ? ' *' : ''}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        ))}
-                      </div>
-                    </>
+                    ) : filteredPrinterOptions.length > 0 && (
+                      <>
+                        <div className="flex items-center gap-2 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+                          <span className="text-[10px] font-medium" style={{ color: 'var(--text-secondary)' }}>
+                            Opciones de la impresora
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          {filteredPrinterOptions.map((opt) => (
+                            <div key={opt.key}>
+                              <label className="block text-xs font-medium mb-1 truncate" title={opt.display_name} style={{ color: 'var(--text-secondary)' }}>
+                                {opt.display_name}
+                              </label>
+                              <select
+                                value={optionValues[opt.key] || opt.default_value}
+                                onChange={(e) => setOptionValues(prev => ({ ...prev, [opt.key]: e.target.value }))}
+                                className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
+                                style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                              >
+                                {opt.values.map((v) => (
+                                  <option key={v} value={v}>
+                                    {v}{v === opt.default_value ? ' *' : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )
                   )}
                 </div>
               )}
@@ -545,7 +635,8 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
             {/* Boton iniciar */}
             <button
               onClick={startPrinting}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90"
+              disabled={selectedPrinterNames.length === 0}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90 disabled:opacity-50"
               style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
             >
               <Printer size={16} />
@@ -557,20 +648,29 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
         {/* Step: Printing odd pages */}
         {step === 'printing-odd' && (
           <div className="text-center py-6">
-            {totalBatches > 1 && (
+            {(totalCopies > 1 || multiPrinter) && (
               <div className="text-xs font-medium mb-4 px-3 py-1.5 rounded-full inline-block" style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}>
-                Lote {currentBatch} de {totalBatches} ({currentBatchCopies} {currentBatchCopies === 1 ? 'copia' : 'copias'})
+                {roundLabel}
               </div>
             )}
             {printingStep && !error && (
               <>
                 <Loader2 size={40} className="mx-auto mb-4 animate-spin" style={{ color: 'var(--accent)' }} />
                 <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                  Imprimiendo paginas impares...
+                  Imprimiendo paginas impares{multiPrinter ? ` en ${activeThisRound.length} impresoras` : ''}...
                 </p>
                 <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-                  {currentBatchCopies} {currentBatchCopies === 1 ? 'copia' : 'copias'} - solo paginas 1, 3, 5...
+                  Paginas 1, 3, 5...
                 </p>
+                {multiPrinter && (
+                  <div className="mt-3 space-y-0.5">
+                    {activeThisRound.map(name => (
+                      <p key={name} className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>
+                        {getPrinterDesc(name)}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -579,10 +679,13 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
         {/* Step: Flip pages */}
         {step === 'flip' && (
           <div className="space-y-4">
-            {totalBatches > 1 && (
+            {(totalCopies > 1 || multiPrinter) && (
               <div className="text-center">
                 <span className="text-xs font-medium px-3 py-1.5 rounded-full inline-block" style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}>
-                  Lote {currentBatch} de {totalBatches}
+                  {multiPrinter
+                    ? `Ronda ${currentRound} de ${totalRounds}`
+                    : `Copia ${currentRound} de ${totalCopies}`
+                  }
                 </span>
               </div>
             )}
@@ -592,8 +695,21 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
               style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
             >
               <h4 className="text-sm font-semibold mb-4 text-center" style={{ color: 'var(--warning)' }}>
-                Voltear las hojas
+                Voltear las hojas{multiPrinter ? ' en cada impresora' : ''}
               </h4>
+
+              {multiPrinter && (
+                <div className="mb-4 rounded-lg p-2" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                  <p className="text-[10px] font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
+                    Impresoras activas:
+                  </p>
+                  {activeThisRound.map(name => (
+                    <p key={name} className="text-xs" style={{ color: 'var(--text-primary)' }}>
+                      &bull; {getPrinterDesc(name)}
+                    </p>
+                  ))}
+                </div>
+              )}
 
               <div className="space-y-3">
                 <div className="flex items-start gap-3">
@@ -604,7 +720,7 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
                     1
                   </div>
                   <p className="text-sm pt-0.5" style={{ color: 'var(--text-primary)' }}>
-                    Retire <strong>todas</strong> las hojas impresas de la bandeja de salida
+                    Retire <strong>todas</strong> las hojas impresas de la bandeja de salida{multiPrinter ? ' de cada impresora' : ''}
                   </p>
                 </div>
 
@@ -617,7 +733,7 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
                   </div>
                   <div className="pt-0.5">
                     <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                      Voltee el paquete de hojas completo
+                      Voltee {multiPrinter ? 'cada' : 'el'} paquete de hojas completo
                     </p>
                     <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
                       El lado impreso debe quedar hacia abajo
@@ -633,7 +749,7 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
                     3
                   </div>
                   <p className="text-sm pt-0.5" style={{ color: 'var(--text-primary)' }}>
-                    Coloque las hojas en la bandeja de entrada en el mismo orden
+                    Coloque las hojas en la bandeja de entrada{multiPrinter ? ' de cada impresora' : ''} en el mismo orden
                   </p>
                 </div>
               </div>
@@ -678,7 +794,7 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
               style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
             >
               <Check size={16} />
-              Listo, hojas volteadas
+              Listo, hojas volteadas{multiPrinter ? ' en todas las impresoras' : ''}
             </button>
           </div>
         )}
@@ -686,26 +802,26 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
         {/* Step: Printing even pages */}
         {step === 'printing-even' && (
           <div className="text-center py-6">
-            {totalBatches > 1 && (
+            {(totalCopies > 1 || multiPrinter) && (
               <div className="text-xs font-medium mb-4 px-3 py-1.5 rounded-full inline-block" style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}>
-                Lote {currentBatch} de {totalBatches} ({currentBatchCopies} {currentBatchCopies === 1 ? 'copia' : 'copias'})
+                {roundLabel}
               </div>
             )}
             {printingStep && !error && (
               <>
                 <Loader2 size={40} className="mx-auto mb-4 animate-spin" style={{ color: 'var(--accent)' }} />
                 <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                  Imprimiendo paginas pares en reversa...
+                  Imprimiendo paginas pares en reversa{multiPrinter ? ` en ${activeThisRound.length} impresoras` : ''}...
                 </p>
                 <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-                  {currentBatchCopies} {currentBatchCopies === 1 ? 'copia' : 'copias'} - paginas 2, 4, 6... en orden inverso
+                  Paginas 2, 4, 6... en orden inverso
                 </p>
               </>
             )}
           </div>
         )}
 
-        {/* Step: Batch done */}
+        {/* Step: Round/copy done */}
         {step === 'batch-done' && (
           <div className="text-center py-6 space-y-4">
             <div
@@ -716,11 +832,20 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
             </div>
             <div>
               <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                Lote {currentBatch} completado
+                {multiPrinter
+                  ? `Ronda ${currentRound} completada`
+                  : `Copia ${currentRound} completada`
+                }
               </p>
               <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
                 {completedCopies} de {totalCopies} copias completadas.
-                Faltan {totalCopies - completedCopies} copias ({totalBatches - currentBatch} {totalBatches - currentBatch === 1 ? 'lote' : 'lotes'} mas).
+                {totalCopies - completedCopies === 1 ? ' Falta 1 copia.' : ` Faltan ${totalCopies - completedCopies} copias.`}
+              </p>
+              <p className="text-xs mt-2" style={{ color: 'var(--warning)' }}>
+                {multiPrinter
+                  ? 'Retire las copias terminadas de cada impresora antes de continuar.'
+                  : 'Retire la copia terminada de la bandeja antes de continuar.'
+                }
               </p>
             </div>
 
@@ -735,13 +860,32 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
               />
             </div>
 
+            {/* Progreso por impresora */}
+            {multiPrinter && (
+              <div className="space-y-1.5 text-left">
+                {allocations.map(a => (
+                  <div key={a.name} className="flex items-center gap-2">
+                    <span className="text-[11px] truncate flex-1" style={{ color: 'var(--text-secondary)' }}>
+                      {getPrinterDesc(a.name)}
+                    </span>
+                    <span className="text-[11px] font-medium" style={{ color: a.completed >= a.copies ? 'var(--success)' : 'var(--text-primary)' }}>
+                      {a.completed}/{a.copies}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <button
-              onClick={startNextBatch}
+              onClick={startNextRound}
               className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90"
               style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
             >
               <Printer size={16} />
-              Iniciar lote {currentBatch + 1}
+              {multiPrinter
+                ? `Iniciar ronda ${currentRound + 1}`
+                : `Iniciar copia ${currentRound + 1}`
+              }
             </button>
           </div>
         )}
@@ -760,8 +904,8 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
                 Impresion doble cara completada
               </p>
               <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-                Se imprimieron {totalCopies} {totalCopies === 1 ? 'copia' : 'copias'} a doble cara exitosamente
-                {totalBatches > 1 && ` en ${totalBatches} lotes`}.
+                Se {totalCopies === 1 ? 'imprimio 1 copia' : `imprimieron ${totalCopies} copias`} a doble cara exitosamente
+                {multiPrinter && ` en ${allocations.length} impresoras`}.
               </p>
             </div>
 
