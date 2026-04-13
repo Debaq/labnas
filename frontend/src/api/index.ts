@@ -70,7 +70,12 @@ export async function uploadFile(file: File, path?: string): Promise<void> {
 }
 
 export function downloadFile(path: string): void {
-  const url = `/api/files/download?path=${encodeURIComponent(path)}`
+  let token = ''
+  try {
+    const saved = localStorage.getItem('labnas_auth')
+    if (saved) token = JSON.parse(saved).token || ''
+  } catch {}
+  const url = `/api/files/download?path=${encodeURIComponent(path)}&token=${encodeURIComponent(token)}`
   window.open(url, '_blank')
 }
 
