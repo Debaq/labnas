@@ -17,7 +17,25 @@ import EmailPage from './pages/EmailPage'
 import InventoryPage from './pages/InventoryPage'
 import PortfolioPage from './pages/PortfolioPage'
 import PlaylistEditorPage from './pages/PlaylistEditorPage'
+import SensorsPage from './pages/SensorsPage'
+import AdminPage from './pages/AdminPage'
 import { Loader2 } from 'lucide-react'
+
+// Registro de modulos: mapea module_id -> ruta + componente
+const MODULE_ROUTES: Record<string, { path: string; component: React.ComponentType }> = {
+  dashboard:  { path: '/dashboard',  component: DashboardPage },
+  files:      { path: '/files',      component: FilesPage },
+  printing:   { path: '/printing',   component: PrintingPage },
+  printers3d: { path: '/printers3d', component: Printers3DPage },
+  network:    { path: '/network',    component: NetworkPage },
+  tasks:      { path: '/tasks',      component: TasksPage },
+  notes:      { path: '/notes',      component: NotesPage },
+  email:      { path: '/email',      component: EmailPage },
+  inventory:  { path: '/inventory',  component: InventoryPage },
+  portfolio:  { path: '/portfolio',  component: PortfolioPage },
+  sensors:    { path: '/sensors',    component: SensorsPage },
+  terminal:   { path: '/terminal',   component: TerminalPage },
+}
 
 function LoadingScreen() {
   const logoUrl = localStorage.getItem('labnas_logo_url')
@@ -38,7 +56,7 @@ function LoadingScreen() {
 }
 
 function AppRoutes() {
-  const { user, loading } = useAuth()
+  const { user, loading, isModuleEnabled } = useAuth()
 
   if (loading) {
     return <LoadingScreen />
@@ -52,19 +70,17 @@ function AppRoutes() {
     <Routes>
       <Route element={<Layout />}>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/files" element={<FilesPage />} />
-        <Route path="/printing" element={<PrintingPage />} />
-        <Route path="/printers3d" element={<Printers3DPage />} />
-        <Route path="/network" element={<NetworkPage />} />
-        <Route path="/tasks" element={<TasksPage />} />
-        <Route path="/notes" element={<NotesPage />} />
-        <Route path="/email" element={<EmailPage />} />
-        <Route path="/inventory" element={<InventoryPage />} />
-        <Route path="/portfolio" element={<PortfolioPage />} />
-        <Route path="/terminal" element={<TerminalPage />} />
+        {Object.entries(MODULE_ROUTES)
+          .filter(([id]) => isModuleEnabled(id))
+          .map(([id, { path, component: Comp }]) => (
+            <Route key={id} path={path} element={<Comp />} />
+          ))}
+        {/* Rutas no-modulo: siempre disponibles */}
         <Route path="/playlists/:id" element={<PlaylistEditorPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/admin" element={<AdminPage />} />
+        {/* Catch-all: redirige a dashboard */}
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>
     </Routes>
   )

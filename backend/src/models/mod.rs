@@ -10,3 +10,4 @@ pub mod system;
 pub mod tasks;
 pub mod inventory;
 pub mod portfolio;
+pub mod sensors;

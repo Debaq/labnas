@@ -23,14 +23,16 @@ async fn main() {
     let pool = db::init_db();
 
     // Read startup settings from DB
-    let (mdns_enabled, mdns_hostname, upload_limit_mb) = {
+    let (mdns_enabled, mdns_hostname, upload_limit_mb, enabled_modules_set) = {
         let conn = pool.get().expect("DB pool error at startup");
         let mdns_enabled = db::get_setting_bool(&conn, "mdns_enabled");
         let mdns_hostname = db::get_setting(&conn, "mdns_hostname")
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "labnas".to_string());
         let upload_limit_mb = db::get_setting_u32(&conn, "upload_limit_mb", 50);
-        (mdns_enabled, mdns_hostname, upload_limit_mb)
+        let enabled_modules: std::collections::HashSet<String> =
+            db::get_enabled_module_ids(&conn).into_iter().collect();
+        (mdns_enabled, mdns_hostname, upload_limit_mb, enabled_modules)
     };
 
     let shutdown = Arc::new(Notify::new());
@@ -51,6 +53,8 @@ async fn main() {
         music: Arc::new(Mutex::new(handlers::music::MusicState::default())),
         music_process: Arc::new(Mutex::new(None)),
         update_cache: Arc::new(Mutex::new(state::UpdateCache::default())),
+        sensors: Arc::new(Mutex::new(state::SensorState::default())),
+        enabled_modules: Arc::new(Mutex::new(enabled_modules_set)),
     };
 
     // Start mDNS if enabled
@@ -87,6 +91,10 @@ async fn main() {
         .route("/api/notifications/telegram/chat/{chat_id}/link", post(handlers::auth::admin_link_chat))
         // Health
         .route("/api/health", get(handlers::system::health_handler))
+        // Modules
+        .route("/api/modules", get(handlers::modules::list_modules))
+        .route("/api/modules/{id}", put(handlers::modules::toggle_module))
+        .route("/api/modules/order", put(handlers::modules::reorder_modules))
         // Files
         .route("/api/files", get(handlers::files::list_files))
         .route("/api/files", delete(handlers::files::delete_file))
@@ -278,24 +286,53 @@ async fn main() {
         .route("/api/reports/mine", get(handlers::reports::my_reports))
         .route("/api/reports/{id}", put(handlers::reports::respond_report))
         .route("/api/reports/{id}", delete(handlers::reports::delete_report))
+        // Sensores
+        .route("/api/sensors/devices", get(handlers::sensors::list_devices))
+        .route("/api/sensors/devices", post(handlers::sensors::register_device))
+        .route("/api/sensors/devices/{id}", delete(handlers::sensors::delete_device))
+        .route("/api/sensors/devices/{id}/status", put(handlers::sensors::update_device_status))
+        .route("/api/sensors/devices/{id}/name", put(handlers::sensors::update_device_name))
+        .route("/api/sensors/devices/{id}/readings", get(handlers::sensors::get_readings))
+        .route("/api/sensors/data", post(handlers::sensors::ingest_data))
+        .route("/api/sensors/latest", get(handlers::sensors::get_latest))
+        .route("/api/sensors/alerts", get(handlers::sensors::list_alerts))
+        .route("/api/sensors/alerts", post(handlers::sensors::create_alert))
+        .route("/api/sensors/alerts/{id}", put(handlers::sensors::update_alert))
+        .route("/api/sensors/alerts/{id}", delete(handlers::sensors::delete_alert))
+        .route("/api/sensors/receiver/config", post(handlers::sensors::configure_receiver))
+        .route("/api/sensors/receiver/status", get(handlers::sensors::receiver_status))
         .layer(axum::extract::DefaultBodyLimit::max(upload_limit_mb as usize * 1024 * 1024))
         .layer(axum_mw::from_fn_with_state(state.clone(), middleware::permission_check))
         .layer(cors)
         .with_state(state.clone());
 
-    // Spawn Telegram bot polling loop + daily scheduler + task reminders + email check
+    // Background tasks: siempre activas (infraestructura)
     tokio::spawn(handlers::notifications::telegram_bot_loop(state.clone()));
     tokio::spawn(handlers::notifications::task_reminder_loop(state.clone()));
-    tokio::spawn(handlers::email::email_check_loop(state.clone()));
     tokio::spawn(handlers::notifications::daily_notification_loop(state.clone()));
-    tokio::spawn(handlers::printers3d::printer_monitor_loop(state.clone()));
     tokio::spawn(handlers::system::update_check_loop(state.clone()));
-    // Asegurar acceso X para video/audio
-    tokio::spawn(handlers::music::ensure_x_access());
-    // Monitor de reproducción: avanza la cola automáticamente cuando mpv termina
-    tokio::spawn(handlers::music::music_monitor_loop(state.clone()));
-    // Escaneo de red al inicio + periódico cada 5 min
-    tokio::spawn(handlers::network::network_scan_loop(state));
+
+    // Background tasks: condicionales por modulo
+    {
+        let mods = state.enabled_modules.lock().await;
+        if mods.contains("email") {
+            tokio::spawn(handlers::email::email_check_loop(state.clone()));
+        }
+        if mods.contains("printers3d") {
+            tokio::spawn(handlers::printers3d::printer_monitor_loop(state.clone()));
+        }
+        if mods.contains("music") {
+            tokio::spawn(handlers::music::ensure_x_access());
+            tokio::spawn(handlers::music::music_monitor_loop(state.clone()));
+        }
+        if mods.contains("sensors") {
+            tokio::spawn(handlers::sensors::serial_listener_loop(state.clone()));
+            tokio::spawn(handlers::sensors::sensor_monitor_loop(state.clone()));
+        }
+        if mods.contains("network") {
+            tokio::spawn(handlers::network::network_scan_loop(state.clone()));
+        }
+    }
 
     // Static files
     let exe_dir = std::env::current_exe()

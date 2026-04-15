@@ -8,6 +8,33 @@ use axum::{
 use crate::models::notifications::UserRole;
 use crate::state::AppState;
 
+/// Mapeo modulo -> prefijos de ruta API
+const MODULE_ROUTE_PREFIXES: &[(&str, &[&str])] = &[
+    ("files",      &["/api/files", "/api/shares", "/api/share/", "/api/download-url"]),
+    ("network",    &["/api/network"]),
+    ("printing",   &["/api/printing"]),
+    ("printers3d", &["/api/printers3d"]),
+    ("tasks",      &["/api/tasks", "/api/projects", "/api/events"]),
+    ("notes",      &["/api/notes"]),
+    ("email",      &["/api/email"]),
+    ("inventory",  &["/api/inventory"]),
+    ("portfolio",  &["/api/portfolio"]),
+    ("sensors",    &["/api/sensors"]),
+    ("terminal",   &["/api/terminal"]),
+    ("music",      &["/api/music"]),
+];
+
+fn resolve_module_for_path(path: &str) -> Option<&'static str> {
+    for (module_id, prefixes) in MODULE_ROUTE_PREFIXES {
+        for prefix in *prefixes {
+            if path.starts_with(prefix) {
+                return Some(module_id);
+            }
+        }
+    }
+    None
+}
+
 pub async fn permission_check(
     State(state): State<AppState>,
     request: Request,
@@ -20,10 +47,20 @@ pub async fn permission_check(
     if matches!(
         path.as_str(),
         "/api/health" | "/api/auth/login" | "/api/auth/register" | "/api/auth/has-users" | "/api/system/branding"
+        | "/api/sensors/data"
     ) || path.starts_with("/api/share/")
     || !path.starts_with("/api/")
     {
         return next.run(request).await;
+    }
+
+    // Check if target module is enabled (except public sensor data endpoint)
+    if let Some(module_id) = resolve_module_for_path(&path) {
+        // /api/sensors/data is public, already handled above
+        let enabled = state.enabled_modules.lock().await.contains(module_id);
+        if !enabled {
+            return (StatusCode::NOT_FOUND, "Modulo no disponible").into_response();
+        }
     }
 
     // Extract token (header o query param para WebSocket)
@@ -117,6 +154,18 @@ pub async fn permission_check(
         (&Method::POST, "/api/reports/config") => is_admin,
         (&Method::PUT, p) if p.starts_with("/api/reports/") => is_admin,
         (&Method::DELETE, p) if p.starts_with("/api/reports/") => is_admin,
+
+        // Modules: admin only for toggle/reorder
+        (&Method::PUT, p) if p.starts_with("/api/modules") => is_admin,
+
+        // Sensors: device management, alerts config, receiver config = admin
+        (&Method::POST, p) if p.starts_with("/api/sensors/devices") => is_admin,
+        (&Method::DELETE, p) if p.starts_with("/api/sensors/devices") => is_admin,
+        (&Method::PUT, p) if p.starts_with("/api/sensors/devices") => is_admin,
+        (&Method::POST, p) if p.starts_with("/api/sensors/alerts") => is_admin,
+        (&Method::PUT, p) if p.starts_with("/api/sensors/alerts") => is_admin,
+        (&Method::DELETE, p) if p.starts_with("/api/sensors/alerts") => is_admin,
+        (&Method::POST, "/api/sensors/receiver/config") => is_admin,
 
         // Email: groq-key solo admin, el resto cualquier autenticado
         (&Method::POST, "/api/email/groq-key") => is_admin,

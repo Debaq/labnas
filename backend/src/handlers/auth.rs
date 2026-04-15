@@ -126,11 +126,15 @@ pub async fn register(
 
     state.log_activity("Registro", &username, &username).await;
 
+    let modules = crate::db::db_op(&state.db, |conn| Ok(crate::db::get_modules(conn))).await
+        .unwrap_or_default();
+
     Ok(Json(AuthResponse {
         token,
         username,
         role,
         permissions,
+        enabled_modules: modules,
     }))
 }
 
@@ -191,11 +195,15 @@ pub async fn login(
         created_at: std::time::Instant::now(),
     });
 
+    let modules = crate::db::db_op(&state.db, |conn| Ok(crate::db::get_modules(conn))).await
+        .unwrap_or_default();
+
     Ok(Json(AuthResponse {
         token,
         username,
         role,
         permissions,
+        enabled_modules: modules,
     }))
 }
 
@@ -223,11 +231,15 @@ pub async fn me(
         ).optional().map_err(|e| e.to_string())
     }).await.ok().flatten().flatten();
 
+    let modules = crate::db::db_op(&state.db, |conn| Ok(crate::db::get_modules(conn))).await
+        .unwrap_or_default();
+
     Ok(Json(MeResponse {
         username,
         role,
         permissions,
         linked_telegram: linked,
+        enabled_modules: modules,
     }))
 }
 
@@ -322,6 +334,7 @@ pub async fn list_users(
                     archivos_escritura: row.get(4)?,
                 },
                 linked_telegram: row.get(5)?,
+                enabled_modules: vec![],
             })
         }).map_err(|e| e.to_string())?;
 
@@ -535,11 +548,15 @@ pub async fn rename_user(
 
     state.log_activity("Renombrado", &format!("{} -> {}", old_username, new_username), &new_username).await;
 
+    let modules = crate::db::db_op(&state.db, |conn| Ok(crate::db::get_modules(conn))).await
+        .unwrap_or_default();
+
     Ok(Json(AuthResponse {
         token: token,
         username: new_username,
         role,
         permissions,
+        enabled_modules: modules,
     }))
 }
 

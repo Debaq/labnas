@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::notifications::{UserPermissions, UserRole};
+use crate::db::ModuleInfo;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebUser {
@@ -32,6 +33,7 @@ pub struct AuthResponse {
     pub username: String,
     pub role: UserRole,
     pub permissions: UserPermissions,
+    pub enabled_modules: Vec<ModuleInfo>,
 }
 
 #[derive(Debug, Serialize)]
@@ -40,6 +42,7 @@ pub struct MeResponse {
     pub role: UserRole,
     pub permissions: UserPermissions,
     pub linked_telegram: Option<i64>,
+    pub enabled_modules: Vec<ModuleInfo>,
 }
 
 #[derive(Debug, Deserialize)]

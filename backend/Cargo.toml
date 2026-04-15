@@ -1,6 +1,6 @@
 [package]
 name = "labnas-backend"
-version = "2.6.9"
+version = "2.7.0"
 edition = "2021"
 
 [dependencies]
@@ -32,6 +32,7 @@ regex-lite = "0.1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.25"
+serialport = "4"
 
 [features]
 default = []

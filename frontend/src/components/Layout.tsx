@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight, Mail, Download, Package, GraduationCap } from 'lucide-react'
+import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight, Mail, Download, Package, GraduationCap, Thermometer, Shield } from 'lucide-react'
 import { useTheme } from '../themes/ThemeContext'
 import { useAuth } from '../auth/AuthContext'
 import { shutdownServer, getBranding, fetchHealth, checkUpdate } from '../api'
@@ -19,13 +19,15 @@ const pageTitles: Record<string, string> = {
   '/email': 'Correo',
   '/inventory': 'Inventario',
   '/portfolio': 'Portafolio Academico',
+  '/sensors': 'Sensores',
   '/settings': 'Configuracion',
+  '/admin': 'Administracion',
   '/playlists': 'Editor de Playlist',
 }
 
 export default function Layout() {
   const { theme, setTheme, themeNames } = useTheme()
-  const { user, logout, can, isAdmin } = useAuth()
+  const { user, logout, can, isAdmin, enabledModules, isModuleEnabled } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const pageTitle = pageTitles[location.pathname] || pageTitles['/' + location.pathname.split('/')[1]] || 'LabNAS'
@@ -110,20 +112,38 @@ export default function Layout() {
     } catch { /* conexion se cortara */ }
   }
 
-  // Build nav items based on permissions
+  // Module nav registry
+  const moduleNav: Record<string, { to: string; label: string; icon: any }> = {
+    dashboard:  { to: '/dashboard',  label: 'Dashboard',       icon: LayoutDashboard },
+    files:      { to: '/files',      label: 'Archivos',        icon: FolderOpen },
+    printing:   { to: '/printing',   label: 'Impresion',       icon: Printer },
+    printers3d: { to: '/printers3d', label: 'Impresoras 3D',   icon: Box },
+    network:    { to: '/network',    label: 'Red',             icon: Network },
+    tasks:      { to: '/tasks',      label: 'Tareas / Horario', icon: ClipboardList },
+    notes:      { to: '/notes',      label: 'Notas',           icon: FileText },
+    email:      { to: '/email',      label: 'Correo',          icon: Mail },
+    inventory:  { to: '/inventory',  label: 'Inventario',      icon: Package },
+    portfolio:  { to: '/portfolio',  label: 'Portafolio',      icon: GraduationCap },
+    sensors:    { to: '/sensors',    label: 'Sensores',        icon: Thermometer },
+    terminal:   { to: '/terminal',   label: 'Terminal',        icon: TerminalSquare },
+  }
+
+  // Build nav items from enabled modules (sorted by display_order)
+  const moduleItems = enabledModules
+    .filter(m => m.enabled && moduleNav[m.id])
+    .sort((a, b) => a.display_order - b.display_order)
+    .filter(m => {
+      if (m.id === 'terminal') return can('terminal')
+      if (m.id === 'printing') return can('impresion')
+      return true
+    })
+    .map(m => ({ ...moduleNav[m.id], show: true }))
+
+  // Fixed items at end
   const navItems = [
-    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
-    { to: '/files', label: 'Archivos', icon: FolderOpen, show: true },
-    { to: '/printing', label: 'Impresion', icon: Printer, show: can('impresion') },
-    { to: '/printers3d', label: 'Impresoras 3D', icon: Box, show: true },
-    { to: '/network', label: 'Red', icon: Network, show: true },
-    { to: '/tasks', label: 'Tareas / Horario', icon: ClipboardList, show: true },
-    { to: '/notes', label: 'Notas', icon: FileText, show: true },
-    { to: '/email', label: 'Correo', icon: Mail, show: true },
-    { to: '/inventory', label: 'Inventario', icon: Package, show: true },
-    { to: '/portfolio', label: 'Portafolio', icon: GraduationCap, show: true },
-    { to: '/terminal', label: 'Terminal', icon: TerminalSquare, show: can('terminal') },
+    ...moduleItems,
     { to: '/settings', label: 'Configuracion', icon: Settings, show: true },
+    { to: '/admin', label: 'Admin', icon: Shield, show: isAdmin },
   ]
 
   const roleLabel = user?.role === 'admin' ? 'Admin' : user?.role === 'operador' ? 'Operador' : user?.role === 'observador' ? 'Observador' : 'Pendiente'
@@ -311,12 +331,12 @@ export default function Layout() {
           <div className={location.pathname === '/terminal' ? 'hidden' : 'p-8 h-full overflow-auto'}>
             <Outlet />
           </div>
-          {can('terminal') && <PersistentTerminal />}
+          {isModuleEnabled('terminal') && can('terminal') && <PersistentTerminal />}
         </main>
       </div>
 
       {/* Music Panel */}
-      <MusicPanel />
+      {isModuleEnabled('music') && <MusicPanel />}
     </div>
   )
 }

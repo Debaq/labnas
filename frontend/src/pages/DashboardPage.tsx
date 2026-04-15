@@ -63,7 +63,7 @@ function getFormattedDate(): string {
 }
 
 export default function DashboardPage() {
-  const { user } = useAuth()
+  const { user, isModuleEnabled } = useAuth()
   const greeting = useMemo(() => getGreeting(), [])
   const formattedDate = useMemo(() => getFormattedDate(), [])
 
@@ -83,35 +83,65 @@ export default function DashboardPage() {
   async function loadData(initial = false) {
     if (initial) setLoading(true)
     try {
-      const [disksData, hostsData, healthData, sysInfoData, printers3dData, servicesData, tasksData, eventsData, projectsData] = await Promise.allSettled([
+      // Always fetch system basics
+      const promises: Promise<any>[] = [
         fetchDisks(),
-        fetchHosts(),
         fetchHealth(),
         fetchSystemInfo(),
-        fetchPrinters3D(),
         getServices(),
-        fetchTasks(),
-        fetchEvents(),
-        fetchProjects(),
-      ])
+      ]
+      // Conditional fetches by module
+      const hasNetwork = isModuleEnabled('network')
+      const hasPrinters3d = isModuleEnabled('printers3d')
+      const hasTasks = isModuleEnabled('tasks')
+
+      if (hasNetwork) promises.push(fetchHosts())
+      if (hasPrinters3d) promises.push(fetchPrinters3D())
+      if (hasTasks) {
+        promises.push(fetchTasks())
+        promises.push(fetchEvents())
+        promises.push(fetchProjects())
+      }
+
+      const results = await Promise.allSettled(promises)
+      let idx = 0
+
+      // System basics (always)
+      const disksData = results[idx++]
+      const healthData = results[idx++]
+      const sysInfoData = results[idx++]
+      const servicesData = results[idx++]
+
       if (disksData.status === 'fulfilled') setDisks(disksData.value)
-      if (hostsData.status === 'fulfilled') setHosts(hostsData.value)
       if (healthData.status === 'fulfilled') { setHealth(healthData.value); if (healthData.value.ip) setServerIp(healthData.value.ip) }
       if (sysInfoData.status === 'fulfilled') setSystemInfo(sysInfoData.value)
       if (servicesData.status === 'fulfilled') setServices(servicesData.value)
-      if (tasksData.status === 'fulfilled') setTasks(tasksData.value)
-      if (eventsData.status === 'fulfilled') setEvents(eventsData.value)
-      if (projectsData.status === 'fulfilled') setProjects(projectsData.value)
-      if (printers3dData.status === 'fulfilled') {
-        setPrinters3d(printers3dData.value)
-        const statusResults = await Promise.allSettled(
-          printers3dData.value.map((p) => fetchPrinter3DStatus(p.id))
-        )
-        setPrinterStatuses(
-          statusResults
-            .filter((r): r is PromiseFulfilledResult<Printer3DStatus> => r.status === 'fulfilled')
-            .map((r) => r.value)
-        )
+
+      if (hasNetwork) {
+        const hostsData = results[idx++]
+        if (hostsData.status === 'fulfilled') setHosts(hostsData.value)
+      }
+      if (hasPrinters3d) {
+        const printers3dData = results[idx++]
+        if (printers3dData.status === 'fulfilled') {
+          setPrinters3d(printers3dData.value)
+          const statusResults = await Promise.allSettled(
+            printers3dData.value.map((p: Printer3DConfig) => fetchPrinter3DStatus(p.id))
+          )
+          setPrinterStatuses(
+            statusResults
+              .filter((r): r is PromiseFulfilledResult<Printer3DStatus> => r.status === 'fulfilled')
+              .map((r) => r.value)
+          )
+        }
+      }
+      if (hasTasks) {
+        const tasksData = results[idx++]
+        const eventsData = results[idx++]
+        const projectsData = results[idx++]
+        if (tasksData.status === 'fulfilled') setTasks(tasksData.value)
+        if (eventsData.status === 'fulfilled') setEvents(eventsData.value)
+        if (projectsData.status === 'fulfilled') setProjects(projectsData.value)
       }
     } finally {
       if (initial) setLoading(false)
@@ -179,7 +209,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Printers 3D Row */}
-      {printers3d.length > 0 && (
+      {isModuleEnabled('printers3d') && printers3d.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <StatCard
             icon={<Box size={24} style={{ color: 'var(--accent)' }} />}
@@ -202,6 +232,7 @@ export default function DashboardPage() {
       {/* Second Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Network Devices */}
+        {isModuleEnabled('network') && (
         <div
           className="rounded-xl p-6 transition-all duration-200 hover:shadow-lg"
           style={{
@@ -242,6 +273,7 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+        )}
 
         {/* System Status */}
         <div
@@ -313,6 +345,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Tareas pendientes y Eventos proximos */}
+      {isModuleEnabled('tasks') && (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Tareas pendientes */}
         <div
@@ -441,6 +474,7 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+      )}
 
       {/* Servicios del Lab */}
       {services.length > 0 && (

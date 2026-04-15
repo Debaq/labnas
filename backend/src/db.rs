@@ -58,6 +58,9 @@ fn create_schema(conn: &Connection) {
 
 fn migrate_from_json(conn: &Connection) {
     let json_path = crate::config::config_path();
+    // Always seed default modules
+    seed_modules(conn);
+
     if !json_path.exists() {
         println!("[LabNAS] No config.json encontrado, instalacion nueva");
         // Insert singleton rows
@@ -589,6 +592,99 @@ pub fn get_setting_u32(conn: &Connection, key: &str, default: u32) -> u32 {
 }
 
 // ═══════════════════════════════════════
+// Module helpers
+// ═══════════════════════════════════════
+
+const DEFAULT_MODULES: &[(&str, i32)] = &[
+    ("dashboard", 0),
+    ("files", 1),
+    ("network", 2),
+    ("printing", 3),
+    ("printers3d", 4),
+    ("tasks", 5),
+    ("notes", 6),
+    ("email", 7),
+    ("inventory", 8),
+    ("portfolio", 9),
+    ("sensors", 10),
+    ("terminal", 11),
+    ("music", 12),
+];
+
+fn seed_modules(conn: &Connection) {
+    for (id, order) in DEFAULT_MODULES {
+        conn.execute(
+            "INSERT OR IGNORE INTO modules (id, enabled, display_order) VALUES (?1, 1, ?2)",
+            params![id, order],
+        ).ok();
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ModuleInfo {
+    pub id: String,
+    pub enabled: bool,
+    pub display_order: i32,
+    pub locked: bool,
+}
+
+pub fn get_modules(conn: &Connection) -> Vec<ModuleInfo> {
+    let mut stmt = conn
+        .prepare("SELECT id, enabled, display_order FROM modules ORDER BY display_order")
+        .unwrap();
+    stmt.query_map([], |row| {
+        let id: String = row.get(0)?;
+        let enabled: bool = row.get(1)?;
+        let display_order: i32 = row.get(2)?;
+        let locked = id == "dashboard";
+        Ok(ModuleInfo { id, enabled, display_order, locked })
+    })
+    .unwrap()
+    .filter_map(|r| r.ok())
+    .collect()
+}
+
+pub fn get_enabled_module_ids(conn: &Connection) -> Vec<String> {
+    let mut stmt = conn
+        .prepare("SELECT id FROM modules WHERE enabled = 1 ORDER BY display_order")
+        .unwrap();
+    stmt.query_map([], |row| row.get(0))
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
+}
+
+pub fn is_module_enabled(conn: &Connection, module_id: &str) -> bool {
+    conn.query_row(
+        "SELECT enabled FROM modules WHERE id = ?1",
+        params![module_id],
+        |row| row.get::<_, bool>(0),
+    )
+    .unwrap_or(true)
+}
+
+pub fn set_module_enabled(conn: &Connection, module_id: &str, enabled: bool) -> Result<(), String> {
+    let affected = conn.execute(
+        "UPDATE modules SET enabled = ?1 WHERE id = ?2",
+        params![enabled, module_id],
+    ).map_err(|e| format!("Error actualizando modulo {}: {}", module_id, e))?;
+    if affected == 0 {
+        return Err(format!("Modulo '{}' no existe", module_id));
+    }
+    Ok(())
+}
+
+pub fn set_module_order(conn: &Connection, modules: &[(String, i32)]) -> Result<(), String> {
+    for (id, order) in modules {
+        conn.execute(
+            "UPDATE modules SET display_order = ?1 WHERE id = ?2",
+            params![order, id],
+        ).map_err(|e| format!("Error reordenando modulo {}: {}", id, e))?;
+    }
+    Ok(())
+}
+
+// ═══════════════════════════════════════
 // Schema
 // ═══════════════════════════════════════
 
@@ -876,5 +972,50 @@ CREATE TABLE IF NOT EXISTS user_reports (
     admin_response TEXT,
     created_at TEXT NOT NULL,
     responded_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sensor_devices (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    mac TEXT NOT NULL UNIQUE,
+    device_type TEXT NOT NULL DEFAULT '',
+    connection TEXT NOT NULL DEFAULT 'espnow',
+    status TEXT NOT NULL DEFAULT 'pending',
+    battery INTEGER,
+    rssi INTEGER,
+    last_seen TEXT,
+    config TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sensor_readings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id TEXT NOT NULL REFERENCES sensor_devices(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    value REAL NOT NULL,
+    unit TEXT NOT NULL DEFAULT '',
+    timestamp TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sensor_readings_device_time
+    ON sensor_readings(device_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_sensor_readings_device_key_time
+    ON sensor_readings(device_id, key, timestamp);
+
+CREATE TABLE IF NOT EXISTS sensor_alerts (
+    id TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL REFERENCES sensor_devices(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    condition TEXT NOT NULL DEFAULT 'above',
+    threshold REAL NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    cooldown_minutes INTEGER NOT NULL DEFAULT 30,
+    last_triggered TEXT
+);
+
+CREATE TABLE IF NOT EXISTS modules (
+    id TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    display_order INTEGER NOT NULL DEFAULT 0
 );
 "#;

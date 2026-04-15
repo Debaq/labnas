@@ -3,9 +3,10 @@ use crate::handlers::music::MusicState;
 use crate::models::email::EmailMessage;
 use crate::models::network::NetworkHost;
 use crate::models::notifications::{UserPermissions, UserRole};
+use crate::models::sensors::SensorLatest;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, Notify};
@@ -45,6 +46,16 @@ pub struct AppState {
     pub music: Arc<Mutex<MusicState>>,
     pub music_process: Arc<Mutex<Option<tokio::process::Child>>>,
     pub update_cache: Arc<Mutex<UpdateCache>>,
+    pub sensors: Arc<Mutex<SensorState>>,
+    pub enabled_modules: Arc<Mutex<HashSet<String>>>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SensorState {
+    pub latest: HashMap<String, SensorLatest>,
+    pub receiver_connected: bool,
+    pub receiver_port: Option<String>,
+    pub receiver_error: Option<String>,
 }
 
 /// Cache de la ultima consulta de actualizacion a GitHub

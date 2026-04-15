@@ -63,6 +63,15 @@ export interface AutostartStatus {
   uninstall_cmd: string
 }
 
+// --- Modules ---
+
+export interface ModuleInfo {
+  id: string
+  enabled: boolean
+  display_order: number
+  locked?: boolean
+}
+
 // --- Notifications (Telegram) ---
 
 export type UserRole = 'pendiente' | 'observador' | 'operador' | 'admin'
@@ -407,6 +416,58 @@ export interface Project {
   members: string[]
   member_tags: Record<string, string[]>
   created_at: string
+}
+
+// --- Sensors ---
+
+export type SensorConnection = 'espnow' | 'wifi'
+export type SensorDeviceStatus = 'pending' | 'accepted' | 'rejected'
+export type AlertCondition = 'above' | 'below'
+
+export interface SensorDevice {
+  id: string
+  name: string
+  mac: string
+  device_type: string
+  connection: SensorConnection
+  status: SensorDeviceStatus
+  battery: number | null
+  rssi: number | null
+  last_seen: string | null
+  config: string
+  created_at: string
+}
+
+export interface SensorReading {
+  id: number
+  device_id: string
+  key: string
+  value: number
+  unit: string
+  timestamp: string
+}
+
+export interface SensorAlert {
+  id: string
+  device_id: string
+  key: string
+  condition: AlertCondition
+  threshold: number
+  enabled: boolean
+  cooldown_minutes: number
+  last_triggered: string | null
+}
+
+export interface SensorLatest {
+  device: SensorDevice | null
+  readings: Record<string, number>
+  online: boolean
+}
+
+export interface ReceiverStatus {
+  connected: boolean
+  port: string | null
+  error: string | null
 }
 
 // --- User Reports ---
