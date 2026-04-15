@@ -576,7 +576,10 @@ export default function TasksPage() {
                               )}
                               {ev.recurrence && ev.recurrence !== 'none' && (
                                 <span className="ml-1.5 px-1 py-0.5 rounded text-[9px]" style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}>
-                                  {ev.recurrence === 'daily' ? 'Diario' : ev.recurrence === 'weekly' ? 'Semanal' : 'Mensual'}
+                                  {ev.recurrence === 'daily' ? 'Diario' : ev.recurrence === 'weekly' ? 'Semanal' : ev.recurrence === 'monthly' ? 'Mensual' : ev.recurrence === 'weekdays' ? 'Lun-Vie' : ev.recurrence.startsWith('days:') ? (() => {
+                                    const dayNames = ['Lun','Mar','Mie','Jue','Vie','Sab','Dom']
+                                    return ev.recurrence.replace('days:', '').split(',').map(d => dayNames[parseInt(d)] || '').join(', ')
+                                  })() : ev.recurrence}
                                 </span>
                               )}
                             </p>
@@ -808,14 +811,49 @@ export default function TasksPage() {
                     </div>
                     <div>
                       <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Repetir</label>
-                      <select value={eventRecurrence} onChange={e => setEventRecurrence(e.target.value)}
+                      <select value={eventRecurrence.startsWith('days:') ? 'custom' : eventRecurrence} onChange={e => {
+                          const v = e.target.value
+                          if (v === 'custom') {
+                            // Default: día actual
+                            const d = eventDate ? new Date(eventDate + 'T12:00').getDay() : new Date().getDay()
+                            const chrono = d === 0 ? 6 : d - 1 // JS Sunday=0 → chrono Mon=0
+                            setEventRecurrence(`days:${chrono}`)
+                          } else {
+                            setEventRecurrence(v)
+                          }
+                        }}
                         className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
                         style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}>
                         <option value="">No repetir</option>
                         <option value="daily">Diario</option>
+                        <option value="weekdays">Dias habiles (Lun-Vie)</option>
                         <option value="weekly">Semanal</option>
                         <option value="monthly">Mensual</option>
+                        <option value="custom">Dias especificos...</option>
                       </select>
+                      {eventRecurrence.startsWith('days:') && (
+                        <div className="flex gap-1 mt-2">
+                          {['Lun','Mar','Mie','Jue','Vie','Sab','Dom'].map((day, i) => {
+                            const selected = eventRecurrence.replace('days:', '').split(',').includes(String(i))
+                            return (
+                              <button key={i} type="button" onClick={() => {
+                                const current = eventRecurrence.replace('days:', '').split(',').filter(Boolean).map(Number)
+                                const next = selected ? current.filter(d => d !== i) : [...current, i].sort()
+                                if (next.length === 0) return
+                                setEventRecurrence(`days:${next.join(',')}`)
+                              }}
+                                className="flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-all"
+                                style={{
+                                  backgroundColor: selected ? 'var(--accent)' : 'var(--input-bg)',
+                                  color: selected ? '#fff' : 'var(--text-secondary)',
+                                  border: `1px solid ${selected ? 'var(--accent)' : 'var(--input-border)'}`,
+                                }}>
+                                {day}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
                     </div>
                   </div>
                   {eventRecurrence && (

@@ -1973,6 +1973,32 @@ pub async fn task_reminder_loop(state: AppState) {
                                             let y = if parsed_date.month() == 12 { parsed_date.year() + 1 } else { parsed_date.year() };
                                             chrono::NaiveDate::from_ymd_opt(y, m, parsed_date.day().min(28))
                                         }
+                                        "weekdays" => {
+                                            // Avanzar al próximo día hábil (Lun-Vie)
+                                            let mut d = parsed_date + chrono::Duration::days(1);
+                                            while d.weekday().num_days_from_monday() >= 5 {
+                                                d += chrono::Duration::days(1);
+                                            }
+                                            Some(d)
+                                        }
+                                        r if r.starts_with("days:") => {
+                                            // "days:0,2,4" = Lun,Mie,Vie (num_days_from_monday)
+                                            let target_days: Vec<u32> = r[5..].split(',')
+                                                .filter_map(|s| s.trim().parse().ok())
+                                                .collect();
+                                            if target_days.is_empty() {
+                                                None
+                                            } else {
+                                                let mut d = parsed_date + chrono::Duration::days(1);
+                                                for _ in 0..7 {
+                                                    if target_days.contains(&d.weekday().num_days_from_monday()) {
+                                                        break;
+                                                    }
+                                                    d += chrono::Duration::days(1);
+                                                }
+                                                Some(d)
+                                            }
+                                        }
                                         _ => None,
                                     };
 
