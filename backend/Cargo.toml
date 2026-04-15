@@ -1,6 +1,6 @@
 [package]
 name = "labnas-backend"
-version = "2.6.7"
+version = "2.6.8"
 edition = "2021"
 
 [dependencies]
