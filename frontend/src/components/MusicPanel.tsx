@@ -448,12 +448,6 @@ export default function MusicPanel() {
                     <p className="text-[11px] truncate" style={{ color: 'var(--text-primary)' }}>{track.title}</p>
                     <p className="text-[10px] truncate" style={{ color: 'var(--text-secondary)' }}>{track.artist} · {formatDuration(track.duration)}</p>
                   </div>
-                  {musicState.current ? (
-                    <>
-                      <button onClick={() => !loadingTrack && handlePlay(track.id)} className="p-1 rounded hover:opacity-80" style={{ color: 'var(--accent)' }} title="Agregar a cola"><Plus size={14} /></button>
-                      <button onClick={() => !loadingTrack && handlePlay(track.id, true)} className="p-1 rounded hover:opacity-80" style={{ color: 'var(--success)' }} title="Reproducir ahora"><Play size={14} /></button>
-                    </>
-                  ) : <Play size={14} style={{ color: 'var(--accent)' }} />}
                   {/* Add to playlist dropdown */}
                   {playlists.length > 0 && (
                     <select className="w-5 h-5 opacity-0 hover:opacity-100 cursor-pointer absolute right-8" title="Agregar a lista"
@@ -467,6 +461,12 @@ export default function MusicPanel() {
                       {playlists.map(pl => <option key={pl.id} value={pl.id}>{pl.name}</option>)}
                     </select>
                   )}
+                  {musicState.current ? (
+                    <>
+                      <button onClick={() => !loadingTrack && handlePlay(track.id)} className="p-1 rounded hover:opacity-80 shrink-0" style={{ color: 'var(--accent)' }} title="Agregar a cola"><Plus size={14} /></button>
+                      <button onClick={() => !loadingTrack && handlePlay(track.id, true)} className="p-1 rounded hover:opacity-80 shrink-0" style={{ color: 'var(--success)' }} title="Reproducir ahora"><Play size={14} /></button>
+                    </>
+                  ) : <Play size={14} style={{ color: 'var(--accent)' }} />}
                 </div>
               ))}
             </div>

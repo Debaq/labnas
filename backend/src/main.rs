@@ -104,6 +104,7 @@ async fn main() {
         .route("/api/system/update/force-check", post(handlers::system::force_check_update))
         .route("/api/system/upload-limit", post(handlers::system::set_upload_limit))
         .route("/api/system/update/do", post(handlers::system::do_update))
+        .route("/api/system/reinstall", post(handlers::system::reinstall))
         .route("/api/system/branding", get(handlers::system::get_branding))
         .route("/api/system/branding", post(handlers::system::set_branding))
         .route("/api/system/mdns", get(handlers::system::get_mdns_status))

@@ -98,6 +98,7 @@ pub async fn permission_check(
         // Admin only: shutdown + update + mdns
         (&Method::POST, "/api/system/shutdown") => is_admin,
         (&Method::POST, "/api/system/update/do") => is_admin,
+        (&Method::POST, "/api/system/reinstall") => is_admin,
         (&Method::POST, "/api/system/branding") => is_admin,
         (&Method::POST, "/api/system/mdns") => is_admin,
 

@@ -358,6 +358,91 @@ pub async fn do_update(
     Ok((StatusCode::OK, format!("Actualizado a {}. Reiniciando...", latest)))
 }
 
+/// POST /api/system/reinstall - Reinstala la versión actual
+pub async fn reinstall(
+    State(state): State<AppState>,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    let tag = format!("v{}", CURRENT_VERSION);
+    let url = fetch_release_url_by_tag(&state.http_client, &tag).await
+        .ok_or((StatusCode::NOT_FOUND, format!("No se encontro release para {}", tag)))?;
+
+    let exe_path = std::env::current_exe()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let install_dir = exe_path.parent()
+        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No se pudo determinar directorio".to_string()))?;
+
+    let tmp_dir = format!("/tmp/labnas-reinstall-{}", uuid::Uuid::new_v4());
+
+    let resp = state.http_client.get(&url)
+        .timeout(Duration::from_secs(120))
+        .send().await
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Error descargando: {}", e)))?;
+
+    if !resp.status().is_success() {
+        return Err((StatusCode::BAD_REQUEST, format!("GitHub respondio {}", resp.status())));
+    }
+
+    let bytes = resp.bytes().await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error leyendo: {}", e)))?;
+
+    tokio::fs::create_dir_all(&tmp_dir).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let tarball = format!("{}/labnas.tar.gz", tmp_dir);
+    tokio::fs::write(&tarball, &bytes).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let output = Command::new("tar")
+        .args(["xzf", &tarball, "-C", &tmp_dir])
+        .output().await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if !output.status.success() {
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Error extrayendo tarball".to_string()));
+    }
+
+    let extracted = format!("{}/labnas", tmp_dir);
+    let copy_result = Command::new("cp")
+        .args(["-rf", &format!("{}/.", extracted), &install_dir.to_string_lossy()])
+        .output().await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if !copy_result.status.success() {
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Error copiando archivos".to_string()));
+    }
+
+    let _ = tokio::fs::remove_dir_all(&tmp_dir).await;
+
+    state.log_activity("Reinstalacion", &format!("Reinstalado v{}", CURRENT_VERSION), "sistema").await;
+
+    let _ = Command::new("systemctl")
+        .args(["restart", "labnas"])
+        .output().await;
+
+    Ok((StatusCode::OK, format!("Reinstalado v{}. Reiniciando...", CURRENT_VERSION)))
+}
+
+async fn fetch_release_url_by_tag(client: &reqwest::Client, tag: &str) -> Option<String> {
+    let url = format!("https://api.github.com/repos/{}/releases/tags/{}", GITHUB_REPO, tag);
+    let resp = client.get(&url)
+        .header("User-Agent", "LabNAS")
+        .header("Accept", "application/vnd.github+json")
+        .timeout(Duration::from_secs(10))
+        .send().await.ok()?;
+
+    if !resp.status().is_success() { return None; }
+
+    let json: serde_json::Value = resp.json().await.ok()?;
+    json["assets"].as_array()
+        .and_then(|assets| {
+            assets.iter().find(|a| {
+                a["name"].as_str()
+                    .map(|n| n.contains("linux") && n.contains("x86_64") && n.ends_with(".tar.gz"))
+                    .unwrap_or(false)
+            })
+        })
+        .and_then(|a| a["browser_download_url"].as_str().map(|s| s.to_string()))
+}
+
 async fn fetch_latest_release(client: &reqwest::Client) -> (Option<String>, Option<String>) {
     // Intentar con releases/latest primero
     let url = format!("https://api.github.com/repos/{}/releases/latest", GITHUB_REPO);

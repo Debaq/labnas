@@ -4,7 +4,7 @@ import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, 
 import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, getThemeNames, type ThemeName } from '../themes/themes'
-import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, forceCheckUpdate, doUpdate, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, updateService, setLastfmKey, fetchHealth, getMpvArgs, setMpvArgs as saveMpvArgs, type LabBranding, type LabService } from '../api'
+import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, forceCheckUpdate, doUpdate, doReinstall, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, updateService, setLastfmKey, fetchHealth, getMpvArgs, setMpvArgs as saveMpvArgs, type LabBranding, type LabService } from '../api'
 import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig, UserRole, UserPermissions } from '../types'
 
 function formatBytes(bytes: number): string {
@@ -74,6 +74,7 @@ export default function SettingsPage() {
   const [updateInfo, setUpdateInfo] = useState<{ current_version: string; latest_version: string | null; update_available: boolean } | null>(null)
   const [updating, setUpdating] = useState(false)
   const [checking, setChecking] = useState(false)
+  const [reinstalling, setReinstalling] = useState(false)
   const [mdns, setMdnsState] = useState<{ enabled: boolean; hostname: string; url: string } | null>(null)
   const [mdnsHostname, setMdnsHostname] = useState('')
   const [branding, setBrandingState] = useState<LabBranding | null>(null)
@@ -1460,6 +1461,21 @@ export default function SettingsPage() {
             >
               {updating ? <Loader2 size={16} className="animate-spin" /> : null}
               {updating ? 'Actualizando...' : `Actualizar a ${updateInfo.latest_version}`}
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              onClick={async () => {
+                if (!confirm('Reinstalar la version actual? Se descargara y reemplazara el binario. El servidor se reiniciara.')) return
+                setReinstalling(true)
+                try { await doReinstall() } catch {} finally { setReinstalling(false) }
+              }}
+              disabled={reinstalling}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium w-full justify-center"
+              style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+            >
+              {reinstalling ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={14} />}
+              {reinstalling ? 'Reinstalando...' : 'Reinstalar version actual'}
             </button>
           )}
           {sysInfo && (

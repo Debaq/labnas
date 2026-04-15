@@ -426,6 +426,11 @@ export async function doUpdate(): Promise<string> {
   return res.text()
 }
 
+export async function doReinstall(): Promise<string> {
+  const res = await api('/api/system/reinstall', { method: 'POST' })
+  return res.text()
+}
+
 // --- Branding ---
 
 export interface LabBranding {
