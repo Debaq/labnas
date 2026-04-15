@@ -121,6 +121,8 @@ pub struct SearchQuery {
 #[derive(Debug, Deserialize)]
 pub struct PlayRequest {
     pub id: String,
+    #[serde(default)]
+    pub force: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -469,11 +471,30 @@ pub async fn play(
     let mut track = fetch_track_info(&req.id).await?;
     track.added_by = Some(username.clone());
 
-    if has_current {
+    if has_current && !req.force {
         // Ya hay algo → agregar a la cola
         let mut ms = state.music.lock().await;
         ms.queue.push(track);
         return Ok(Json(ms.clone()));
+    }
+
+    if has_current && req.force {
+        // Force: detener actual, poner la actual al inicio de la cola, reproducir nueva
+        kill_player(&state).await;
+        let mut ms = state.music.lock().await;
+        if let Some(current) = ms.current.take() {
+            ms.queue.insert(0, current);
+        }
+        add_to_history(&mut ms, &track, &username);
+        ms.current = Some(track.clone());
+        ms.playback_started_at = Some(now_epoch_secs());
+        ms.elapsed = 0;
+        ms.started_by = Some(username.clone());
+        ms.paused = false;
+        drop(ms);
+        spawn_player(&state, &req.id).await;
+        state.log_activity("musica", &format!("Reproduciendo (forzado): {}", track.title), &username).await;
+        return Ok(Json(state.music.lock().await.clone()));
     }
 
     // Nada reproduciéndose → reproducir ahora

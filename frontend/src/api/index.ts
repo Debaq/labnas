@@ -1323,11 +1323,11 @@ export async function searchMusic(q: string): Promise<MusicTrack[]> {
   return res.json()
 }
 
-export async function playMusic(id: string): Promise<MusicState> {
+export async function playMusic(id: string, force?: boolean): Promise<MusicState> {
   const res = await api('/api/music/play', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id }),
+    body: JSON.stringify({ id, force: force || false }),
   })
   if (!res.ok) throw new Error('Error reproduciendo')
   return res.json()

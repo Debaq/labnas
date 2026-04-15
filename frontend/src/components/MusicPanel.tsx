@@ -98,9 +98,9 @@ export default function MusicPanel() {
     try { setSearchResults(await searchMusic(searchQuery)) } catch {} finally { setSearching(false) }
   }
 
-  async function handlePlay(id: string) {
+  async function handlePlay(id: string, force?: boolean) {
     setLoadingTrack(true)
-    try { setMusicState(safeMusicState(await playMusic(id))) } catch {} finally { setLoadingTrack(false) }
+    try { setMusicState(safeMusicState(await playMusic(id, force))) } catch {} finally { setLoadingTrack(false) }
   }
 
   async function handlePause() { try { setMusicState(safeMusicState(await pauseMusic())) } catch {} }
@@ -425,7 +425,7 @@ export default function MusicPanel() {
       </div>
 
       {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto" style={{ overscrollBehavior: 'contain' }}>
         {/* Search results (always visible when present) */}
         {searchResults.length > 0 && (
           <div className="px-3 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -448,7 +448,12 @@ export default function MusicPanel() {
                     <p className="text-[11px] truncate" style={{ color: 'var(--text-primary)' }}>{track.title}</p>
                     <p className="text-[10px] truncate" style={{ color: 'var(--text-secondary)' }}>{track.artist} · {formatDuration(track.duration)}</p>
                   </div>
-                  {musicState.current ? <Plus size={14} style={{ color: 'var(--accent)' }} /> : <Play size={14} style={{ color: 'var(--accent)' }} />}
+                  {musicState.current ? (
+                    <>
+                      <button onClick={() => !loadingTrack && handlePlay(track.id)} className="p-1 rounded hover:opacity-80" style={{ color: 'var(--accent)' }} title="Agregar a cola"><Plus size={14} /></button>
+                      <button onClick={() => !loadingTrack && handlePlay(track.id, true)} className="p-1 rounded hover:opacity-80" style={{ color: 'var(--success)' }} title="Reproducir ahora"><Play size={14} /></button>
+                    </>
+                  ) : <Play size={14} style={{ color: 'var(--accent)' }} />}
                   {/* Add to playlist dropdown */}
                   {playlists.length > 0 && (
                     <select className="w-5 h-5 opacity-0 hover:opacity-100 cursor-pointer absolute right-8" title="Agregar a lista"
