@@ -42,6 +42,7 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
   // Configuracion
   const [selectedPrinterNames, setSelectedPrinterNames] = useState<string[]>([defaultPrinter])
   const [totalCopiesInput, setTotalCopiesInput] = useState(1)
+  const [batchSize, setBatchSize] = useState(5)
 
   // Opciones avanzadas
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -61,6 +62,7 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cleanupRef = useRef<string | null>(null)
   const failedRef = useRef<string[]>([])
+  const roundCopiesRef = useRef<Record<string, number>>({})
 
   // Valores derivados
   const multiPrinter = allocations.length > 1
@@ -69,7 +71,7 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
     : totalCopiesInput
   const completedCopies = allocations.reduce((s, a) => s + a.completed, 0)
   const totalRounds = allocations.length > 0
-    ? Math.max(...allocations.map(a => a.copies))
+    ? Math.max(...allocations.map(a => Math.ceil(a.copies / batchSize)))
     : 1
 
   const getPrinterDesc = (name: string) =>
@@ -91,8 +93,8 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
   const configTotalRounds = useMemo(() => {
     const active = configAllocations.filter(a => a.copies > 0)
     if (active.length === 0) return 1
-    return Math.max(...active.map(a => a.copies))
-  }, [configAllocations])
+    return Math.max(...active.map(a => Math.ceil(a.copies / batchSize)))
+  }, [configAllocations, batchSize])
 
   const configActivePrinters = configAllocations.filter(a => a.copies > 0).length
 
@@ -194,6 +196,11 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
     failedRef.current = []
 
     const active = allocs.map(a => a.name)
+    const roundCopies: Record<string, number> = {}
+    for (const a of allocs) {
+      roundCopies[a.name] = Math.min(batchSize, a.copies)
+    }
+    roundCopiesRef.current = roundCopies
     setActiveThisRound(active)
     setStep('printing-odd')
     printOddPages(active)
@@ -214,7 +221,7 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
         duplexPrintStep({
           temp_id: prepareData.temp_id,
           printer: name,
-          copies: 1,
+          copies: roundCopiesRef.current[name] || 1,
           page_set: 'odd',
           options: opts,
         })
@@ -248,7 +255,7 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
         duplexPrintStep({
           temp_id: prepareData.temp_id,
           printer: name,
-          copies: 1,
+          copies: roundCopiesRef.current[name] || 1,
           page_set: 'even',
           output_order: 'reverse',
           options: opts,
@@ -267,7 +274,9 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
       let allDone = false
       setAllocations(prev => {
         const updated = prev.map(a =>
-          activeThisRound.includes(a.name) ? { ...a, completed: a.completed + 1 } : a
+          activeThisRound.includes(a.name)
+            ? { ...a, completed: a.completed + (roundCopiesRef.current[a.name] || 1) }
+            : a
         )
         allDone = updated.every(a => a.completed >= a.copies)
         return updated
@@ -285,9 +294,13 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
     setCurrentRound(prev => prev + 1)
     failedRef.current = []
 
-    const active = allocations
-      .filter(a => a.completed < a.copies)
-      .map(a => a.name)
+    const pending = allocations.filter(a => a.completed < a.copies)
+    const active = pending.map(a => a.name)
+    const roundCopies: Record<string, number> = {}
+    for (const a of pending) {
+      roundCopies[a.name] = Math.min(batchSize, a.copies - a.completed)
+    }
+    roundCopiesRef.current = roundCopies
     setActiveThisRound(active)
     setStep('printing-odd')
     printOddPages(active)
@@ -323,7 +336,7 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
 
   const roundLabel = multiPrinter
     ? `Ronda ${currentRound} de ${totalRounds} (${activeThisRound.length} ${activeThisRound.length === 1 ? 'impresora' : 'impresoras'})`
-    : `Copia ${currentRound} de ${totalCopies}`
+    : `Lote ${currentRound} de ${totalRounds}`
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -487,19 +500,37 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
             </div>
 
             {/* Copias */}
-            <div>
-              <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                Copias totales
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={100}
-                value={totalCopiesInput}
-                onChange={(e) => setTotalCopiesInput(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
-                className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-                style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
+                  Copias totales
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={totalCopiesInput}
+                  onChange={(e) => setTotalCopiesInput(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
+                  className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                  style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
+                  Copias por lote
+                </label>
+                <select
+                  value={batchSize}
+                  onChange={(e) => setBatchSize(parseInt(e.target.value))}
+                  className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
+                  style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+                >
+                  <option value={1}>1 copia</option>
+                  <option value={3}>3 copias</option>
+                  <option value={5}>5 copias</option>
+                  <option value={10}>10 copias</option>
+                </select>
+              </div>
             </div>
 
             {/* Info de distribucion */}
@@ -516,13 +547,14 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
                           ).join(' · ')}
                         </p>
                         <p className="mt-1">
-                          {configTotalRounds} {configTotalRounds === 1 ? 'ronda' : 'rondas'} de impresion
-                          — en cada ronda se imprimen hasta {configActivePrinters} copias en paralelo.
+                          {configTotalRounds} {configTotalRounds === 1 ? 'ronda' : 'rondas'} de hasta {batchSize} {batchSize === 1 ? 'copia' : 'copias'} por impresora
+                          ({configActivePrinters} en paralelo).
                         </p>
                       </>
                     ) : (
                       <p>
-                        Cada copia se imprime por separado para asegurar que las paginas queden correctamente alineadas.
+                        Se imprimiran en <strong style={{ color: 'var(--text-primary)' }}>{configTotalRounds} {configTotalRounds === 1 ? 'lote' : 'lotes'}</strong> de hasta {batchSize} {batchSize === 1 ? 'copia' : 'copias'}.
+                        {configTotalRounds > 1 && ' Imprimir por lotes reduce el riesgo si hay atasco.'}
                       </p>
                     )}
                   </div>
@@ -684,7 +716,7 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
                 <span className="text-xs font-medium px-3 py-1.5 rounded-full inline-block" style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}>
                   {multiPrinter
                     ? `Ronda ${currentRound} de ${totalRounds}`
-                    : `Copia ${currentRound} de ${totalCopies}`
+                    : `Lote ${currentRound} de ${totalRounds}`
                   }
                 </span>
               </div>
@@ -834,7 +866,7 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
               <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
                 {multiPrinter
                   ? `Ronda ${currentRound} completada`
-                  : `Copia ${currentRound} completada`
+                  : `Lote ${currentRound} completado`
                 }
               </p>
               <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
@@ -884,7 +916,7 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
               <Printer size={16} />
               {multiPrinter
                 ? `Iniciar ronda ${currentRound + 1}`
-                : `Iniciar copia ${currentRound + 1}`
+                : `Iniciar lote ${currentRound + 1}`
               }
             </button>
           </div>
