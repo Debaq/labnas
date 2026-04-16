@@ -271,16 +271,13 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
       const names = failed.map(n => getPrinterDesc(n)).join(', ')
       setError(`Error al imprimir en: ${names}`)
     } else {
-      let allDone = false
-      setAllocations(prev => {
-        const updated = prev.map(a =>
-          activeThisRound.includes(a.name)
-            ? { ...a, completed: a.completed + (roundCopiesRef.current[a.name] || 1) }
-            : a
-        )
-        allDone = updated.every(a => a.completed >= a.copies)
-        return updated
-      })
+      const updated = allocations.map(a =>
+        activeThisRound.includes(a.name)
+          ? { ...a, completed: a.completed + (roundCopiesRef.current[a.name] || 1) }
+          : a
+      )
+      const allDone = updated.every(a => a.completed >= a.copies)
+      setAllocations(updated)
 
       if (allDone) {
         setStep('complete')
