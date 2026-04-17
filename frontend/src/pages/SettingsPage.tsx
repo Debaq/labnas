@@ -1,11 +1,40 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine, Pencil, Music, HelpCircle, X, RefreshCw } from 'lucide-react'
+import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine, Pencil, Music, HelpCircle, X, RefreshCw, Shield, LayoutDashboard, FolderOpen, Network, Printer, Box, ClipboardList, FileText, Mail, Package, GraduationCap, Thermometer, ChevronUp, ChevronDown, AlertTriangle, Bell, Server, SlidersHorizontal } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, getThemeNames, type ThemeName } from '../themes/themes'
-import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, forceCheckUpdate, doUpdate, doReinstall, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, updateService, setLastfmKey, fetchHealth, getMpvArgs, setMpvArgs as saveMpvArgs, type LabBranding, type LabService } from '../api'
-import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig, UserRole, UserPermissions } from '../types'
+import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, forceCheckUpdate, doUpdate, doReinstall, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, updateService, setLastfmKey, fetchHealth, getMpvArgs, setMpvArgs as saveMpvArgs, fetchModules, toggleModule, reorderModules, type LabBranding, type LabService } from '../api'
+import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig, UserRole, UserPermissions, ModuleInfo } from '../types'
+
+const MODULE_META: Record<string, { label: string; icon: any; description: string }> = {
+  dashboard:  { label: 'Dashboard',        icon: LayoutDashboard, description: 'Panel principal con estadisticas y resumen' },
+  files:      { label: 'Archivos',         icon: FolderOpen,      description: 'Explorador y gestor de archivos' },
+  network:    { label: 'Red',              icon: Network,         description: 'Escaneo y monitoreo de red local' },
+  printing:   { label: 'Impresion',        icon: Printer,         description: 'Impresion de documentos via CUPS' },
+  printers3d: { label: 'Impresoras 3D',    icon: Box,             description: 'Control de impresoras 3D (OctoPrint/Moonraker)' },
+  tasks:      { label: 'Tareas / Horario', icon: ClipboardList,   description: 'Tareas, proyectos y calendario' },
+  notes:      { label: 'Notas',            icon: FileText,        description: 'Notas compartidas del laboratorio' },
+  email:      { label: 'Correo',           icon: Mail,            description: 'Correo electronico IMAP' },
+  inventory:  { label: 'Inventario',       icon: Package,         description: 'Inventario de equipos y materiales' },
+  portfolio:  { label: 'Portafolio',       icon: GraduationCap,   description: 'Portafolio academico e investigacion' },
+  sensors:    { label: 'Sensores',         icon: Thermometer,     description: 'Sensores IoT (ESP-NOW / WiFi)' },
+  terminal:   { label: 'Terminal',         icon: TerminalSquare,  description: 'Terminal web remoto' },
+  music:      { label: 'Musica',           icon: Music,           description: 'Reproductor de musica (yt-dlp + mpv)' },
+}
+
+type TabId = 'general' | 'lab' | 'users' | 'notifications' | 'network' | 'media' | 'system' | 'admin'
+
+const TABS: { id: TabId; label: string; icon: any; adminOnly: boolean }[] = [
+  { id: 'general',       label: 'General',        icon: SlidersHorizontal, adminOnly: false },
+  { id: 'lab',           label: 'Laboratorio',    icon: Building2,         adminOnly: true  },
+  { id: 'users',         label: 'Usuarios',       icon: Users,             adminOnly: true  },
+  { id: 'notifications', label: 'Notificaciones', icon: Bell,              adminOnly: true  },
+  { id: 'network',       label: 'Red',            icon: Globe,             adminOnly: true  },
+  { id: 'media',         label: 'Multimedia',     icon: Music,             adminOnly: true  },
+  { id: 'system',        label: 'Sistema',        icon: Server,            adminOnly: true  },
+  { id: 'admin',         label: 'Administracion', icon: Shield,            adminOnly: true  },
+]
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -66,7 +95,15 @@ function ThemeCard({
 export default function SettingsPage() {
   const navigate = useNavigate()
   const { theme, setTheme, themeNames } = useTheme()
-  const { user: authUser } = useAuth()
+  const { user: authUser, refreshModules } = useAuth()
+  const [activeTab, setActiveTab] = useState<TabId>(() => {
+    const saved = localStorage.getItem('labnas-settings-tab') as TabId | null
+    return saved && TABS.some(t => t.id === saved) ? saved : 'general'
+  })
+  const [modules, setModules] = useState<ModuleInfo[]>([])
+  const [modulesLoading, setModulesLoading] = useState(true)
+  const [toggling, setToggling] = useState<string | null>(null)
+  const [needsRestart, setNeedsRestart] = useState(false)
   const [disks, setDisks] = useState<DiskInfo[]>([])
   const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null)
   const [webUsers, setWebUsers] = useState<{ username: string; role: UserRole; permissions: UserPermissions }[]>([])
@@ -119,6 +156,47 @@ export default function SettingsPage() {
   const isAdmin = authUser?.role === 'admin'
 
   useEffect(() => {
+    localStorage.setItem('labnas-settings-tab', activeTab)
+  }, [activeTab])
+
+  useEffect(() => {
+    if (!isAdmin) return
+    fetchModules()
+      .then(m => { setModules(m); setModulesLoading(false) })
+      .catch(() => setModulesLoading(false))
+  }, [isAdmin])
+
+  async function handleModuleToggle(mod: ModuleInfo) {
+    if (mod.locked) return
+    setToggling(mod.id)
+    try {
+      await toggleModule(mod.id, !mod.enabled)
+      setModules(prev => prev.map(m => m.id === mod.id ? { ...m, enabled: !m.enabled } : m))
+      await refreshModules()
+      setNeedsRestart(true)
+    } catch {}
+    setToggling(null)
+  }
+
+  async function handleModuleMove(id: string, direction: 'up' | 'down') {
+    const sorted = [...modules].sort((a, b) => a.display_order - b.display_order)
+    const idx = sorted.findIndex(m => m.id === id)
+    if (idx < 0) return
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+    if (swapIdx < 0 || swapIdx >= sorted.length) return
+    const newOrder = sorted.map((m, i) => {
+      if (i === idx) return { ...m, display_order: sorted[swapIdx].display_order }
+      if (i === swapIdx) return { ...m, display_order: sorted[idx].display_order }
+      return m
+    })
+    setModules(newOrder)
+    try {
+      await reorderModules(newOrder.map(m => ({ id: m.id, order: m.display_order })))
+      await refreshModules()
+    } catch {}
+  }
+
+  useEffect(() => {
     if (!isAdmin) return
     fetchDisks().then(setDisks).catch(() => {})
     fetchSystemInfo().then(setSysInfo).catch(() => {})
@@ -144,10 +222,39 @@ export default function SettingsPage() {
     navigate('/terminal', { state: { commands: cmd } })
   }
 
+  const visibleTabs = TABS.filter(t => !t.adminOnly || isAdmin)
+  const sortedModules = [...modules].sort((a, b) => a.display_order - b.display_order)
+  const enabledCount = modules.filter(m => m.enabled).length
+
   return (
     <div className="space-y-8 max-w-4xl">
+      {/* Tab bar */}
+      <div
+        className="flex flex-wrap gap-1 p-1 rounded-xl sticky top-0 z-10"
+        style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
+      >
+        {visibleTabs.map(t => {
+          const Icon = t.icon
+          const active = activeTab === t.id
+          return (
+            <button
+              key={t.id}
+              onClick={() => setActiveTab(t.id)}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+              style={{
+                backgroundColor: active ? 'var(--accent)' : 'transparent',
+                color: active ? '#ffffff' : 'var(--text-secondary)',
+              }}
+            >
+              <Icon size={16} />
+              <span>{t.label}</span>
+            </button>
+          )
+        })}
+      </div>
+
       {/* Lab Branding (admin) */}
-      {isAdmin && branding && (
+      {activeTab === 'lab' && isAdmin && branding && (
         <section>
           <div className="flex items-center gap-3 mb-4">
             <Building2 size={22} style={{ color: 'var(--accent)' }} />
@@ -273,7 +380,7 @@ export default function SettingsPage() {
       )}
 
       {/* Servicios del Lab (admin) */}
-      {isAdmin && (
+      {activeTab === 'lab' && isAdmin && (
         <section>
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
@@ -419,7 +526,7 @@ export default function SettingsPage() {
       )}
 
       {/* Appearance */}
-      <section>
+      {activeTab === 'general' && <section>
         <div className="flex items-center gap-3 mb-4">
           <Palette size={22} style={{ color: 'var(--accent)' }} />
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -463,10 +570,10 @@ export default function SettingsPage() {
             />
           ))}
         </div>
-      </section>
+      </section>}
 
       {/* Rename user */}
-      <section>
+      {activeTab === 'general' && <section>
         <div className="flex items-center gap-3 mb-4">
           <PenLine size={22} style={{ color: 'var(--accent)' }} />
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -523,10 +630,10 @@ export default function SettingsPage() {
             </p>
           )}
         </div>
-      </section>
+      </section>}
 
       {/* Change password */}
-      <section>
+      {activeTab === 'general' && <section>
         <div className="flex items-center gap-3 mb-4">
           <Key size={22} style={{ color: 'var(--accent)' }} />
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -583,10 +690,10 @@ export default function SettingsPage() {
             </p>
           )}
         </div>
-      </section>
+      </section>}
 
       {/* Usuarios y Telegram (admin only) */}
-      {isAdmin && <section>
+      {activeTab === 'users' && isAdmin && <section>
         <div className="flex items-center gap-3 mb-4">
           <Users size={22} style={{ color: 'var(--accent)' }} />
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -752,7 +859,7 @@ export default function SettingsPage() {
       </section>}
 
       {/* Autostart (admin only) */}
-      {isAdmin && <section>
+      {activeTab === 'system' && isAdmin && <section>
         <div className="flex items-center gap-3 mb-4">
           <Power size={22} style={{ color: 'var(--accent)' }} />
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -811,7 +918,7 @@ export default function SettingsPage() {
       </section>}
 
       {/* Tailscale - Remote Access (admin only) */}
-      {isAdmin && (
+      {activeTab === 'network' && isAdmin && (
         <section>
           <div className="flex items-center gap-3 mb-4">
             <Globe size={22} style={{ color: 'var(--accent)' }} />
@@ -849,7 +956,7 @@ export default function SettingsPage() {
       )}
 
       {/* mDNS - Local domain (admin only) */}
-      {isAdmin && (
+      {activeTab === 'network' && isAdmin && (
         <section>
           <div className="flex items-center gap-3 mb-4">
             <Globe size={22} style={{ color: 'var(--accent)' }} />
@@ -901,7 +1008,7 @@ export default function SettingsPage() {
       )}
 
       {/* Telegram Notifications (admin only) */}
-      {isAdmin && <section>
+      {activeTab === 'notifications' && isAdmin && <section>
         <div className="flex items-center gap-3 mb-4">
           <MessageCircle size={22} style={{ color: 'var(--accent)' }} />
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -1184,7 +1291,7 @@ export default function SettingsPage() {
       </section>}
 
       {/* Last.fm (admin only) */}
-      {isAdmin && <section>
+      {activeTab === 'media' && isAdmin && <section>
         <div className="flex items-center gap-3 mb-4">
           <Radio size={22} style={{ color: 'var(--accent)' }} />
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -1232,7 +1339,7 @@ export default function SettingsPage() {
       </section>}
 
       {/* mpv Args (admin only) */}
-      {isAdmin && <section>
+      {activeTab === 'media' && isAdmin && <section>
         <div className="flex items-center gap-3 mb-4">
           <Music size={22} style={{ color: 'var(--accent)' }} />
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -1356,7 +1463,7 @@ export default function SettingsPage() {
       )}
 
       {/* Storage (admin only) */}
-      {isAdmin && <section>
+      {activeTab === 'system' && isAdmin && <section>
         <div className="flex items-center gap-3 mb-4">
           <HardDrive size={22} style={{ color: 'var(--accent)' }} />
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -1411,7 +1518,7 @@ export default function SettingsPage() {
       </section>}
 
       {/* About (admin only) */}
-      {isAdmin && <section>
+      {activeTab === 'system' && isAdmin && <section>
         <div className="flex items-center gap-3 mb-4">
           <Info size={22} style={{ color: 'var(--accent)' }} />
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -1534,6 +1641,136 @@ export default function SettingsPage() {
           </div>
         </div>
       </section>}
+
+      {/* Administracion: modulos (admin only) */}
+      {activeTab === 'admin' && isAdmin && (
+        <section>
+          <div className="flex items-center gap-3 mb-4">
+            <Shield size={22} style={{ color: 'var(--accent)' }} />
+            <div>
+              <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+                Modulos de LabNAS
+              </h2>
+              <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                Activa, desactiva y reordena los modulos disponibles
+              </p>
+            </div>
+          </div>
+
+          {needsRestart && (
+            <div
+              className="flex items-center gap-3 rounded-xl px-5 py-3 mb-4"
+              style={{ backgroundColor: 'var(--warning-alpha, rgba(255,180,0,0.1))', border: '1px solid var(--warning, #f5a623)' }}
+            >
+              <AlertTriangle size={18} style={{ color: 'var(--warning, #f5a623)' }} />
+              <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
+                Los cambios en modulos con procesos en segundo plano (sensores, red, musica, email, impresoras 3D) requieren reiniciar LabNAS para tomar efecto completo.
+              </span>
+            </div>
+          )}
+
+          <div
+            className="flex items-center gap-6 rounded-xl px-5 py-3 mb-4"
+            style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
+          >
+            <div className="flex items-center gap-2">
+              <Power size={16} style={{ color: 'var(--success)' }} />
+              <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                {enabledCount} de {modules.length} modulos activos
+              </span>
+            </div>
+          </div>
+
+          {modulesLoading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 size={24} className="animate-spin" style={{ color: 'var(--accent)' }} />
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {sortedModules.map((mod, idx) => {
+                const meta = MODULE_META[mod.id]
+                if (!meta) return null
+                const Icon = meta.icon
+                return (
+                  <div
+                    key={mod.id}
+                    className="flex items-center gap-4 rounded-xl px-5 py-4 transition-all duration-200"
+                    style={{
+                      backgroundColor: 'var(--bg-secondary)',
+                      border: '1px solid var(--border)',
+                      opacity: mod.enabled ? 1 : 0.5,
+                    }}
+                  >
+                    <div
+                      className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+                      style={{ backgroundColor: mod.enabled ? 'var(--accent-alpha)' : 'var(--bg-tertiary)' }}
+                    >
+                      <Icon size={20} style={{ color: mod.enabled ? 'var(--accent)' : 'var(--text-secondary)' }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                          {meta.label}
+                        </span>
+                        {mod.locked && (
+                          <span
+                            className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                            style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}
+                          >
+                            Siempre activo
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>
+                        {meta.description}
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <button
+                        onClick={() => handleModuleMove(mod.id, 'up')}
+                        disabled={idx === 0}
+                        className="p-0.5 rounded transition-all hover:opacity-80 disabled:opacity-20"
+                        style={{ color: 'var(--text-secondary)' }}
+                      >
+                        <ChevronUp size={14} />
+                      </button>
+                      <button
+                        onClick={() => handleModuleMove(mod.id, 'down')}
+                        disabled={idx === sortedModules.length - 1}
+                        className="p-0.5 rounded transition-all hover:opacity-80 disabled:opacity-20"
+                        style={{ color: 'var(--text-secondary)' }}
+                      >
+                        <ChevronDown size={14} />
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => handleModuleToggle(mod)}
+                      disabled={mod.locked || toggling === mod.id}
+                      className="relative w-12 h-6 rounded-full transition-all duration-300 flex-shrink-0"
+                      style={{
+                        backgroundColor: mod.enabled ? 'var(--accent)' : 'var(--bg-tertiary)',
+                        cursor: mod.locked ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {toggling === mod.id ? (
+                        <Loader2 size={12} className="animate-spin absolute top-1.5 left-1/2 -translate-x-1/2" style={{ color: '#fff' }} />
+                      ) : (
+                        <span
+                          className="absolute top-0.5 w-5 h-5 rounded-full transition-all duration-300"
+                          style={{
+                            backgroundColor: '#fff',
+                            left: mod.enabled ? '26px' : '2px',
+                          }}
+                        />
+                      )}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   )
 }

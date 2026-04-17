@@ -18,7 +18,6 @@ import InventoryPage from './pages/InventoryPage'
 import PortfolioPage from './pages/PortfolioPage'
 import PlaylistEditorPage from './pages/PlaylistEditorPage'
 import SensorsPage from './pages/SensorsPage'
-import AdminPage from './pages/AdminPage'
 import { Loader2 } from 'lucide-react'
 
 // Registro de modulos: mapea module_id -> ruta + componente
@@ -78,7 +77,7 @@ function AppRoutes() {
         {/* Rutas no-modulo: siempre disponibles */}
         <Route path="/playlists/:id" element={<PlaylistEditorPage />} />
         <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/admin" element={<AdminPage />} />
+        <Route path="/admin" element={<Navigate to="/settings" replace />} />
         {/* Catch-all: redirige a dashboard */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>

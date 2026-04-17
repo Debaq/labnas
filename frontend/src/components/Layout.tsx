@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight, Mail, Download, Package, GraduationCap, Thermometer, Shield } from 'lucide-react'
+import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight, Mail, Download, Package, GraduationCap, Thermometer } from 'lucide-react'
 import { useTheme } from '../themes/ThemeContext'
 import { useAuth } from '../auth/AuthContext'
 import { shutdownServer, getBranding, fetchHealth, checkUpdate } from '../api'
@@ -21,7 +21,6 @@ const pageTitles: Record<string, string> = {
   '/portfolio': 'Portafolio Academico',
   '/sensors': 'Sensores',
   '/settings': 'Configuracion',
-  '/admin': 'Administracion',
   '/playlists': 'Editor de Playlist',
 }
 
@@ -143,7 +142,6 @@ export default function Layout() {
   const navItems = [
     ...moduleItems,
     { to: '/settings', label: 'Configuracion', icon: Settings, show: true },
-    { to: '/admin', label: 'Admin', icon: Shield, show: isAdmin },
   ]
 
   const roleLabel = user?.role === 'admin' ? 'Admin' : user?.role === 'operador' ? 'Operador' : user?.role === 'observador' ? 'Observador' : 'Pendiente'
