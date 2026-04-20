@@ -5,227 +5,278 @@
 <h1 align="center">LabNAS</h1>
 
 <p align="center">
-  <strong>Self-hosted lab server: NAS + network scanner + 3D printers + music streaming + AI email + task management + Telegram bot — one binary, one web UI.</strong>
+  <strong>Servidor de laboratorio self-hosted: NAS + escáner de red + impresoras 3D + streaming + IA de correo + tareas + inventario + sensores IoT + bot de Telegram — un solo binario, una sola web UI.</strong>
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/version-2.8.0-success?style=flat-square" alt="Version" />
   <img src="https://img.shields.io/badge/Rust-Axum_0.8-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/React-19-blue?style=flat-square" alt="React" />
   <img src="https://img.shields.io/badge/TypeScript-5.9-blue?style=flat-square" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Telegram-40%2B_commands-26A5E4?style=flat-square" alt="Telegram" />
-  <img src="https://img.shields.io/badge/Groq-AI_Classification-orange?style=flat-square" alt="Groq" />
+  <img src="https://img.shields.io/badge/SQLite-WAL-003B57?style=flat-square" alt="SQLite" />
+  <img src="https://img.shields.io/badge/Telegram-40%2B_cmds-26A5E4?style=flat-square" alt="Telegram" />
+  <img src="https://img.shields.io/badge/AI-Groq_Llama_3.3-orange?style=flat-square" alt="Groq" />
   <img src="https://img.shields.io/badge/Tested_on-Arch_Linux-1793D1?style=flat-square" alt="Arch" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" />
 </p>
 
 ---
 
-## What is LabNAS?
+## Qué es LabNAS
 
-A self-hosted platform for managing a laboratory server. It combines a file explorer, web terminal, bidirectional Telegram bot, AI-powered email, project/task management, 3D printer control, music/video streaming, document printing, and network security — all in a single modern web interface.
+Plataforma self-hosted pensada para laboratorios (docencia, investigación, makerspaces). Integra gestión de archivos, terminal web, bot de Telegram bidireccional, correo con IA, tareas/proyectos, impresoras 3D multi-protocolo, streaming de música/video, impresión CUPS, inventario, reportes académicos, portafolio, sensores IoT y escaneo de red — todo en una única interfaz web moderna.
 
-Ships as a **statically-linked binary** (musl) with embedded web UI. No Docker, no runtime dependencies beyond the binary itself.
+Se distribuye como **binario estático** (musl) con la web UI embebida. Sin Docker, sin dependencias de runtime obligatorias. Persistencia en **SQLite** (WAL).
 
-## Quick Start
+## Inicio rápido
 
 ```bash
-# Download latest release
+# Descargar último release
 TAG=$(curl -s https://api.github.com/repos/Debaq/labnas/releases/latest | grep tag_name | cut -d'"' -f4)
 curl -sL "https://github.com/Debaq/labnas/releases/download/${TAG}/labnas-${TAG}-linux-x86_64.tar.gz" | tar xz
 
-# Run
+# Ejecutar
 cd labnas
 sudo ./labnas-backend
 ```
 
-Open `http://localhost:3001` — the first account you create becomes admin.
+Abre `http://localhost:3001` — la primera cuenta creada se convierte en admin.
 
-## Features
+## Sistema de módulos activables
 
-### File Management
-- Full file browser: upload, download, delete, create directories
-- Quick access shortcuts to common paths
-- Share files via temporary links (24h expiry)
-- Download files from URL directly to the NAS
-- Print files directly to CUPS printers
-- BTRFS subvolume deduplication
+Desde **v2.7.0**, las funcionalidades son **módulos independientes** que se activan/desactivan desde el panel de Administración. Cada rol de usuario puede tener acceso distinto a cada módulo. Esto permite desplegar LabNAS como solo-NAS, solo-gestor-impresoras, lab completo, etc.
 
-### Music & Video Player
-- YouTube search and playback via `yt-dlp` + `mpv`
-- **Dual playback modes**: NAS speakers or browser streaming
-- **Last.fm Radio**: find similar songs, verify on YouTube, build a playlist automatically
-- **Lucky Play**: play a random similar song — surprise mode
-- Full transport controls: play, pause, previous, next, stop
-- Progress bar with elapsed/total time indicator
-- Queue management: reorder, play next, play any item, clear queue, remove
-- Shuffle and repeat modes (off / all / one)
-- Compact volume control with vertical popup slider
-- AI-powered recommendations using YouTube Mix — multi-seed, artist-diversified
-- **Video output**: fullscreen on any connected display with multi-monitor support (X11)
-- Persistent side panel accessible from every page
-- Full Telegram bot control: `/play`, `/next`, `/stop`, `/pause`, `/mix`, `/vol`
+Módulos disponibles:
 
-### Email (IMAP & POP3)
-- IMAP and POP3 protocol support with in-app protocol selector
-- Compatible with Gmail (IMAP), Outlook (POP3 + app password), and any standard mail server
-- AI classification via Groq LLM: urgent, task, informational, spam
-- Auto-generated summaries and suggested actions per email
-- Sender-based filters: priority, normal, silent, ignore
-- Convert any email to a task with one click
-- Background checking every 5 minutes with Telegram alerts for urgent mail
-- Telegram commands: `/correos`, `/leer UID`, `/correo2tarea UID`
+| Módulo | Descripción |
+|--------|-------------|
+| Archivos | Explorador de archivos, compartir, descargar URL |
+| Música/Video | Reproductor YouTube + radio Last.fm |
+| Correo | IMAP/POP3 con clasificación IA |
+| Impresoras 3D | Moonraker / OctoPrint / Creality / FlashForge |
+| Impresión | CUPS + wizard doble cara manual |
+| Red | Escáner ICMP + detección de dispositivos |
+| Tareas/Proyectos | Kanban + calendario + notificaciones |
+| Inventario | Stock de insumos con movimientos y costos |
+| Portafolio académico | Evidencias de trabajo por usuario |
+| Reportes | Generación de informes por periodo |
+| Sensores IoT | Dashboard de sensores ESP32/MQTT/HTTP |
+| Notas | Markdown colaborativo |
+| Servicios | Links a otros servicios del lab |
 
-### 3D Printers
-- **4 protocol support**: Moonraker (Klipper), OctoPrint, Creality stock firmware (WebSocket), FlashForge stock firmware (TCP)
-- Unified control for mixed printer fleets — different brands and firmwares in a single dashboard
-- Direct link to each printer's web management UI (Fluidd, Mainsail, OctoPrint, Creality)
-- Real-time temperatures with visual bars (hotend + bed)
-- Job control: start, pause, resume, cancel
-- Jog pad for axis movement (0.1, 1, 10, 100mm)
-- Home axes and manual G-code commands
-- File management on printer: list, upload, print, delete
-- Webcam snapshots in web UI and via Telegram (`/camara`)
-- Upload `.gcode` files with drag & drop
-- Auto-monitor: Telegram notification when print finishes or errors
-- Network auto-detection of printers (all 4 protocols)
+## Funcionalidades
 
-### Tasks & Projects
-- Create tasks with assignments (`@user`, `@all`), due dates, and project grouping
-- Clickable user chips for assignment — lists all system users
-- Telegram notification when task is created (to assigned users) or completed (to creator)
-- Due date alerts: "expires today" and "overdue" reminders on a 12h cycle
-- `@all` targets operators and admins only (not observers); individual `@user` works for any role
-- Confirmation workflow: requires explicit accept/reject
-- Insistent reminders via Telegram (default 8 min, configurable)
-- Project progress tracking with visual bars
-- Calendar with events, invitations (RSVP), and reminders
-- Full Telegram command set: `/tarea`, `/tareas`, `/hecho`, `/confirmar`, `/rechazar`, `/proyecto`, `/eventos`
+### Archivos
+- Explorador completo: subir, descargar, borrar, crear directorios
+- Accesos directos a rutas comunes
+- Compartir archivos con links temporales (24h)
+- Descargar desde URL directo al NAS
+- Imprimir archivos directo a CUPS
+- Dedup por subvolúmenes BTRFS
 
-### Network Scanner
-- ICMP-based network scanning with automatic device discovery
-- MAC address and manufacturer detection
-- Known vs unknown device tracking with emoji icons (24 device icons)
-- Telegram alerts for new unknown devices
-- Custom device labeling with editable icons
-- Periodic background scanning (every 5 minutes)
+### Música y Video
+- Búsqueda y reproducción de YouTube vía `yt-dlp` + `mpv`
+- **Dos modos**: parlantes del NAS o streaming al navegador
+- **Radio Last.fm**: genera playlist automática con canciones similares
+- **Lucky Play**: una canción similar al azar
+- **Playlists persistentes**: crear, editar, reproducir; editor a pantalla completa
+- Reproducir directo desde resultados de búsqueda
+- Controles completos: play, pause, prev, next, stop, shuffle, repeat (off/all/one)
+- Cola: reordenar, play next, eliminar, limpiar
+- Volumen con popup vertical compacto
+- Recomendaciones IA multi-semilla diversificadas por artista (YouTube Mix)
+- **Salida de video**: fullscreen en display conectado con multi-monitor (X11)
+- Panel lateral persistente en todas las páginas
+- Control por Telegram: `/play`, `/next`, `/stop`, `/pause`, `/mix`, `/vol`
 
-### Telegram Bot (40+ commands)
+### Correo (IMAP y POP3)
+- IMAP y POP3 con selector de protocolo por cuenta
+- Compatible con Gmail (IMAP), Outlook (POP3 + app password), y cualquier servidor estándar
+- Clasificación IA vía Groq LLM: urgente, tarea, informativo, spam
+- Resumen y acciones sugeridas por correo
+- Filtros por remitente: prioridad, normal, silencioso, ignorar
+- Convertir correo a tarea en un click
+- Chequeo en segundo plano cada 5 min + alertas Telegram para urgentes
+- Comandos Telegram: `/correos`, `/leer UID`, `/correo2tarea UID`
 
-| Category | Commands |
-|----------|---------|
-| System | `/estado` `/discos` `/ram` `/cpu` `/uptime` `/red` `/ip` `/actividad` |
-| 3D Printers | `/impresoras` `/temp` `/camara` `/imprimir` `/pausar` `/cancelar3d` |
-| Terminal | `/cmd <command>` — interactive remote shell with sudo support |
-| Tasks | `/tarea` `/tareas` `/hecho` `/confirmar` `/rechazar` `/avance` |
-| Projects | `/proyecto` `/proyectos` |
-| Calendar | `/evento` `/eventos` `/aceptar` `/declinar` |
-| Email | `/correos` `/leer` `/correo2tarea` |
-| Music | `/musica` `/play` `/next` `/stop` `/pause` `/mix` `/vol` |
-| User | `/vincular` `/mirol` `/horario` `/ayuda` |
+### Impresoras 3D
+- **4 protocolos**: Moonraker (Klipper), OctoPrint, Creality stock (WebSocket), FlashForge stock (TCP)
+- Control unificado de flotas mixtas en un solo dashboard
+- Link directo a UI web de cada impresora (Fluidd, Mainsail, OctoPrint, Creality)
+- Temperaturas en tiempo real con barras (hotend + cama)
+- Control de job: iniciar, pausar, reanudar, cancelar
+- Jog pad por ejes (0.1, 1, 10, 100mm)
+- Home ejes + G-code manual
+- Gestión de archivos en impresora: listar, subir, imprimir, borrar
+- Snapshots de webcam en UI y vía Telegram (`/camara`)
+- Drag & drop de `.gcode`
+- Auto-monitor: notificación Telegram al finalizar o al error
+- Autodetección de impresoras en red (los 4 protocolos)
+- Secciones/agrupaciones de impresoras por área del lab
 
-### Web Terminal
-- Full PTY terminal over WebSocket (xterm.js)
-- Runs as the logged-in system user (not root) for security
-- Supports resize, 256 colors, and interactive programs
-- Interactive terminal also available via Telegram (`/cmd`)
+### Impresión de documentos
+- Integración CUPS con opciones dinámicas por impresora
+- Tamaño, calidad, color, dúplex
+- Cola con cancelación
+- Drag & drop
+- **Wizard doble cara manual**: para impresoras sin dúplex automático, guía al usuario paso a paso con lotes multi-impresora, intercalado correcto y configuración avanzada por trabajo
+- Conteo real de páginas PDF y límite de subida configurable
 
-### Document Printing
-- CUPS integration with dynamic per-printer options
-- Paper size, quality, color, duplex settings
-- Print queue with cancellation
-- Drag & drop file printing
+### Tareas y Proyectos
+- Crear tareas con asignación (`@user`, `@all`), fecha límite, proyecto
+- Chips clickeables para asignar — lista todos los usuarios del sistema
+- Notificación Telegram al crear (asignados) y completar (creador)
+- Alertas de vencimiento: "vence hoy" y "vencida" en ciclo de 12h
+- `@all` sólo para operadores y admins (no observadores); `@user` funciona para cualquier rol
+- Flujo de confirmación: accept/reject explícito
+- Recordatorios insistentes Telegram (default 8 min, configurable)
+- Progreso de proyecto con barras visuales
+- Calendario con eventos, invitaciones (RSVP), recordatorios
+- **Recurrencia por días específicos** en eventos (v2.6.9)
+- Comandos Telegram: `/tarea`, `/tareas`, `/hecho`, `/confirmar`, `/rechazar`, `/proyecto`, `/eventos`
 
-### Notes
-- Markdown editor with live split preview
-- Headers, bold, italic, code blocks, lists, links
-- Share notes with `@user` — recipients get a Telegram notification
-- Public flag: mark a note as visible to all users
-- Collaborative: all users can view and edit
+### Inventario
+- Stock de insumos del lab (filamentos, reactivos, material)
+- Movimientos de entrada/salida con usuario y timestamp
+- Costos por usuario y por proyecto
+- Alerta de stock bajo
 
-### Lab Services Dashboard
-- Register lab services running on other ports (CVAT, Label Studio, CUPS, Jupyter, etc.)
-- Quick-access link cards on the dashboard
-- Admin management from Settings
+### Reportes
+- Generación de informes por periodo (día, semana, mes, rango custom)
+- Incluye actividad del sistema, impresiones 3D, impresiones papel, uso de recursos
+- Exportables desde la UI
 
-### Notifications
-- Full Telegram bot with long polling
-- Daily scheduled reports (system status + activity log) — per-user configurable time
-- Real-time alerts: new network devices, urgent emails, 3D print completion/errors, task assignments/completions, shared notes
-- Role-based notification filtering
+### Portafolio académico
+- Evidencias de trabajo por usuario (archivos, notas, piezas impresas)
+- Vista pública opcional por usuario
+- Útil para seguimiento docente
 
-### System & Administration
-- Real-time dashboard: CPU, RAM, disk usage, network hosts, printers, uptime
-- 4 themes: Dracula (default), Light, Nord, Solarized + auto mode
-- Custom branding: lab name, logo, accent color, institution, mission/vision
-- Self-update from GitHub Releases — checks every 6 hours, one-click update
-- Systemd service with auto-restart
-- mDNS/Bonjour advertisement (`labnas.local`)
-- Shutdown from web UI (admin only)
+### Sensores IoT
+- Dashboard de sensores con ingesta HTTP/MQTT
+- Compatibilidad con ESP32 y similares
+- Gráficos de series temporales
+- Alertas por umbrales
 
-### Authentication & Security
-- Multi-user with 4 roles: Admin, Operator, Observer, Pending
-- bcrypt password hashing + session tokens (24h expiry)
-- Per-role granular permissions (terminal, printing, files)
-- Route-level middleware permission enforcement
-- Rate limiting on login (2s delay per failed attempt)
-- Bot token never exposed in API responses
-- Telegram ↔ web account linking with 8-char verification codes (5 min expiry)
+### Escáner de red
+- Scan ICMP con descubrimiento automático
+- Detección de MAC y fabricante
+- Tracking de dispositivos conocidos vs desconocidos con iconos (24 tipos)
+- Alertas Telegram ante nuevos dispositivos desconocidos
+- Etiquetas e iconos personalizables
+- Escaneo periódico en segundo plano (cada 5 min)
 
-## Tech Stack
+### Bot de Telegram (40+ comandos)
 
-| Component | Technology |
-|-----------|-----------|
+| Categoría | Comandos |
+|-----------|----------|
+| Sistema | `/estado` `/discos` `/ram` `/cpu` `/uptime` `/red` `/ip` `/actividad` |
+| Impresoras 3D | `/impresoras` `/temp` `/camara` `/imprimir` `/pausar` `/cancelar3d` |
+| Terminal | `/cmd <comando>` — shell remoto interactivo con sudo |
+| Tareas | `/tarea` `/tareas` `/hecho` `/confirmar` `/rechazar` `/avance` |
+| Proyectos | `/proyecto` `/proyectos` |
+| Calendario | `/evento` `/eventos` `/aceptar` `/declinar` |
+| Correo | `/correos` `/leer` `/correo2tarea` |
+| Música | `/musica` `/play` `/next` `/stop` `/pause` `/mix` `/vol` |
+| Usuario | `/vincular` `/mirol` `/horario` `/ayuda` |
+
+### Terminal web
+- PTY completa sobre WebSocket (xterm.js)
+- Corre como el usuario logueado (no root) por seguridad
+- Resize, 256 colores, programas interactivos
+- Terminal interactiva también por Telegram (`/cmd`)
+
+### Notas
+- Editor Markdown con preview en vivo split
+- Compartir con `@user` — destinatarios reciben notificación Telegram
+- Flag public: visible a todos los usuarios
+- Colaborativas: todos ven y editan
+
+### Servicios del laboratorio
+- Registrar servicios en otros puertos (CVAT, Label Studio, CUPS, Jupyter, etc.)
+- Cards de acceso rápido en dashboard
+- Administración desde Configuración
+- Muestran IP real del host
+
+### Notificaciones
+- Bot Telegram con long polling
+- Reportes diarios programados (estado sistema + actividad) con horario por usuario
+- Alertas en tiempo real: dispositivos nuevos, correos urgentes, impresiones 3D terminadas/errores, asignación/completar tareas, notas compartidas
+- Filtrado por rol
+
+### Sistema y Administración
+- Dashboard en tiempo real: CPU, RAM, disco, hosts, impresoras, uptime
+- **Configuración con pestañas** (v2.8.0): separa cada área en tabs
+- **Panel Administración** como tab: gestión de usuarios, roles, módulos activos, permisos por rol
+- 4 temas: Dracula (default), Light, Nord, Solarized + modo auto
+- Branding: nombre del lab, logo, color de acento, institución, misión/visión
+- Título de la web muestra `[NombreLab] - LabNAS`
+- **Auto-actualización** desde GitHub Releases — chequea cada 6h, update en un click
+- **Reinstalar versión actual** (útil ante archivos corruptos)
+- Servicio systemd con auto-restart
+- mDNS/Bonjour (`labnas.local`)
+- Apagado desde la UI (sólo admin)
+
+### Autenticación y Seguridad
+- Multiusuario con 4 roles: Admin, Operador, Observador, Pendiente
+- Hash bcrypt + tokens de sesión (24h)
+- Permisos granulares por rol (terminal, impresión, archivos, módulos)
+- Middleware de permisos a nivel de ruta
+- Rate limiting en login (2s de delay por intento fallido)
+- Token del bot nunca se expone en respuestas de la API
+- Vinculación Telegram ↔ cuenta web con código de 8 chars (5 min expiry)
+
+## Stack técnico
+
+| Componente | Tecnología |
+|------------|-----------|
 | Backend | Rust, Axum 0.8, Tokio |
 | Frontend | React 19, TypeScript 5.9, Vite 8, TailwindCSS 4 |
+| Persistencia | SQLite (WAL) |
 | Terminal | portable-pty + xterm.js 6 (WebSocket) |
-| Music/Video | yt-dlp + mpv (X11 multi-monitor), Last.fm API |
-| Email | IMAP (native), POP3 (custom TLS implementation) |
-| AI | Groq API (Llama 3.3 70B Versatile) |
-| 3D Printers | Moonraker API, OctoPrint API, Creality WebSocket, FlashForge TCP |
-| Printing | CUPS CLI (lp, lpstat, cancel) |
-| Network | ICMP ping (surge-ping), DNS lookup |
+| Música/Video | yt-dlp + mpv (X11 multi-monitor), Last.fm API |
+| Correo | IMAP (nativo), POP3 (TLS custom) |
+| IA | Groq API (Llama 3.3 70B Versatile) |
+| Impresoras 3D | Moonraker, OctoPrint, Creality WS, FlashForge TCP |
+| Impresión | CUPS CLI (lp, lpstat, cancel) |
+| Red | ICMP ping (surge-ping), DNS lookup |
 | mDNS | mdns-sd |
-| Notifications | Telegram Bot API (long polling) |
+| Notificaciones | Telegram Bot API (long polling) |
 | Auth | bcrypt + UUID session tokens |
-| Build | Static binary via musl + vendored OpenSSL |
+| Build | Binario estático vía musl + OpenSSL vendored |
 
-## Requirements
+## Requisitos
 
-**Tested on Arch Linux.** Should work on any modern Linux distribution.
+**Probado en Arch Linux.** Debería funcionar en cualquier distro Linux moderna.
 
-- **OS**: Linux x86_64
-- **Optional runtime dependencies** (for full functionality):
+- **SO**: Linux x86_64
+- **Dependencias opcionales** (para funcionalidad completa):
 
-| Dependency | Used for | Install (Arch) |
-|-----------|---------|----------------|
-| `mpv` | Music/video playback | `pacman -S mpv` |
-| `yt-dlp` | YouTube search & streaming | `pacman -S yt-dlp` |
-| `alsa-utils` | Volume control | `pacman -S alsa-utils` |
-| `cups` | Document printing | `pacman -S cups` |
-| `avahi` + `nss-mdns` | mDNS hostname resolution | `pacman -S avahi nss-mdns` |
+| Dependencia | Para qué | Instalar (Arch) |
+|-------------|----------|-----------------|
+| `mpv` | Reproducción música/video | `pacman -S mpv` |
+| `yt-dlp` | Búsqueda y streaming YouTube | `pacman -S yt-dlp` |
+| `alsa-utils` | Control de volumen | `pacman -S alsa-utils` |
+| `cups` | Impresión de documentos | `pacman -S cups` |
+| `avahi` + `nss-mdns` | Resolución mDNS | `pacman -S avahi nss-mdns` |
 
 ```bash
-# Install all optional dependencies at once (Arch)
+# Instalar todas las deps opcionales de una (Arch)
 sudo pacman -S mpv yt-dlp alsa-utils cups avahi nss-mdns
 ```
 
-## Installation
+## Instalación
 
-### Pre-built Binary (recommended)
+### Binario pre-compilado (recomendado)
 
 ```bash
-# Download and extract
 TAG=$(curl -s https://api.github.com/repos/Debaq/labnas/releases/latest | grep tag_name | cut -d'"' -f4)
 curl -sL "https://github.com/Debaq/labnas/releases/download/${TAG}/labnas-${TAG}-linux-x86_64.tar.gz" | tar xz
 
-# Move to system directory
 sudo mv labnas /opt/labnas
-
-# Run directly
 sudo /opt/labnas/labnas-backend
 ```
 
-### Systemd Service (production)
+### Servicio systemd (producción)
 
 ```bash
 sudo tee /etc/systemd/system/labnas.service > /dev/null << 'EOF'
@@ -248,144 +299,154 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now labnas
 ```
 
-### mDNS Setup
+### mDNS
 
-Enable mDNS from **Settings > mDNS** in the web UI.
+Activar mDNS desde **Configuración > mDNS** en la web.
 
-For client machines to resolve `labnas.local`:
+Para que los clientes resuelvan `labnas.local`:
 
 ```bash
-# Use the included helper script
+# Helper incluido
 sudo bash /opt/labnas/setup-mdns.sh
 
-# Or manually (Arch):
+# O manual (Arch):
 sudo pacman -S avahi nss-mdns
 sudo systemctl enable --now avahi-daemon
-# Ensure /etc/nsswitch.conf has: hosts: ... mdns4_minimal [NOTFOUND=return] ... dns
+# /etc/nsswitch.conf debe tener: hosts: ... mdns4_minimal [NOTFOUND=return] ... dns
 ```
 
-**Windows clients**: Install [Bonjour Print Services](https://support.apple.com/kb/DL999) or ensure UDP port 5353 is open.
+**Clientes Windows**: instalar [Bonjour Print Services](https://support.apple.com/kb/DL999) o abrir UDP 5353.
 
-### Build from Source
+### Build desde código
 
 ```bash
 git clone https://github.com/Debaq/labnas.git
 cd labnas
 
-# Interactive menu
+# Menú interactivo
 ./labnas.sh
 
-# Or directly:
-./labnas.sh build    # Production binary + frontend
-./labnas.sh run      # Run production build
-./labnas.sh dev      # Development with hot reload
+# O directo:
+./labnas.sh build    # Binario producción + frontend
+./labnas.sh run      # Correr build producción
+./labnas.sh dev      # Dev con hot reload
 ```
 
-**Build requirements**: Rust toolchain (stable), Node.js 20+, npm
+**Requisitos de build**: toolchain Rust (stable), Node.js 20+, npm.
 
-## Configuration
+Script `version.sh` para bump de versión antes de commit release.
 
-Config is stored at `~/.labnas/config.json` (relative to the binary owner's home). Override with `LABNAS_CONFIG` env var.
+## Configuración
 
-### First Setup
-1. Open `http://localhost:3001` (or `http://labnas.local:3001`)
-2. Create your admin account
-3. Go to **Settings** to configure:
-   - Telegram bot token
-   - Lab branding (name, logo, colors)
-   - 3D printers
-   - Last.fm API key (for Radio & Lucky Play)
-   - Email accounts
-   - Lab services (port links)
-   - mDNS hostname
+Config persiste en `~/.labnas/` (SQLite + assets). Override con `LABNAS_CONFIG`.
 
-### Telegram Bot
-1. Create a bot via [@BotFather](https://t.me/botfather)
-2. Paste the token in **Settings > Notifications**
-3. Send `/start` to your bot
-4. Link web account: generate code in Settings, then `/vincular CODE` in Telegram
+### Primera vez
+1. Abrir `http://localhost:3001` (o `http://labnas.local:3001`)
+2. Crear cuenta admin
+3. Ir a **Configuración** (ahora con pestañas):
+   - Token del bot Telegram
+   - Branding (nombre, logo, colores, institución)
+   - Impresoras 3D
+   - Last.fm API key (Radio y Lucky Play)
+   - Cuentas de correo
+   - Servicios del lab (links a puertos)
+   - mDNS
+   - **Administración**: gestión usuarios, módulos, roles
 
-### Email with AI
-1. Get a free API key at [console.groq.com](https://console.groq.com)
-2. Admin sets the key in **Settings > Email > Groq API Key**
-3. Each user configures their mail account:
+### Bot Telegram
+1. Crear bot con [@BotFather](https://t.me/botfather)
+2. Pegar token en **Configuración > Notificaciones**
+3. `/start` al bot
+4. Vincular cuenta web: generar código en Configuración, luego `/vincular CODIGO` en Telegram
+
+### Correo con IA
+1. API key gratis en [console.groq.com](https://console.groq.com)
+2. Admin pega la key en **Configuración > Correo > Groq API Key**
+3. Cada usuario configura su cuenta:
    - **Gmail**: IMAP, `imap.gmail.com:993`, app password
    - **Outlook**: POP3, `outlook.office365.com:995`, app password
 
-### Video on External Displays
-When running as a systemd service, LabNAS automatically:
-1. Detects the user with the active X session
-2. Grants root X11 access via `xhost`
-3. Detects connected displays via DRM
+### Video en pantallas externas
+Corriendo como servicio systemd, LabNAS:
+1. Detecta usuario con sesión X activa
+2. Otorga acceso X11 vía `xhost`
+3. Detecta displays conectados por DRM
 
-Select a display from the music panel menu (three dots icon) to play video fullscreen.
+Elegir display desde el menú del panel de música (tres puntos) para fullscreen.
 
-## Ports
+## Puertos
 
-| Service | Port | Protocol |
-|---------|------|----------|
+| Servicio | Puerto | Protocolo |
+|----------|--------|-----------|
 | Web UI + API | 3001 | HTTP |
 | mDNS | 5353 | UDP multicast |
 
-## Project Structure
+## Estructura del proyecto
 
 ```
 labnas/
   backend/src/
-    main.rs              # Router, server, background tasks
-    state.rs             # Shared state (sessions, terminals, music)
-    config.rs            # JSON config persistence
-    middleware.rs         # Role-based permission enforcement
+    main.rs              # Router, server, tareas background
+    state.rs             # Estado compartido (sesiones, terminales, música)
+    config.rs            # Persistencia SQLite
+    middleware.rs        # Permisos por rol
     handlers/
-      auth.rs            # Login, register, roles, linking
-      files.rs           # File browser + sharing
-      music.rs           # Music/video player + YouTube
-      email.rs           # IMAP/POP3 + AI classification
-      network.rs         # Network scanner + MAC detection
-      system.rs          # System info, update, branding, services
-      terminal.rs        # WebSocket PTY terminal
-      notifications.rs   # Telegram bot (40+ commands)
-      tasks.rs           # Tasks, projects, calendar
-      printers3d.rs      # 3D printer control
-      printing.rs        # CUPS document printing
-      extras.rs          # Temp links, URL download, notes
-    models/              # Data structures
+      auth.rs            # Login, registro, roles, vinculación
+      files.rs           # Explorador + sharing
+      music.rs           # Reproductor + YouTube + playlists
+      email.rs           # IMAP/POP3 + IA
+      network.rs         # Escáner + MAC
+      system.rs          # Info, update, branding, servicios
+      terminal.rs        # WebSocket PTY
+      notifications.rs   # Bot Telegram (40+ cmds)
+      tasks.rs           # Tareas, proyectos, calendario
+      printers3d.rs      # Impresoras 3D
+      printing.rs        # CUPS + wizard doble cara
+      inventory.rs       # Inventario y movimientos
+      portfolio.rs       # Portafolio académico
+      reports.rs         # Reportes por periodo
+      sensors.rs         # Sensores IoT
+      modules.rs         # Activación de módulos
+      extras.rs          # Temp links, download URL, notas
+    models/              # Estructuras de datos
   frontend/src/
-    pages/               # Page components
+    pages/               # Páginas
     components/
-      Layout.tsx         # App shell with sidebar
-      MusicPanel.tsx     # Global music side panel
-    themes/              # Theme system (4 themes + auto)
-    auth/                # Auth context + permission hooks
-    api/                 # Type-safe API client
-  labnas.sh              # Dev/build/run interactive script
-  setup-mdns.sh          # mDNS client setup helper
+      Layout.tsx         # Shell con sidebar
+      MusicPanel.tsx     # Panel lateral persistente
+    themes/              # 4 temas + auto
+    auth/                # Contexto auth + hooks permisos
+    api/                 # Cliente API tipado
+  labnas.sh              # Script interactivo dev/build/run
+  version.sh             # Bump de versión
+  setup-mdns.sh          # Helper mDNS
 ```
 
-## Self-Update
+## Auto-actualización
 
-LabNAS checks GitHub for new releases every 6 hours. When an update is available:
-- Admin gets a Telegram notification
-- **Settings** shows an "Update" button
-- One click downloads, extracts, replaces, and restarts via systemd
+LabNAS chequea GitHub cada 6h. Cuando hay update:
+- Admin recibe notificación Telegram
+- **Configuración** muestra botón "Actualizar"
+- Un click descarga, extrae, reemplaza, reinicia vía systemd
+- También permite **reinstalar la versión actual** (archivos corruptos)
 
-## Security Notes
+## Seguridad
 
-- All API routes require authentication (except login/register)
-- Passwords hashed with bcrypt (cost factor 12)
-- Session tokens: UUID v4, 24-hour expiry
-- Role-based middleware blocks unauthorized API calls
-- Bot token never exposed in API responses
-- CUPS commands sanitized against injection
-- System paths protected from deletion
-- Terminal runs as the desktop user, not root
+- Todas las rutas API requieren auth (excepto login/registro)
+- Passwords con bcrypt (cost 12)
+- Tokens de sesión: UUID v4, expiran en 24h
+- Middleware por rol bloquea llamadas no autorizadas
+- Token del bot jamás expuesto en la API
+- Comandos CUPS sanitizados contra inyección
+- Rutas del sistema protegidas contra borrado
+- Terminal corre como usuario desktop, no root
 
-## License
+## Licencia
 
 MIT
 
 ---
 
 <p align="center">
-  Built by <a href="https://github.com/Debaq">TecMedHub</a>
+  Hecho por <a href="https://github.com/Debaq">TecMedHub</a>
 </p>
