@@ -19,9 +19,15 @@ jobs:
           - arch: x86_64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-musl
+            use_cross: false
           - arch: aarch64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
+            use_cross: false
+          - arch: armv7
+            runner: ubuntu-latest
+            target: armv7-unknown-linux-musleabihf
+            use_cross: true
 
     steps:
       - uses: actions/checkout@v4
@@ -39,13 +45,18 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Setup Rust (musl estatico)
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - name: Instalar musl tools y deps
+      - name: Instalar musl tools y deps (build nativo)
+        if: matrix.use_cross == false
         run: sudo apt-get update && sudo apt-get install -y musl-tools pkg-config perl make
+
+      - name: Instalar cross (build cruzado)
+        if: matrix.use_cross == true
+        run: cargo install cross --git https://github.com/cross-rs/cross --locked
 
       - name: Cache Rust
         uses: actions/cache@v4
@@ -54,7 +65,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             backend/target
-          key: ${{ runner.os }}-${{ matrix.arch }}-musl-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.arch }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
 
       - name: Build frontend
         working-directory: frontend
@@ -62,11 +73,17 @@ jobs:
           npm ci
           npx vite build --emptyOutDir
 
-      - name: Build backend (release, estatico)
+      - name: Build backend (nativo)
+        if: matrix.use_cross == false
         working-directory: backend
         env:
           OPENSSL_STATIC: "1"
         run: cargo build --release --target ${{ matrix.target }} --features vendored-ssl
+
+      - name: Build backend (cross)
+        if: matrix.use_cross == true
+        working-directory: backend
+        run: cross build --release --target ${{ matrix.target }} --features vendored-ssl
 
       - name: Empaquetar release
         run: |
