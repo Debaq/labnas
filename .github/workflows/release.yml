@@ -10,8 +10,18 @@ permissions:
 
 jobs:
   build:
-    name: Build Linux x86_64
-    runs-on: ubuntu-latest
+    name: Build Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
 
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +42,7 @@ jobs:
       - name: Setup Rust (musl estatico)
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl
+          targets: ${{ matrix.target }}
 
       - name: Instalar musl tools y deps
         run: sudo apt-get update && sudo apt-get install -y musl-tools pkg-config perl make
@@ -44,7 +54,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             backend/target
-          key: ${{ runner.os }}-musl-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.arch }}-musl-cargo-${{ hashFiles('backend/Cargo.lock') }}
 
       - name: Build frontend
         working-directory: frontend
@@ -56,16 +66,18 @@ jobs:
         working-directory: backend
         env:
           OPENSSL_STATIC: "1"
-        run: cargo build --release --target x86_64-unknown-linux-musl --features vendored-ssl
+        run: cargo build --release --target ${{ matrix.target }} --features vendored-ssl
 
       - name: Empaquetar release
         run: |
           VERSION="${{ steps.version.outputs.version }}"
+          ARCH="${{ matrix.arch }}"
+          TARGET="${{ matrix.target }}"
           RELEASE_DIR="labnas"
           mkdir -p "$RELEASE_DIR"
 
           # Binario estatico
-          cp backend/target/x86_64-unknown-linux-musl/release/labnas-backend "$RELEASE_DIR/"
+          cp backend/target/$TARGET/release/labnas-backend "$RELEASE_DIR/"
 
           # Frontend
           cp -r frontend/dist "$RELEASE_DIR/dist"
@@ -76,20 +88,37 @@ jobs:
           cp VERSION "$RELEASE_DIR/"
 
           # Tarball
-          TARBALL="labnas-v${VERSION}-linux-x86_64.tar.gz"
+          TARBALL="labnas-v${VERSION}-linux-${ARCH}.tar.gz"
           tar czf "$TARBALL" "$RELEASE_DIR"
           echo "tarball=$TARBALL" >> "$GITHUB_ENV"
+
+      - name: Crear release si no existe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          # Reintentar hasta 5 veces para evitar race entre jobs paralelos
+          for i in 1 2 3 4 5; do
+            if gh release view "$TAG" &>/dev/null; then
+              echo "Release $TAG ya existe"
+              exit 0
+            fi
+            if gh release create "$TAG" \
+                --title "LabNAS $VERSION" \
+                --generate-notes 2>/dev/null; then
+              echo "Release $TAG creado"
+              exit 0
+            fi
+            echo "Reintento $i..."
+            sleep 3
+          done
+          # Verificacion final
+          gh release view "$TAG"
 
       - name: Subir asset al release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.version.outputs.tag }}"
-          # Si el release ya existe, solo subir el asset. Si no, crearlo.
-          if gh release view "$TAG" &>/dev/null; then
-            gh release upload "$TAG" "${{ env.tarball }}" --clobber
-          else
-            gh release create "$TAG" "${{ env.tarball }}" \
-              --title "LabNAS ${{ steps.version.outputs.version }}" \
-              --generate-notes
-          fi
+          gh release upload "$TAG" "${{ env.tarball }}" --clobber
