@@ -443,17 +443,14 @@ fn release_arch() -> &'static str {
     }
 }
 
-/// URL del tarball del servidor para esta arquitectura: `labnas-v<ver>-linux-<arch>.tar.gz`.
-/// Nombre exacto para no confundirlo con otros assets (p.ej. labnas-viewer).
+/// URL del tarball del servidor para esta arquitectura: `labnas-<tag>-linux-<arch>.tar.gz`.
+/// Nombre exacto para no confundirlo con otros assets (p.ej. labnas-viewer-<tag>-linux-<arch>).
 fn find_server_asset(release: &serde_json::Value) -> Option<String> {
-    let suffix = format!("-linux-{}.tar.gz", release_arch());
+    let tag = release["tag_name"].as_str()?;
+    let expected = format!("labnas-{}-linux-{}.tar.gz", tag, release_arch());
     release["assets"].as_array()?
         .iter()
-        .find(|a| {
-            a["name"].as_str()
-                .map(|n| n.starts_with("labnas-v") && n.ends_with(&suffix))
-                .unwrap_or(false)
-        })
+        .find(|a| a["name"].as_str() == Some(expected.as_str()))
         .and_then(|a| a["browser_download_url"].as_str().map(|s| s.to_string()))
 }
 

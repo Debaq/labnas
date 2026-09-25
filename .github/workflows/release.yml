@@ -147,10 +147,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Nombres sin "linux"/"x86_64" para no confundir al updater de versiones antiguas
-          - arch: amd64
+          - arch: x86_64
             runner: ubuntu-latest
-          - arch: arm64
+          - arch: aarch64
             runner: ubuntu-24.04-arm
 
     steps:
@@ -190,7 +189,7 @@ jobs:
           cp viewer/target/release/labnas-viewer "$DIR/"
           cp -r viewer/assets "$DIR/assets"
           cp viewer/install.sh "$DIR/"
-          TARBALL="labnas-viewer-v${VERSION}-${{ matrix.arch }}.tar.gz"
+          TARBALL="labnas-viewer-v${VERSION}-linux-${{ matrix.arch }}.tar.gz"
           tar czf "$TARBALL" "$DIR"
           echo "tarball=$TARBALL" >> "$GITHUB_ENV"
 
