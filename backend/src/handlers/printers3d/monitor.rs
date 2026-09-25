@@ -11,6 +11,58 @@ pub(super) struct PrinterMonitorState {
     was_printing: bool,
     file_name: String,
     start_time: Option<std::time::Instant>,
+    /// Timelapse en curso: carpeta, fotogramas guardados y ultima foto
+    timelapse: Option<(std::path::PathBuf, u32, std::time::Instant)>,
+}
+
+/// Guarda un fotograma; devuelve la sesion actualizada (o la misma si fallo)
+async fn capture_frame(
+    client: &reqwest::Client,
+    printer: &Printer3DConfig,
+    session: (std::path::PathBuf, u32, std::time::Instant),
+) -> (std::path::PathBuf, u32, std::time::Instant) {
+    let (dir, frames, _) = session.clone();
+    match fetch_snapshot(client, printer).await {
+        Ok((_, bytes)) => {
+            let path = frame_path(&dir, frames + 1);
+            let ok = tokio::task::spawn_blocking(move || {
+                std::fs::create_dir_all(path.parent().unwrap_or(std::path::Path::new("/")))
+                    .and_then(|_| std::fs::write(&path, &bytes))
+                    .is_ok()
+            })
+            .await
+            .unwrap_or(false);
+            if ok { (dir, frames + 1, std::time::Instant::now()) } else { session }
+        }
+        Err(_) => session,
+    }
+}
+
+/// Fin de impresion con timelapse: arma el video (si hay ffmpeg) y avisa
+fn finish_timelapse(state: &AppState, printer_name: String, dir: std::path::PathBuf, frames: u32) {
+    let state = state.clone();
+    tokio::spawn(async move {
+        let d = dir.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            if ffmpeg_available() { assemble(&d).map(Some) } else { Ok(None) }
+        })
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()));
+        let (level, body) = match result {
+            Ok(Some(video)) => (crate::events::Level::Success, format!("{}", video.display())),
+            Ok(None) => (crate::events::Level::Info, format!("{} fotos en {} (instala ffmpeg para armar el video)", frames, dir.display())),
+            Err(e) => (crate::events::Level::Warning, format!("No se pudo armar el video: {} (fotos en {})", e, dir.display())),
+        };
+        state.log_activity("Timelapse", &format!("{}: {}", printer_name, body), "sistema").await;
+        crate::events::notify(
+            &state,
+            crate::events::Audience::All,
+            Some("printers3d"),
+            level,
+            &format!("Timelapse de {}", printer_name),
+            &body,
+        );
+    });
 }
 
 /// Consulta todas las impresoras (en paralelo): cada 5 s si hay alguien conectado al
@@ -28,7 +80,9 @@ pub async fn printer_monitor_loop(state: AppState) {
         tokio::time::sleep(LIVE_EVERY).await;
 
         let live = state.events.has_interest("printers3d.status");
-        if !live && last_poll.is_some_and(|t| t.elapsed() < IDLE_EVERY) {
+        // con un timelapse en curso se consulta seguido para no perder fotos
+        let recording = printer_states.values().any(|p| p.timelapse.is_some());
+        if !live && !recording && last_poll.is_some_and(|t| t.elapsed() < IDLE_EVERY) {
             continue;
         }
         last_poll = Some(std::time::Instant::now());
@@ -50,6 +104,15 @@ pub async fn printer_monitor_loop(state: AppState) {
         if printers.is_empty() {
             continue;
         }
+
+        let (tl_config, tl_dir) = db_op(&state.db, |conn| {
+            let c = load_config(conn);
+            let d = effective_dir(conn, &c);
+            Ok((c, d))
+        })
+        .await
+        .unwrap_or_default();
+        let tl_interval = Duration::from_secs(tl_config.interval_secs.max(5));
 
         let client = &state.http_client;
         let results: Vec<Option<Printer3DStatus>> = futures_util::future::join_all(
@@ -132,6 +195,29 @@ pub async fn printer_monitor_loop(state: AppState) {
                 );
             }
 
+            // Timelapse: fotos mientras imprime; al terminar, video
+            let mut timelapse = prev.and_then(|p| p.timelapse.clone());
+            let wants_tl = tl_config.printers.contains(&printer.id);
+            if is_printing && wants_tl {
+                if let Some(base) = &tl_dir {
+                    let session = timelapse.take().unwrap_or_else(|| {
+                        let never = std::time::Instant::now() - tl_interval * 2;
+                        (session_dir(base, &printer.name), 0, never)
+                    });
+                    timelapse = Some(if session.2.elapsed() >= tl_interval {
+                        capture_frame(client, printer, session).await
+                    } else {
+                        session
+                    });
+                }
+            } else if !is_printing {
+                if let Some((dir, frames, _)) = timelapse.take() {
+                    if frames > 0 {
+                        finish_timelapse(&state, printer.name.clone(), dir, frames);
+                    }
+                }
+            }
+
             printer_states.insert(
                 printer.id.clone(),
                 PrinterMonitorState {
@@ -144,8 +230,55 @@ pub async fn printer_monitor_loop(state: AppState) {
                     } else {
                         None
                     },
+                    timelapse,
                 },
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn printer(camera_url: String) -> Printer3DConfig {
+        Printer3DConfig {
+            id: "p1".into(),
+            name: "Prusa".into(),
+            ip: "127.0.0.1".into(),
+            port: 7125,
+            printer_type: Printer3DType::Moonraker,
+            api_key: None,
+            camera_url: Some(camera_url),
+            power_watts: None,
+            electricity_cost_kwh: None,
+            section_id: None,
+            order: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn captura_fotogramas_de_la_camara() {
+        // "camara" local que devuelve un JPEG
+        let app = axum::Router::new().route("/snap", axum::routing::get(|| async { (StatusCode::OK, vec![0xFFu8, 0xD8, 0xFF, 0xD9]) }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+
+        let dir = std::env::temp_dir().join(format!("labnas-tlcap-{}", uuid::Uuid::new_v4()));
+        let client = reqwest::Client::new();
+        let p = printer(format!("http://127.0.0.1:{}/snap", port));
+        let start = (dir.clone(), 0, std::time::Instant::now());
+
+        let s1 = capture_frame(&client, &p, start).await;
+        let s2 = capture_frame(&client, &p, s1).await;
+        assert_eq!(s2.1, 2);
+        assert_eq!(std::fs::read(frame_path(&dir, 2)).unwrap(), vec![0xFF, 0xD8, 0xFF, 0xD9]);
+
+        // camara caida: la sesion queda igual
+        let caida = printer("http://127.0.0.1:1/no".into());
+        let s3 = capture_frame(&client, &caida, s2).await;
+        assert_eq!(s3.1, 2);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

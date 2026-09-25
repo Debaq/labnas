@@ -12,4 +12,5 @@ mod printers;
 mod secrets;
 mod security;
 mod sensors;
+mod timelapse;
 mod webdav;

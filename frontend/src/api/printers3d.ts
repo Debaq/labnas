@@ -247,3 +247,23 @@ export async function reorderPrintQueue(ids: string[]): Promise<void> {
   })
   if (!res.ok) throw new Error((await res.text()) || 'Error al ordenar la cola')
 }
+
+// --- Timelapse ---
+
+export interface TimelapseSettings {
+  printers: string[]
+  interval_secs: number
+  dir: string
+  effective_dir: string
+  ffmpeg: boolean
+}
+
+export async function fetchTimelapse(): Promise<TimelapseSettings> {
+  return queueJson(await api('/api/printers3d/timelapse'), 'Error al obtener timelapse')
+}
+
+export async function saveTimelapse(cfg: Pick<TimelapseSettings, 'printers' | 'interval_secs' | 'dir'>): Promise<TimelapseSettings> {
+  return queueJson(await api('/api/printers3d/timelapse', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg),
+  }), 'Error al guardar timelapse')
+}

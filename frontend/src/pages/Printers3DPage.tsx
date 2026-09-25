@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useEvent, useEventsConnected } from '../events/useEvents'
 import { useNavigate } from 'react-router-dom'
-import { Box, ArrowLeft, Plus, Trash2, Upload, Loader2, Thermometer, Search, Wifi, WifiOff, X, Play, Pause, Square, Home, Send, Camera, RefreshCw, FileText, Printer, ChevronDown, ChevronUp, Move, Flame, ArrowUp, ArrowDown, ArrowRight, ExternalLink, Calculator, Pencil, FolderPlus, ChevronRight, Check, ListOrdered } from 'lucide-react'
+import { Box, ArrowLeft, Plus, Trash2, Upload, Loader2, Thermometer, Search, Wifi, WifiOff, X, Play, Pause, Square, Home, Send, Camera, RefreshCw, FileText, Printer, ChevronDown, ChevronUp, Move, Flame, ArrowUp, ArrowDown, ArrowRight, ExternalLink, Calculator, Pencil, FolderPlus, ChevronRight, Check, ListOrdered, Film } from 'lucide-react'
 import {
   fetchPrinters3D,
   addPrinter3D,
@@ -36,6 +36,7 @@ import type {
 } from '../types'
 import CostCalculatorModal from '../components/printers3d/CostCalculatorModal'
 import PrintQueueModal from '../components/printers3d/PrintQueueModal'
+import TimelapseModal from '../components/printers3d/TimelapseModal'
 
 function formatTime(seconds: number | null | undefined): string {
   if (!seconds) return '--'
@@ -101,6 +102,7 @@ export default function Printers3DPage() {
   const [editingPrinterId, setEditingPrinterId] = useState<string | null>(null)
   const [showCostCalc, setShowCostCalc] = useState(false)
   const [showQueue, setShowQueue] = useState(false)
+  const [showTimelapse, setShowTimelapse] = useState(false)
 
   const loadPrinters = useCallback(async () => {
     try {
@@ -552,6 +554,13 @@ export default function Printers3DPage() {
             style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
           >
             <ListOrdered size={12} /> Cola de impresion
+          </button>
+          <button
+            onClick={() => setShowTimelapse(true)}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+            style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+          >
+            <Film size={12} /> Timelapse
           </button>
         </div>
 
@@ -1526,6 +1535,7 @@ export default function Printers3DPage() {
 
       {showCostCalc && <CostCalculatorModal printers={printers} onClose={() => setShowCostCalc(false)} />}
       {showQueue && <PrintQueueModal printers={printers} onClose={() => setShowQueue(false)} />}
+      {showTimelapse && <TimelapseModal printers={printers} onClose={() => setShowTimelapse(false)} />}
     </>
   )
 }

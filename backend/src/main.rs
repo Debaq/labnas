@@ -499,6 +499,8 @@ fn api_routes() -> Router<AppState> {
         .route("/api/printers3d", post(handlers::printers3d::add_printer))
         .route("/api/printers3d/detect", post(handlers::printers3d::detect_printers))
         .route("/api/printers3d/test-home", post(handlers::printers3d::test_home))
+        .route("/api/printers3d/timelapse", get(handlers::printers3d::get_timelapse))
+        .route("/api/printers3d/timelapse", put(handlers::printers3d::set_timelapse))
         .route("/api/printers3d/queue", get(handlers::printers3d::list_queue))
         .route("/api/printers3d/queue", post(handlers::printers3d::add_to_queue))
         .route("/api/printers3d/queue/reorder", post(handlers::printers3d::reorder_queue))

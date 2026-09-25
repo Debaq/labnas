@@ -25,10 +25,11 @@ mod motion;
 mod camera;
 mod monitor;
 mod queue;
+mod timelapse;
 
 // API publica (handlers y loops) y visibilidad entre submodulos (`use super::*`)
 #[allow(unused_imports)]
-pub use {creality::*, flashforge::*, config::*, status::*, jobs::*, detect::*, motion::*, camera::*, monitor::*, queue::*};
+pub use {creality::*, flashforge::*, config::*, status::*, jobs::*, detect::*, motion::*, camera::*, monitor::*, queue::*, timelapse::*};
 
 /// Convierte texto del DB al enum Printer3DType
 fn parse_printer_type(s: &str) -> Printer3DType {
