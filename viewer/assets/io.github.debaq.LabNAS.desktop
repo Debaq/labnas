@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=LabNAS
+GenericName=Visor LabNAS
+Comment=Ventana nativa para la interfaz de LabNAS
+Exec=labnas-viewer %u
+Icon=io.github.debaq.LabNAS
+Terminal=false
+Categories=Network;Utility;
+StartupWMClass=io.github.debaq.LabNAS
+Keywords=nas;lab;labnas;
