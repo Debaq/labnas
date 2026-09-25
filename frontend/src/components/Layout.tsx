@@ -1,10 +1,9 @@
-import { useState, useEffect } from 'react'
+import { Suspense, lazy, useState, useEffect } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight, Mail, Download, Package, GraduationCap, Thermometer } from 'lucide-react'
+import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight, Mail, Download, Package, GraduationCap, Thermometer, Loader2 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { shutdownServer, getBranding, fetchHealth, checkUpdate } from '../api'
 import MusicPanel from './MusicPanel'
-import PersistentTerminal from './PersistentTerminal'
 import type { IconComponent } from '../lib/icons'
 
 const pageTitles: Record<string, string> = {
@@ -23,6 +22,9 @@ const pageTitles: Record<string, string> = {
   '/settings': 'Configuracion',
   '/playlists': 'Editor de Playlist',
 }
+
+// xterm pesa ~300 KB: solo se descarga si alguien abre la terminal
+const PersistentTerminal = lazy(() => import('./PersistentTerminal'))
 
 export default function Layout() {
   const { user, logout, can, isAdmin, enabledModules, isModuleEnabled } = useAuth()
@@ -144,6 +146,11 @@ export default function Layout() {
   ]
 
   const isPending = user?.role === 'pendiente'
+
+  // La terminal se monta la primera vez que se visita /terminal y queda montada
+  // (la sesion sigue viva al navegar a otras paginas)
+  const [terminalOpened, setTerminalOpened] = useState(false)
+  if (!terminalOpened && location.pathname === '/terminal') setTerminalOpened(true)
   const roleLabel = user?.role === 'admin' ? 'Admin' : user?.role === 'operador' ? 'Operador' : user?.role === 'observador' ? 'Observador' : 'Pendiente'
 
   return (
@@ -339,9 +346,15 @@ export default function Layout() {
           ) : (
             <>
               <div className={location.pathname === '/terminal' ? 'hidden' : 'p-8 h-full overflow-auto'}>
-                <Outlet />
+                <Suspense fallback={<div className="flex justify-center py-16"><Loader2 size={28} className="animate-spin" style={{ color: 'var(--accent)' }} /></div>}>
+                  <Outlet />
+                </Suspense>
               </div>
-              {isModuleEnabled('terminal') && can('terminal') && <PersistentTerminal />}
+              {terminalOpened && isModuleEnabled('terminal') && can('terminal') && (
+                <Suspense fallback={null}>
+                  <PersistentTerminal />
+                </Suspense>
+              )}
             </>
           )}
         </main>

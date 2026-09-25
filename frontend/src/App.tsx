@@ -6,20 +6,23 @@ import EventsProvider from './events/EventsProvider'
 import Layout from './components/Layout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
-import FilesPage from './pages/FilesPage'
-import NetworkPage from './pages/NetworkPage'
-import SettingsPage from './pages/SettingsPage'
-import TerminalPage from './pages/TerminalPage'
-import Printers3DPage from './pages/Printers3DPage'
-import PrintingPage from './pages/PrintingPage'
-import TasksPage from './pages/TasksPage'
-import NotesPage from './pages/NotesPage'
-import EmailPage from './pages/EmailPage'
-import InventoryPage from './pages/InventoryPage'
-import PortfolioPage from './pages/PortfolioPage'
-import PlaylistEditorPage from './pages/PlaylistEditorPage'
-import SensorsPage from './pages/SensorsPage'
 import { Loader2 } from 'lucide-react'
+import { lazy } from 'react'
+
+// Paginas cargadas bajo demanda: el bundle inicial solo trae login, layout y dashboard
+const FilesPage = lazy(() => import('./pages/FilesPage'))
+const NetworkPage = lazy(() => import('./pages/NetworkPage'))
+const SettingsPage = lazy(() => import('./pages/SettingsPage'))
+const TerminalPage = lazy(() => import('./pages/TerminalPage'))
+const Printers3DPage = lazy(() => import('./pages/Printers3DPage'))
+const PrintingPage = lazy(() => import('./pages/PrintingPage'))
+const TasksPage = lazy(() => import('./pages/TasksPage'))
+const NotesPage = lazy(() => import('./pages/NotesPage'))
+const EmailPage = lazy(() => import('./pages/EmailPage'))
+const InventoryPage = lazy(() => import('./pages/InventoryPage'))
+const PortfolioPage = lazy(() => import('./pages/PortfolioPage'))
+const PlaylistEditorPage = lazy(() => import('./pages/PlaylistEditorPage'))
+const SensorsPage = lazy(() => import('./pages/SensorsPage'))
 
 // Registro de modulos: mapea module_id -> ruta + componente
 const MODULE_ROUTES: Record<string, { path: string; component: React.ComponentType }> = {
