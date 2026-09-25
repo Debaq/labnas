@@ -24,6 +24,7 @@ Cambios grandes pensados para una instalación nueva. Leer **Cambios que afectan
 - HTML/XML/JS se previsualizan como texto y SVG sin scripts
 
 ### Nuevo
+- **Instalador de un comando** (`curl -fsSL …/releases/latest/download/install.sh | sudo bash`): detecta arquitectura, verifica SHA-256, crea el servicio systemd sin root, abre puertos en ufw; también actualiza y desinstala
 - **HTTPS** en 3443 (y 443 con permiso): certificado autofirmado automático o propio (p.ej. `tailscale cert`), recarga en caliente, descarga del certificado con huella para instalarlo, redirección HTTP→HTTPS opcional (excepto sensores, localhost y el visor)
 - **Visor de escritorio** (`labnas-viewer`): ventana nativa sin navegador, notificaciones nativas, ícono en la bandeja, descubre el NAS por mDNS
 - **Tiempo real** (WebSocket `/api/live`): impresoras, música, sensores y respaldos sin consultar cada pocos segundos; notificaciones en la web y en el visor
@@ -48,5 +49,5 @@ Cambios grandes pensados para una instalación nueva. Leer **Cambios que afectan
 - Bundle inicial de la web: 1.1 MB → 319 KB (páginas y terminal bajo demanda)
 
 ### Interno
-- 64 tests en Rust (unitarios + integración con el servidor completo) y tests del frontend (`npm test`), en CI junto a `clippy -D warnings` y ESLint
+- 67 tests en Rust (unitarios + integración con el servidor completo) y tests del frontend (`npm test`), en CI junto a `clippy -D warnings`, ESLint y `shellcheck` de los scripts
 - Archivos grandes del backend y la API del frontend partidos por módulo

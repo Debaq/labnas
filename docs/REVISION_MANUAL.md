@@ -1,6 +1,6 @@
 # Revisión manual antes del release
 
-Lo automatizado (64 tests de Rust, tests del frontend, clippy, ESLint, build) ya pasa en CI. Esta lista cubre lo que **no se ha visto en pantalla**: UI, navegador real, visor y hardware. Marcar cada punto; si algo falla, anotar qué se esperaba y qué pasó.
+Lo automatizado (67 tests de Rust, tests del frontend, clippy, ESLint, build) ya pasa en CI. Esta lista cubre lo que **no se ha visto en pantalla**: UI, navegador real, visor y hardware. Marcar cada punto; si algo falla, anotar qué se esperaba y qué pasó.
 
 ## Preparación
 
@@ -70,6 +70,12 @@ Base limpia: `LABNAS_HOME=/tmp/labnas-prueba ./labnas-backend` (no toca `~/.labn
 - [ ] Activar "Redirigir", reiniciar: `http://IP:3001` lleva a HTTPS; `http://localhost:3001` y el visor siguen por HTTP; los sensores siguen enviando
 - [ ] (Opcional) Certificado de Tailscale: cargar rutas → el navegador ya no avisa, sin reiniciar
 
-## 11. Actualización (necesita un release real)
+## 11. Instalador (necesita un release real; probar en una VM o equipo de prueba)
+- [ ] `curl -fsSL …/releases/latest/download/install.sh | sudo bash` → servicio activo como el usuario de `sudo`, muestra las URLs
+- [ ] Ejecutarlo de nuevo → actualiza sin perder cuentas ni configuración
+- [ ] En una Raspberry (aarch64/armv7) → descarga el tarball de su arquitectura
+- [ ] `--uninstall` quita servicio y `/opt/labnas`, deja `~/.labnas`
+
+## 12. Actualización (necesita un release real)
 - [ ] Desde la versión anterior instalada, "Actualizar" → descarga, verifica checksum, reinicia en la nueva
 - [ ] "Volver a vX" → vuelve a la anterior y la sesión sigue abierta

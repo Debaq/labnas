@@ -31,14 +31,10 @@ Se distribuye como **binario estático** (musl) con la web UI embebida. Sin Dock
 ## Inicio rápido
 
 ```bash
-# Descargar último release
-TAG=$(curl -s https://api.github.com/repos/Debaq/labnas/releases/latest | grep tag_name | cut -d'"' -f4)
-curl -sL "https://github.com/Debaq/labnas/releases/download/${TAG}/labnas-${TAG}-linux-x86_64.tar.gz" | tar xz
-
-# Ejecutar (como usuario normal, NO con sudo)
-cd labnas
-./labnas-backend
+curl -fsSL https://github.com/Debaq/labnas/releases/latest/download/install.sh | sudo bash
 ```
+
+Instala en `/opt/labnas` como servicio systemd que corre con **tu usuario** (no root) y muestra la dirección al terminar. Ver [Instalación](#instalación) para opciones.
 
 Abre `http://localhost:3001` — la primera cuenta creada se convierte en admin. Las siguientes quedan **pendientes** hasta que un admin las apruebe.
 
@@ -275,7 +271,35 @@ sudo pacman -S mpv yt-dlp alsa-utils cups avahi nss-mdns
 
 ## Instalación
 
-### Binario pre-compilado (recomendado)
+### Instalador (recomendado)
+
+```bash
+curl -fsSL https://github.com/Debaq/labnas/releases/latest/download/install.sh | sudo bash
+```
+
+Qué hace: detecta la arquitectura (x86_64, aarch64, armv7), descarga el release y **verifica su SHA-256**, lo copia a `/opt/labnas` (dueño: el usuario del servicio, para que se auto-actualice), crea y arranca `labnas.service`, abre los puertos en `ufw` si está activo y espera a que responda. Volver a ejecutarlo actualiza sin perder datos (`~/.labnas` no se toca).
+
+Opciones (tras `sudo bash -s --`, o descargando el script):
+
+| Opción | Uso |
+|--------|-----|
+| `--user NOMBRE` | Usuario del servicio (por defecto quien ejecutó `sudo`) |
+| `--version vX.Y.Z` | Versión concreta en vez de la última |
+| `--dir RUTA` | Directorio de instalación (por defecto `/opt/labnas`) |
+| `--deps` | Instala dependencias opcionales (rsync, ffmpeg, mpv, yt-dlp, cups, smartmontools) |
+| `--smart` | Configura el lector SMART (`setup-smart.sh`) |
+| `--tarball ARCHIVO` | Instala desde un tarball local (necesita `ARCHIVO.sha256` al lado) |
+| `--uninstall` | Quita servicio y programa; conserva `~/.labnas` |
+| `--uninstall --purge` | Además borra datos y base (pide escribir `BORRAR`) |
+
+```bash
+# Ejemplo: usuario "lab", con dependencias
+curl -fsSL https://github.com/Debaq/labnas/releases/latest/download/install.sh | sudo bash -s -- --user lab --deps
+```
+
+Tras instalar, **respaldar `~/.labnas/secret.key`** del usuario del servicio: cifra los secretos guardados y no va en los respaldos.
+
+### Instalación manual
 
 ```bash
 TAG=$(curl -s https://api.github.com/repos/Debaq/labnas/releases/latest | grep tag_name | cut -d'"' -f4)
@@ -286,7 +310,7 @@ sudo chown -R "$USER": /opt/labnas   # el servicio corre como tu usuario y se au
 /opt/labnas/labnas-backend
 ```
 
-### Servicio systemd (producción)
+### Servicio systemd (instalación manual)
 
 LabNAS **no debe correr como root**. El servicio corre como un usuario normal (el del escritorio del laboratorio, para que música, terminal y archivos del home funcionen) y solo recibe dos capacidades: `CAP_NET_RAW` (ping del escáner de red) y `CAP_NET_BIND_SERVICE` (puerto 80).
 

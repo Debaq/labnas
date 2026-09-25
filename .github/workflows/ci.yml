@@ -41,6 +41,14 @@ jobs:
         working-directory: backend
         run: cargo test
 
+  scripts:
+    name: Scripts (shellcheck)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck
+        run: shellcheck install.sh setup-smart.sh labnas-smart-read viewer/install.sh
+
   musl:
     name: Backend (build musl estatico)
     runs-on: ubuntu-24.04

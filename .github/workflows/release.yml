@@ -142,6 +142,13 @@ jobs:
           TAG="${{ steps.version.outputs.tag }}"
           gh release upload "$TAG" "${{ env.tarball }}" "${{ env.tarball }}.sha256" --clobber
 
+      # Una sola vez: releases/latest/download/install.sh apunta siempre al ultimo
+      - name: Subir instalador
+        if: matrix.arch == 'x86_64'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ steps.version.outputs.tag }}" install.sh --clobber
+
   viewer:
     name: Viewer ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
