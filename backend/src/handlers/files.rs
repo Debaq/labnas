@@ -12,7 +12,7 @@ use tokio::io::AsyncWriteExt;
 use crate::config::resolve_home;
 use crate::models::files::{FileEntry, MkdirRequest, PathQuery, QuickAccess};
 use crate::state::{AppState, SessionInfo};
-use crate::storage;
+use crate::storage::{self, Op};
 
 type ApiError = (StatusCode, String);
 
@@ -43,16 +43,18 @@ fn roots_as_entries(roots: &[PathBuf]) -> Vec<FileEntry> {
 
 pub async fn list_files(
     State(state): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
     Query(query): Query<PathQuery>,
 ) -> Result<Json<Vec<FileEntry>>, ApiError> {
-    let roots = storage::load_roots(&state.db).await?;
+    let st = storage::Storage::load(&state.db).await?;
     let raw = query.path.unwrap_or_else(|| "/".to_string());
 
-    if raw == "/" && !storage::is_root(&roots, Path::new("/")) {
-        return Ok(Json(roots_as_entries(&roots)));
+    // "/" muestra solo las raices que el usuario puede leer
+    if raw == "/" && !st.is_root(Path::new("/")) {
+        return Ok(Json(roots_as_entries(&st.visible_roots(&session))));
     }
 
-    let target = storage::resolve_existing(&roots, &raw)?;
+    let target = st.resolve_existing_for(&session, &raw, Op::Read)?;
     if !target.is_dir() {
         return Err((StatusCode::BAD_REQUEST, "La ruta no es un directorio".to_string()));
     }
@@ -105,7 +107,7 @@ pub async fn upload_file(
     Extension(session): Extension<SessionInfo>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, String), ApiError> {
-    let roots = storage::load_roots(&state.db).await?;
+    let st = storage::Storage::load(&state.db).await?;
     // El frontend envia "path" antes que "file"; el archivo se escribe en streaming
     let mut target_dir: Option<PathBuf> = None;
     let mut saved: Option<(String, PathBuf)> = None;
@@ -118,7 +120,7 @@ pub async fn upload_file(
         match field.name().unwrap_or("") {
             "path" => {
                 let raw = field.text().await.map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
-                target_dir = Some(storage::resolve(&roots, &raw)?);
+                target_dir = Some(st.resolve_for(&session, &raw, Op::Write)?);
             }
             "file" => {
                 let dir = target_dir.clone().ok_or((
@@ -171,13 +173,14 @@ pub async fn upload_file(
 
 pub async fn download_file(
     State(state): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
     Query(query): Query<PathQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let raw = query
         .path
         .ok_or((StatusCode::BAD_REQUEST, "Parametro 'path' requerido".to_string()))?;
-    let roots = storage::load_roots(&state.db).await?;
-    let file_path = storage::resolve_existing(&roots, &raw)?;
+    let st = storage::Storage::load(&state.db).await?;
+    let file_path = st.resolve_existing_for(&session, &raw, Op::Read)?;
 
     if file_path.is_dir() {
         return Err((StatusCode::NOT_FOUND, "Archivo no encontrado".to_string()));
@@ -216,10 +219,10 @@ pub async fn delete_file(
     let raw = query
         .path
         .ok_or((StatusCode::BAD_REQUEST, "Parametro 'path' requerido".to_string()))?;
-    let roots = storage::load_roots(&state.db).await?;
-    let target = storage::resolve_existing(&roots, &raw)?;
+    let st = storage::Storage::load(&state.db).await?;
+    let target = st.resolve_existing_for(&session, &raw, Op::Write)?;
 
-    if storage::is_root(&roots, &target) {
+    if st.is_root(&target) {
         return Err((
             StatusCode::FORBIDDEN,
             "No se puede eliminar una carpeta raiz".to_string(),
@@ -231,7 +234,7 @@ pub async fn delete_file(
         return Err((StatusCode::BAD_REQUEST, "Usa la papelera para gestionar este elemento".to_string()));
     }
 
-    crate::handlers::trash::move_to_trash(&state, &roots, &target, &session.username).await?;
+    crate::handlers::trash::move_to_trash(&state, &st.paths(), &target, &session.username).await?;
     state
         .log_activity("A la papelera", &target.display().to_string(), &session.username)
         .await;
@@ -244,8 +247,8 @@ pub async fn create_directory(
     Extension(session): Extension<SessionInfo>,
     Json(body): Json<MkdirRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let roots = storage::load_roots(&state.db).await?;
-    let target = storage::resolve(&roots, &body.path)?;
+    let st = storage::Storage::load(&state.db).await?;
+    let target = st.resolve_for(&session, &body.path, Op::Write)?;
 
     tokio::fs::create_dir_all(&target).await.map_err(internal)?;
 
@@ -289,10 +292,11 @@ pub struct PreviewTokenResponse {
 
 pub async fn create_preview_token(
     State(state): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
     Json(req): Json<PreviewTokenRequest>,
 ) -> Result<Json<PreviewTokenResponse>, ApiError> {
-    let roots = storage::load_roots(&state.db).await?;
-    let path = storage::resolve_existing(&roots, &req.path)?;
+    let st = storage::Storage::load(&state.db).await?;
+    let path = st.resolve_existing_for(&session, &req.path, Op::Read)?;
     if path.is_dir() {
         return Err((StatusCode::BAD_REQUEST, "No es un archivo".to_string()));
     }
@@ -383,45 +387,104 @@ pub async fn serve_preview(
 
 // --- Raices de almacenamiento ---
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct RootConfig {
+    pub path: String,
+    #[serde(flatten, default)]
+    pub access: storage::RootAccess,
+}
+
 #[derive(serde::Serialize)]
 pub struct RootsResponse {
-    pub roots: Vec<String>,
+    pub roots: Vec<RootConfig>,
     pub defaults: Vec<String>,
 }
 
-pub async fn get_roots(State(state): State<AppState>) -> Result<Json<RootsResponse>, ApiError> {
-    let roots = crate::db::db_op(&state.db, |conn| Ok(storage::configured_roots(conn))).await?;
-    Ok(Json(RootsResponse {
-        roots,
-        defaults: storage::default_roots(),
-    }))
+async fn roots_response(state: &AppState) -> Result<RootsResponse, ApiError> {
+    let st = storage::Storage::load(&state.db).await?;
+    let configured = crate::db::db_op(&state.db, |conn| Ok(storage::configured_roots(conn))).await?;
+    let access: std::collections::HashMap<PathBuf, storage::RootAccess> = st.access().into_iter().collect();
+    let roots = configured
+        .into_iter()
+        .map(|path| {
+            let access = std::fs::canonicalize(&path)
+                .ok()
+                .and_then(|c| access.get(&c).cloned())
+                .unwrap_or_default();
+            RootConfig { path, access }
+        })
+        .collect();
+    Ok(RootsResponse { roots, defaults: storage::default_roots() })
+}
+
+/// GET /api/files/roots — para no admins solo las rutas que pueden leer (sin permisos)
+pub async fn get_roots(
+    State(state): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
+) -> Result<Json<RootsResponse>, ApiError> {
+    let mut resp = roots_response(&state).await?;
+    if session.role != crate::models::notifications::UserRole::Admin {
+        let st = storage::Storage::load(&state.db).await?;
+        let visible = st.visible_roots(&session);
+        resp.roots.retain(|r| std::fs::canonicalize(&r.path).map(|c| visible.contains(&c)).unwrap_or(false));
+        for r in &mut resp.roots {
+            r.access = storage::RootAccess { readers: vec![], writers: vec![] };
+        }
+    }
+    Ok(Json(resp))
 }
 
 #[derive(serde::Deserialize)]
 pub struct SetRootsRequest {
-    pub roots: Vec<String>,
+    pub roots: Vec<RootConfig>,
 }
 
+/// PUT /api/files/roots (admin) — carpetas accesibles y quien lee/escribe en cada una
 pub async fn set_roots(
     State(state): State<AppState>,
     Extension(session): Extension<SessionInfo>,
     Json(req): Json<SetRootsRequest>,
 ) -> Result<Json<RootsResponse>, ApiError> {
-    let roots = storage::validate_roots(&req.roots)?;
-    let to_save = roots.clone();
-    crate::db::db_op(&state.db, move |conn| storage::save_roots(conn, &to_save)).await?;
+    for r in &req.roots {
+        if let Some(bad) = r.access.readers.iter().chain(&r.access.writers).find(|p| !storage::valid_principal(p)) {
+            return Err((StatusCode::BAD_REQUEST, format!("Permiso invalido: '{}'", bad)));
+        }
+    }
+    let paths: Vec<String> = req.roots.iter().map(|r| r.path.clone()).collect();
+    let canonical = storage::validate_roots(&paths)?;
+    // validate_roots canonicaliza y quita duplicados: emparejar cada ruta con su acceso
+    let mut entries: Vec<(String, storage::RootAccess)> = Vec::new();
+    for r in req.roots {
+        if let Ok(c) = std::fs::canonicalize(r.path.trim()) {
+            let c = c.to_string_lossy().to_string();
+            if canonical.contains(&c) && !entries.iter().any(|(p, _)| *p == c) {
+                entries.push((c, r.access));
+            }
+        }
+    }
+    let summary: Vec<String> = entries
+        .iter()
+        .map(|(p, a)| format!("{} (lee: {}; escribe: {})", p, a.readers.join(","), a.writers.join(",")))
+        .collect();
+    let (to_save, acl) = (canonical.clone(), entries);
+    crate::db::db_op(&state.db, move |conn| {
+        storage::save_roots(conn, &to_save)?;
+        storage::save_access(conn, &acl)
+    })
+    .await?;
     state
-        .log_activity("Raices de almacenamiento", &roots.join(", "), &session.username)
+        .log_activity("Carpetas accesibles", &summary.join(" | "), &session.username)
         .await;
-    Ok(Json(RootsResponse {
-        roots,
-        defaults: storage::default_roots(),
-    }))
+    Ok(Json(roots_response(&state).await?))
 }
 
-pub async fn quick_access(State(state): State<AppState>) -> Json<Vec<QuickAccess>> {
+pub async fn quick_access(
+    State(state): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
+) -> Json<Vec<QuickAccess>> {
     let home = resolve_home();
-    let roots = storage::load_roots(&state.db).await.unwrap_or_default();
+    let Ok(st) = storage::Storage::load(&state.db).await else { return Json(vec![]) };
+    let roots = st.visible_roots(&session);
 
     let candidates: Vec<(&str, &str, &str)> = vec![
         ("Escritorio", "Desktop", "monitor"),
@@ -480,7 +543,7 @@ pub async fn quick_access(State(state): State<AppState>) -> Json<Vec<QuickAccess
     }
 
     // Solo accesos dentro de las raices; y las raices propias que no esten listadas
-    result.retain(|qa| storage::resolve(&roots, &qa.path).is_ok());
+    result.retain(|qa| st.resolve_for(&session, &qa.path, Op::Read).is_ok());
     for r in &roots {
         let path = r.to_string_lossy().to_string();
         if !result.iter().any(|qa| qa.path == path) {

@@ -27,7 +27,9 @@ async fn papelera_mover_restaurar_y_vaciar() {
     let dir = items.as_array().unwrap().iter().find(|i| i["is_dir"] == true).unwrap();
     assert_eq!(dir["size"], 3, "tamaño de la carpeta");
 
-    assert_eq!(s.get("/api/trash", &bob).await.status, 403, "sin permiso de escritura");
+    let visible = s.get("/api/trash", &bob).await;
+    assert_eq!(visible.status, 200);
+    assert_eq!(visible.json().as_array().unwrap().len(), 0, "sin escritura no ve lo borrado");
     let inside = std::fs::read_dir(&trash_dir).unwrap().next().unwrap().unwrap().path();
     assert_eq!(
         s.delete(&format!("/api/files?path={}", enc(&inside.to_string_lossy())), &admin).await.status,

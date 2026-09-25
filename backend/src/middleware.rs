@@ -63,7 +63,6 @@ pub enum Access {
     Admin,
     PermTerminal,
     PermPrint,
-    PermFileWrite,
 }
 
 /// Permisos por ruta. **Denegar por defecto**: toda ruta no listada es solo admin,
@@ -88,9 +87,11 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         // --- Archivos ---
         ("GET", ["files"]) | ("GET", ["files", "download"]) | ("GET", ["files", "quickaccess"]) => User,
         ("GET", ["files", "roots"]) | ("POST", ["files", "preview-token"]) => User,
-        ("POST", ["files", "upload"]) | ("POST", ["files", "directory"]) | ("DELETE", ["files"]) => PermFileWrite,
-        ("POST", ["download-url"]) => PermFileWrite,
-        ("GET", ["trash"]) | ("POST", ["trash", _, "restore"]) | ("DELETE", ["trash", _]) => PermFileWrite,
+        // Escritura: el handler verifica el permiso de la carpeta (storage::Storage).
+        // Por defecto escriben los usuarios con permiso de escritura, como antes.
+        ("POST", ["files", "upload"]) | ("POST", ["files", "directory"]) | ("DELETE", ["files"]) => User,
+        ("POST", ["download-url"]) => User,
+        ("GET", ["trash"]) | ("POST", ["trash", _, "restore"]) | ("DELETE", ["trash", _]) => User,
         ("GET", ["shares"]) | ("POST", ["shares"]) | ("DELETE", ["shares", _]) => User,
 
         // --- Sistema (lectura) ---
@@ -152,7 +153,6 @@ fn allowed(access: Access, s: &SessionInfo) -> bool {
         Access::Admin => is_admin,
         Access::PermTerminal => is_admin || s.permissions.terminal,
         Access::PermPrint => is_admin || s.permissions.impresion,
-        Access::PermFileWrite => is_admin || s.permissions.archivos_escritura,
     }
 }
 
@@ -262,14 +262,13 @@ mod tests {
     }
 
     #[test]
-    fn escritura_de_archivos_requiere_permiso() {
-        assert_eq!(acc(Method::POST, "/api/download-url"), PermFileWrite);
-        assert_eq!(acc(Method::POST, "/api/files/upload"), PermFileWrite);
-        assert_eq!(acc(Method::DELETE, "/api/files"), PermFileWrite);
+    fn archivos_delegan_en_permisos_por_carpeta() {
+        // el middleware deja pasar; storage::Storage decide por carpeta (tests de integracion)
+        assert_eq!(acc(Method::POST, "/api/download-url"), User);
+        assert_eq!(acc(Method::POST, "/api/files/upload"), User);
+        assert_eq!(acc(Method::DELETE, "/api/files"), User);
         assert_eq!(acc(Method::GET, "/api/files/download"), User);
-        assert_eq!(acc(Method::GET, "/api/trash"), PermFileWrite);
-        assert_eq!(acc(Method::POST, "/api/trash/abc/restore"), PermFileWrite);
-        assert_eq!(acc(Method::DELETE, "/api/trash/abc"), PermFileWrite);
+        assert_eq!(acc(Method::GET, "/api/trash"), User);
         assert_eq!(acc(Method::DELETE, "/api/trash"), Admin);
     }
 

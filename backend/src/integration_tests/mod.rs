@@ -6,6 +6,7 @@ mod harness;
 mod backups;
 mod events;
 mod files;
+mod folders;
 mod secrets;
 mod security;
 mod sensors;

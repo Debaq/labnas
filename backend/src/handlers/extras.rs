@@ -25,6 +25,21 @@ fn get_session_user(
     sessions.get(token).map(|s| s.username.clone())
 }
 
+async fn session_of(state: &AppState, headers: &HeaderMap) -> Result<crate::state::SessionInfo, (StatusCode, String)> {
+    let token = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
+    state
+        .sessions
+        .lock()
+        .await
+        .get(token)
+        .cloned()
+        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))
+}
+
 // =====================
 // Temporary file sharing
 // =====================
@@ -57,8 +72,9 @@ pub async fn create_share(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let roots = crate::storage::load_roots(&state.db).await?;
-    let path = crate::storage::resolve_existing(&roots, &req.path)?;
+    let session = session_of(&state, &headers).await?;
+    let st = crate::storage::Storage::load(&state.db).await?;
+    let path = st.resolve_existing_for(&session, &req.path, crate::storage::Op::Read)?;
     if path.is_dir() {
         return Err((StatusCode::NOT_FOUND, "Archivo no encontrado".to_string()));
     }
@@ -188,8 +204,9 @@ pub async fn download_url(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let roots = crate::storage::load_roots(&state.db).await?;
-    let dest = crate::storage::resolve(&roots, &req.destination)?;
+    let session = session_of(&state, &headers).await?;
+    let st = crate::storage::Storage::load(&state.db).await?;
+    let dest = st.resolve_for(&session, &req.destination, crate::storage::Op::Write)?;
 
     let lower = req.url.to_ascii_lowercase();
     if !lower.starts_with("http://") && !lower.starts_with("https://") {

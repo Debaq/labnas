@@ -103,10 +103,11 @@ pub async fn print_upload(
 
 pub async fn print_file_path(
     State(state): State<AppState>,
+    axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
     Json(req): Json<PrintFileRequest>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
-    let roots = crate::storage::load_roots(&state.db).await?;
-    let path = crate::storage::resolve_existing(&roots, &req.path)?;
+    let st = crate::storage::Storage::load(&state.db).await?;
+    let path = st.resolve_existing_for(&session, &req.path, crate::storage::Op::Read)?;
     let path_str = path.to_string_lossy().to_string();
 
     if path.is_dir() {

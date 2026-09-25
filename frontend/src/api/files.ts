@@ -39,8 +39,15 @@ export async function emptyTrash(): Promise<number> {
 
 // --- Files ---
 
+/** Principales: "*", "perm:write", "role:operador|observador|admin", "user:<nombre>" */
+export interface RootConfig {
+  path: string
+  readers: string[]
+  writers: string[]
+}
+
 export interface StorageRoots {
-  roots: string[]
+  roots: RootConfig[]
   defaults: string[]
 }
 
@@ -50,7 +57,7 @@ export async function fetchStorageRoots(): Promise<StorageRoots> {
   return res.json()
 }
 
-export async function saveStorageRoots(roots: string[]): Promise<StorageRoots> {
+export async function saveStorageRoots(roots: RootConfig[]): Promise<StorageRoots> {
   const res = await api('/api/files/roots', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

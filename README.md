@@ -316,7 +316,9 @@ La actualización desde la web reemplaza el binario y se re-ejecuta sola (no nec
 
 ### Carpetas accesibles (raíces de almacenamiento)
 
-El explorador, compartir, descargar URL e imprimir archivo solo acceden a las **raíces de almacenamiento**. Por defecto: el home del usuario del servicio, `/media`, `/mnt` y `/run/media`. Un admin las cambia en **Configuración > Archivos**. El directorio de datos (`~/.labnas`, con la base de datos) nunca es accesible.
+El explorador, compartir, descargar URL e imprimir archivo solo acceden a las **raíces de almacenamiento**. Por defecto: el home del usuario del servicio, `/media`, `/mnt` y `/run/media`. Un admin las cambia en **Configuración > Sistema > Carpetas accesibles**. El directorio de datos (`~/.labnas`, con la base de datos) nunca es accesible.
+
+**Permisos por carpeta**: en cada carpeta se elige quién **lee** y quién **escribe** (escribir incluye leer): todos, los usuarios con permiso de escritura, un rol (operador / observador) o usuarios puntuales. El admin siempre tiene acceso. Por defecto lee cualquiera y escriben los usuarios con permiso de escritura. Un usuario solo ve en el explorador las carpetas que puede leer, y en la papelera solo lo que puede restaurar.
 
 ### mDNS
 

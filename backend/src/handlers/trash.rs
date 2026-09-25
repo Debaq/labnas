@@ -151,7 +151,17 @@ fn remove_path(p: &Path) -> std::io::Result<()> {
 }
 
 /// GET /api/trash — mas recientes primero
-pub async fn list_trash(State(state): State<AppState>) -> Result<Json<Vec<TrashItem>>, ApiError> {
+/// Puede gestionar el elemento: escritura en la carpeta de origen (el admin siempre)
+fn can_manage(st: &crate::storage::Storage, s: &SessionInfo, item: &TrashItem) -> bool {
+    s.role == crate::models::notifications::UserRole::Admin
+        || st.can(s, Path::new(&item.original_path), crate::storage::Op::Write)
+}
+
+pub async fn list_trash(
+    State(state): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
+) -> Result<Json<Vec<TrashItem>>, ApiError> {
+    let st = crate::storage::Storage::load(&state.db).await?;
     let items = crate::db::db_op(&state.db, |conn| {
         let mut stmt = conn
             .prepare("SELECT id FROM trash_items ORDER BY deleted_at DESC")
@@ -170,6 +180,8 @@ pub async fn list_trash(State(state): State<AppState>) -> Result<Json<Vec<TrashI
         Ok(out)
     })
     .await?;
+    // Solo lo que el usuario puede restaurar o borrar
+    let items = items.into_iter().filter(|i| can_manage(&st, &session, i)).collect();
     Ok(Json(items))
 }
 
@@ -184,9 +196,9 @@ pub async fn restore_item(
         .await?
         .ok_or((StatusCode::NOT_FOUND, "No esta en la papelera".to_string()))?;
 
-    // El destino debe seguir dentro de las raices actuales
-    let roots = crate::storage::load_roots(&state.db).await?;
-    let original = crate::storage::resolve(&roots, &item.original_path)?;
+    // El destino debe seguir dentro de las raices actuales y el usuario poder escribir ahi
+    let st = crate::storage::Storage::load(&state.db).await?;
+    let original = st.resolve_for(&session, &item.original_path, crate::storage::Op::Write)?;
 
     let (src, orig) = (PathBuf::from(&trash_path), original.clone());
     let restored = tokio::task::spawn_blocking(move || -> Result<PathBuf, String> {
@@ -231,6 +243,11 @@ pub async fn delete_item(
     let (item, trash_path) = crate::db::db_op(&state.db, move |conn| load_item(conn, &id2))
         .await?
         .ok_or((StatusCode::NOT_FOUND, "No esta en la papelera".to_string()))?;
+
+    let st = crate::storage::Storage::load(&state.db).await?;
+    if !can_manage(&st, &session, &item) {
+        return Err((StatusCode::FORBIDDEN, "Sin permiso de escritura en la carpeta de origen".to_string()));
+    }
 
     let p = PathBuf::from(trash_path);
     tokio::task::spawn_blocking(move || remove_path(&p)).await.map_err(internal)?.map_err(internal)?;

@@ -117,6 +117,12 @@ const MIGRATIONS: &[&str] = &[
     UPDATE settings SET value = labnas_encrypt(value) WHERE key IN ('groq_api_key', 'lastfm_api_key') AND value != '';",
     // 6: token por dispositivo de sensores (se guarda solo el hash)
     "ALTER TABLE sensor_devices ADD COLUMN token_hash TEXT;",
+    // 7: permisos por carpeta (lectores/escritores de cada raiz de almacenamiento)
+    "CREATE TABLE IF NOT EXISTS root_access (
+        root TEXT PRIMARY KEY,
+        readers TEXT NOT NULL DEFAULT '[\"*\"]',
+        writers TEXT NOT NULL DEFAULT '[\"perm:write\"]'
+    );",
 ];
 
 fn run_migrations(conn: &Connection) {

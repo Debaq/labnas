@@ -144,8 +144,192 @@ pub fn resolve_existing(roots: &[PathBuf], raw: &str) -> Result<PathBuf, ApiErro
     Ok(p)
 }
 
-pub fn is_root(roots: &[PathBuf], path: &Path) -> bool {
-    roots.iter().any(|r| r == path)
+// ─── Permisos por carpeta ───
+//
+// Cada raiz tiene lectores y escritores. Principales:
+//   "*"             cualquier usuario aprobado
+//   "perm:write"    usuarios con permiso de escritura de archivos (regla historica)
+//   "role:<rol>"    admin | operador | observador
+//   "user:<nombre>" un usuario puntual
+// El admin siempre tiene acceso total. Sin configurar: lee cualquiera, escribe "perm:write".
+
+pub const EVERYONE: &str = "*";
+pub const WRITE_PERM: &str = "perm:write";
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct RootAccess {
+    pub readers: Vec<String>,
+    pub writers: Vec<String>,
+}
+
+impl Default for RootAccess {
+    fn default() -> Self {
+        Self { readers: vec![EVERYONE.to_string()], writers: vec![WRITE_PERM.to_string()] }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Op {
+    Read,
+    Write,
+}
+
+/// Principal valido para una lista de acceso
+pub fn valid_principal(p: &str) -> bool {
+    match p {
+        EVERYONE | WRITE_PERM => true,
+        _ => {
+            if let Some(role) = p.strip_prefix("role:") {
+                matches!(role, "admin" | "operador" | "observador")
+            } else if let Some(user) = p.strip_prefix("user:") {
+                !user.is_empty() && user.len() <= 32 && user.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+            } else {
+                false
+            }
+        }
+    }
+}
+
+fn principal_matches(p: &str, s: &crate::state::SessionInfo) -> bool {
+    use crate::models::notifications::UserRole;
+    match p {
+        EVERYONE => true,
+        WRITE_PERM => s.permissions.archivos_escritura,
+        _ => {
+            if let Some(role) = p.strip_prefix("role:") {
+                let r = match s.role {
+                    UserRole::Admin => "admin",
+                    UserRole::Operador => "operador",
+                    UserRole::Observador => "observador",
+                    UserRole::Pendiente => "pendiente",
+                };
+                role == r
+            } else {
+                p.strip_prefix("user:") == Some(s.username.as_str())
+            }
+        }
+    }
+}
+
+/// Raices configuradas con su acceso
+#[derive(Debug, Clone)]
+pub struct Storage {
+    /// Canonicalizadas; ordenadas de la mas especifica a la mas general (para resolver)
+    roots: Vec<(PathBuf, RootAccess)>,
+    /// Orden en que el admin las configuro (para mostrarlas)
+    ordered: Vec<PathBuf>,
+}
+
+impl Storage {
+    pub fn from_conn(conn: &Connection) -> Self {
+        let mut acl = std::collections::HashMap::new();
+        if let Ok(mut stmt) = conn.prepare("SELECT root, readers, writers FROM root_access") {
+            let rows = stmt.query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+            });
+            if let Ok(rows) = rows {
+                for (root, readers, writers) in rows.flatten() {
+                    acl.insert(
+                        root,
+                        RootAccess {
+                            readers: serde_json::from_str(&readers).unwrap_or_default(),
+                            writers: serde_json::from_str(&writers).unwrap_or_default(),
+                        },
+                    );
+                }
+            }
+        }
+        let ordered = canonical_roots(conn);
+        let mut roots: Vec<(PathBuf, RootAccess)> = ordered
+            .iter()
+            .cloned()
+            .map(|p| {
+                let access = acl.get(p.to_string_lossy().as_ref()).cloned().unwrap_or_default();
+                (p, access)
+            })
+            .collect();
+        roots.sort_by_key(|(p, _)| std::cmp::Reverse(p.as_os_str().len()));
+        Self { roots, ordered }
+    }
+
+    pub async fn load(pool: &DbPool) -> Result<Self, ApiError> {
+        crate::db::db_op(pool, |conn| Ok(Self::from_conn(conn))).await
+    }
+
+    pub fn paths(&self) -> Vec<PathBuf> {
+        self.roots.iter().map(|(p, _)| p.clone()).collect()
+    }
+
+    pub fn is_root(&self, path: &Path) -> bool {
+        self.roots.iter().any(|(p, _)| p == path)
+    }
+
+    /// Acceso de la raiz mas especifica que contiene `path`
+    fn access_for(&self, path: &Path) -> Option<&RootAccess> {
+        self.roots.iter().find(|(r, _)| path.starts_with(r)).map(|(_, a)| a)
+    }
+
+    pub fn can(&self, s: &crate::state::SessionInfo, path: &Path, op: Op) -> bool {
+        if s.role == crate::models::notifications::UserRole::Admin {
+            return self.access_for(path).is_some();
+        }
+        let Some(a) = self.access_for(path) else { return false };
+        let writer = a.writers.iter().any(|p| principal_matches(p, s));
+        match op {
+            Op::Write => writer,
+            // Quien puede escribir tambien puede leer
+            Op::Read => writer || a.readers.iter().any(|p| principal_matches(p, s)),
+        }
+    }
+
+    fn check(&self, s: &crate::state::SessionInfo, path: PathBuf, op: Op) -> Result<PathBuf, ApiError> {
+        if self.can(s, &path, op) {
+            Ok(path)
+        } else {
+            Err(forbidden(match op {
+                Op::Read => "Sin permiso de lectura en esta carpeta",
+                Op::Write => "Sin permiso de escritura en esta carpeta",
+            }))
+        }
+    }
+
+    /// Resuelve dentro de las raices y verifica el permiso del usuario
+    pub fn resolve_for(&self, s: &crate::state::SessionInfo, raw: &str, op: Op) -> Result<PathBuf, ApiError> {
+        let p = resolve(&self.paths(), raw)?;
+        self.check(s, p, op)
+    }
+
+    pub fn resolve_existing_for(&self, s: &crate::state::SessionInfo, raw: &str, op: Op) -> Result<PathBuf, ApiError> {
+        let p = resolve_existing(&self.paths(), raw)?;
+        self.check(s, p, op)
+    }
+
+    /// Raices que el usuario puede leer (en el orden configurado)
+    pub fn visible_roots(&self, s: &crate::state::SessionInfo) -> Vec<PathBuf> {
+        self.ordered.iter().filter(|p| self.can(s, p, Op::Read)).cloned().collect()
+    }
+
+    pub fn access(&self) -> Vec<(PathBuf, RootAccess)> {
+        self.roots.clone()
+    }
+}
+
+/// Guarda el acceso de cada raiz (reemplaza lo anterior)
+pub fn save_access(conn: &Connection, entries: &[(String, RootAccess)]) -> Result<(), String> {
+    conn.execute("DELETE FROM root_access", []).map_err(|e| e.to_string())?;
+    for (root, a) in entries {
+        conn.execute(
+            "INSERT INTO root_access (root, readers, writers) VALUES (?1, ?2, ?3)",
+            rusqlite::params![
+                root,
+                serde_json::to_string(&a.readers).map_err(|e| e.to_string())?,
+                serde_json::to_string(&a.writers).map_err(|e| e.to_string())?
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// Nombre de archivo seguro (sin directorios, `..` ni NUL).
@@ -196,6 +380,75 @@ mod tests {
         std::os::unix::fs::symlink("/etc", &link).unwrap();
         let roots = vec![root.clone()];
         assert!(resolve(&roots, link.join("passwd").to_str().unwrap()).is_err());
+    }
+
+    fn sess(user: &str, role: crate::models::notifications::UserRole, write: bool) -> crate::state::SessionInfo {
+        crate::state::SessionInfo {
+            username: user.into(),
+            role,
+            permissions: crate::models::notifications::UserPermissions { archivos_escritura: write, ..Default::default() },
+            created_at: 0,
+        }
+    }
+
+    #[test]
+    fn permisos_por_carpeta() {
+        use crate::models::notifications::UserRole::*;
+        let a = tmp_root();
+        let b = tmp_root();
+        let st = Storage {
+            roots: vec![
+                (a.clone(), RootAccess::default()),
+                (b.clone(), RootAccess { readers: vec!["role:operador".into()], writers: vec!["user:bob".into()] }),
+            ],
+            ordered: vec![a.clone(), b.clone()],
+        };
+        let obs = sess("ana", Observador, false);
+        let obs_w = sess("eva", Observador, true);
+        let op = sess("oscar", Operador, false);
+        let bob = sess("bob", Observador, false);
+        let admin = sess("root", Admin, false);
+
+        // por defecto: todos leen, escribe quien tiene el permiso
+        assert!(st.can(&obs, &a.join("x"), Op::Read));
+        assert!(!st.can(&obs, &a.join("x"), Op::Write));
+        assert!(st.can(&obs_w, &a.join("x"), Op::Write));
+        // carpeta restringida
+        assert!(!st.can(&obs, &b.join("x"), Op::Read));
+        assert!(st.can(&op, &b.join("x"), Op::Read));
+        assert!(!st.can(&op, &b.join("x"), Op::Write));
+        assert!(st.can(&bob, &b.join("x"), Op::Write));
+        assert!(st.can(&bob, &b.join("x"), Op::Read), "escribir implica leer");
+        assert!(st.can(&admin, &b.join("x"), Op::Write));
+        assert_eq!(st.visible_roots(&obs), vec![a.clone()]);
+        // fuera de toda raiz: nadie, ni el admin
+        assert!(!st.can(&admin, Path::new("/etc"), Op::Read));
+    }
+
+    #[test]
+    fn raiz_mas_especifica_gana() {
+        let a = tmp_root();
+        let inner = a.join("sub");
+        let st = Storage {
+            roots: vec![
+                (inner.clone(), RootAccess { readers: vec!["user:bob".into()], writers: vec![] }),
+                (a.clone(), RootAccess::default()),
+            ],
+            ordered: vec![a.clone(), inner.clone()],
+        };
+        let ana = sess("ana", crate::models::notifications::UserRole::Observador, false);
+        assert!(st.can(&ana, &a.join("otro"), Op::Read));
+        assert!(!st.can(&ana, &inner.join("x"), Op::Read));
+    }
+
+    #[test]
+    fn principales_validos() {
+        for p in ["*", "perm:write", "role:operador", "user:bob.lab"] {
+            assert!(valid_principal(p), "{}", p);
+        }
+        for p in ["", "role:jefe", "user:", "user:a b", "grupo:x"] {
+            assert!(!valid_principal(p), "{}", p);
+        }
     }
 
     #[test]

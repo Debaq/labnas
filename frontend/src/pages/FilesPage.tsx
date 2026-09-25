@@ -95,7 +95,7 @@ function formatDate(dateStr: string): string {
 
 export default function FilesPage() {
   const [files, setFiles] = useState<FileEntry[]>([])
-  const { can, isAdmin } = useAuth()
+  const { isAdmin } = useAuth()
   const [showTrash, setShowTrash] = useState(false)
   const [preview, setPreview] = useState<FileEntry | null>(null)
   const [currentPath, setCurrentPath] = useState('/')
@@ -453,20 +453,19 @@ export default function FilesPage() {
             <Link size={16} />
             Descargar URL
           </button>
-          {can('archivos_escritura') && (
-            <button
-              onClick={() => setShowTrash(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90"
-              style={{
-                backgroundColor: 'var(--card-bg)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border)',
-              }}
-            >
-              <Trash2 size={16} />
-              Papelera
-            </button>
-          )}
+          {/* La papelera muestra solo lo que el usuario puede restaurar (segun sus carpetas) */}
+          <button
+            onClick={() => setShowTrash(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90"
+            style={{
+              backgroundColor: 'var(--card-bg)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border)',
+            }}
+          >
+            <Trash2 size={16} />
+            Papelera
+          </button>
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
