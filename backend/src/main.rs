@@ -79,6 +79,7 @@ async fn main() {
     tokio::spawn(handlers::audit::audit_cleanup_loop(state.clone()));
     tokio::spawn(handlers::backups::backup_scheduler_loop(state.clone()));
     tokio::spawn(handlers::trash::trash_cleanup_loop(state.clone()));
+    tokio::spawn(handlers::smart::smart_monitor_loop(state.clone()));
 
     // Background tasks: condicionales por modulo
     {
@@ -443,6 +444,8 @@ fn api_routes() -> Router<AppState> {
         .route("/api/system/upload-limit", post(handlers::system::set_upload_limit))
         .route("/api/system/update/do", post(handlers::system::do_update))
         .route("/api/system/reinstall", post(handlers::system::reinstall))
+        .route("/api/system/smart", get(handlers::smart::get_smart))
+        .route("/api/system/smart", put(handlers::smart::set_smart))
         .route("/api/system/rollback", get(handlers::system::rollback_status))
         .route("/api/system/rollback", post(handlers::system::do_rollback))
         .route("/api/system/branding", get(handlers::system::get_branding))

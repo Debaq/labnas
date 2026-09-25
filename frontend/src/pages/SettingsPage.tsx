@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine, Pencil, Music, HelpCircle, X, RefreshCw, Shield, LayoutDashboard, FolderOpen, Network, Printer, Box, ClipboardList, FileText, Mail, Package, GraduationCap, Thermometer, ChevronUp, ChevronDown, AlertTriangle, Bell, Server, SlidersHorizontal, RotateCcw, Archive } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import StorageRootsSection from '../components/StorageRootsSection'
+import SmartSection from '../components/SmartSection'
 import AuditLogSection from '../components/AuditLogSection'
 import BackupsSection from '../components/BackupsSection'
 import { useTheme } from '../themes/ThemeContext'
@@ -1674,6 +1675,8 @@ export default function SettingsPage() {
       </section>}
 
       {activeTab === 'system' && isAdmin && <StorageRootsSection />}
+
+      {activeTab === 'system' && isAdmin && <SmartSection />}
 
       {activeTab === 'backups' && isAdmin && <BackupsSection />}
 

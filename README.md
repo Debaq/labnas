@@ -509,6 +509,16 @@ Desactivado por defecto; se activa en **Configuración > Sistema > Carpetas acce
 - Linux: `dav://<servidor>:3001/dav/` en el gestor de archivos (o `davfs2`); macOS: Finder > Ir > Conectarse al servidor
 - Windows sobre HTTP (sin TLS) requiere habilitar Basic en el cliente WebDAV (`HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters\BasicAuthLevel = 2`) o usar WinSCP / Cyberduck. Sin HTTPS la contraseña viaja en claro: úsalo solo en la LAN o sobre Tailscale
 
+## Salud de discos (SMART)
+
+Desactivado por defecto. Como LabNAS no corre como root, necesita un permiso de **solo lectura** para `smartctl`:
+
+```bash
+sudo bash setup-smart.sh <usuario-que-corre-labnas>
+```
+
+Instala `labnas-smart-read` (root, en `/usr/local/lib/labnas/smart-read`), que solo acepta discos reales (`/dev/sdX`, `/dev/nvmeXnY`, `/dev/vdX`) y solo ejecuta `smartctl -j -a`, y una regla en `/etc/sudoers.d/labnas-smart` que permite al usuario del servicio ejecutar **únicamente** ese lector (validada con `visudo -c`). Luego se activa en **Configuración > Sistema > Salud de discos**: muestra estado, temperatura, horas de uso, desgaste (NVMe) y sectores reasignados/pendientes/irrecuperables (ATA). Se revisa cada 6 h y avisa a los admins (web + Telegram) si un disco empeora.
+
 ## Papelera
 
 Borrar desde el explorador **mueve a la papelera** (`.labnas-trash/`, oculta, en el mismo disco que el archivo: mover es instantáneo). Desde **Archivos > Papelera** se restaura a la ruta original (con sufijo si ya existe algo con ese nombre) o se borra definitivamente; un admin puede vaciarla entera. Lo que lleva más de 30 días se borra solo (setting `trash_retention_days`). La papelera no se incluye en los respaldos.

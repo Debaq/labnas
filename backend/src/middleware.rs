@@ -262,6 +262,7 @@ mod tests {
         assert_eq!(acc(Method::PUT, "/api/sensors/security"), Admin);
         assert_eq!(acc(Method::PUT, "/api/files/webdav"), Admin);
         assert_eq!(acc(Method::POST, "/api/network/wake/aa:bb:cc:dd:ee:ff"), Operator);
+        assert_eq!(acc(Method::GET, "/api/system/smart"), Admin);
         // ruta inventada: denegada por defecto
         assert_eq!(acc(Method::GET, "/api/nueva/ruta"), Admin);
     }

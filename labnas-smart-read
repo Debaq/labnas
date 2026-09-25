@@ -1,0 +1,27 @@
+#!/bin/sh
+# labnas-smart-read: lectura SMART de SOLO LECTURA para LabNAS.
+# Se instala como root en /usr/local/lib/labnas/smart-read y es lo unico que el
+# usuario del servicio puede ejecutar con sudo (ver setup-smart.sh). Solo acepta un
+# disco real y solo corre `smartctl -j -a` (sin opciones que cambien el disco).
+set -eu
+
+if [ "$#" -ne 1 ]; then
+    echo "uso: labnas-smart-read /dev/<disco>" >&2
+    exit 2
+fi
+
+dev="$1"
+case "$dev" in
+    /dev/sd[a-z] | /dev/sd[a-z][a-z] | /dev/vd[a-z] | /dev/nvme[0-9]n[0-9] | /dev/nvme[0-9][0-9]n[0-9]) ;;
+    *)
+        echo "dispositivo no permitido: $dev" >&2
+        exit 2
+        ;;
+esac
+
+if [ ! -b "$dev" ]; then
+    echo "no es un dispositivo de bloque: $dev" >&2
+    exit 2
+fi
+
+exec /usr/bin/smartctl -j -a "$dev"

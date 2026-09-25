@@ -1,3 +1,4 @@
+pub mod smart;
 pub mod webdav;
 pub mod trash;
 pub mod backups;

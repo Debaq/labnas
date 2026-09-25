@@ -102,6 +102,7 @@ jobs:
           # Scripts y config
           cp labnas.sh "$RELEASE_DIR/"
           cp setup-tailscale.sh "$RELEASE_DIR/" 2>/dev/null || true
+          cp setup-mdns.sh setup-smart.sh labnas-smart-read "$RELEASE_DIR/"
           cp VERSION "$RELEASE_DIR/"
 
           # Tarball + checksum (el updater no instala sin .sha256)

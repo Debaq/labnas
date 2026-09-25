@@ -260,3 +260,44 @@ export async function runBackup(id: string): Promise<void> {
 export async function fetchBackupSnapshots(id: string): Promise<string[]> {
   return jsonOrThrow(await api(`/api/backups/${id}/snapshots`), 'Error al obtener snapshots')
 }
+
+// --- Salud de discos (SMART, admin) ---
+
+export interface DiskHealth {
+  device: string
+  model: string
+  serial: string
+  size: string
+  transport: string
+  status: 'unknown' | 'ok' | 'warning' | 'failing' | null
+  temperature: number | null
+  power_on_hours: number | null
+  reallocated: number | null
+  pending: number | null
+  uncorrectable: number | null
+  media_errors: number | null
+  percentage_used: number | null
+  error: string | null
+}
+
+export interface SmartInfo {
+  enabled: boolean
+  ready: boolean
+  disks: DiskHealth[]
+}
+
+export async function fetchSmart(): Promise<SmartInfo> {
+  const res = await api('/api/system/smart')
+  if (!res.ok) throw new Error('Error al consultar SMART')
+  return res.json()
+}
+
+export async function setSmartEnabled(enabled: boolean): Promise<SmartInfo> {
+  const res = await api('/api/system/smart', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al guardar')
+  return res.json()
+}
