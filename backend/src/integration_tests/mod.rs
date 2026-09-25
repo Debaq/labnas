@@ -13,6 +13,7 @@ mod printers;
 mod secrets;
 mod security;
 mod sensors;
+mod setup;
 mod smart;
 mod timelapse;
 mod webdav;

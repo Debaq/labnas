@@ -36,7 +36,7 @@ curl -fsSL https://github.com/Debaq/labnas/releases/latest/download/install.sh |
 
 Instala en `/opt/labnas` como servicio systemd que corre con **tu usuario** (no root) y muestra la dirección al terminar. Ver [Instalación](#instalación) para opciones.
 
-Abre `http://localhost:3001` — la primera cuenta creada se convierte en admin. Las siguientes quedan **pendientes** hasta que un admin las apruebe.
+Abre `http://localhost:3001` — la primera cuenta creada se convierte en admin y ve un **asistente de primer arranque** (carpetas compartidas, nombre en la red, HTTPS, bot de Telegram y respaldo de la clave de cifrado; se puede omitir y reabrir en Configuración > Administración). Las siguientes cuentas quedan **pendientes** hasta que un admin las apruebe.
 
 ## Sistema de módulos activables
 

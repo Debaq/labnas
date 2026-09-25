@@ -527,6 +527,8 @@ fn api_routes() -> Router<AppState> {
         .route("/api/system/tls", put(tls::set_tls))
         .route("/api/system/tls/regenerate", post(tls::regenerate))
         .route("/api/tls/cert.pem", get(tls::download_cert))
+        .route("/api/setup", get(handlers::setup::get_setup))
+        .route("/api/setup/done", post(handlers::setup::finish_setup))
         .route("/api/system/smart", get(handlers::smart::get_smart))
         .route("/api/system/smart", put(handlers::smart::set_smart))
         .route("/api/system/rollback", get(handlers::system::rollback_status))

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine, Pencil, Music, HelpCircle, X, RefreshCw, Shield, LayoutDashboard, FolderOpen, Network, Printer, Box, ClipboardList, FileText, Mail, Package, GraduationCap, Thermometer, ChevronUp, ChevronDown, AlertTriangle, Bell, Server, SlidersHorizontal, RotateCcw, Archive } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
+import SetupWizard from '../components/SetupWizard'
 import StorageRootsSection from '../components/StorageRootsSection'
 import SmartSection from '../components/SmartSection'
 import HttpsSection from '../components/HttpsSection'
@@ -9,7 +10,7 @@ import AuditLogSection from '../components/AuditLogSection'
 import BackupsSection from '../components/BackupsSection'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, getThemeNames, type ThemeName } from '../themes/themes'
-import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, forceCheckUpdate, doUpdate, doReinstall, fetchRollbackStatus, doRollback, type RollbackStatus, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, updateService, setLastfmKey, fetchHealth, getMpvArgs, setMpvArgs as saveMpvArgs, setUploadLimit, fetchModules, toggleModule, reorderModules, type LabBranding, type LabService } from '../api'
+import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, forceCheckUpdate, doUpdate, doReinstall, fetchRollbackStatus, doRollback, type RollbackStatus, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, updateService, setLastfmKey, fetchHealth, getMpvArgs, setMpvArgs as saveMpvArgs, setUploadLimit, fetchModules, toggleModule, reorderModules, fetchSetup, type SetupStatus, type LabBranding, type LabService } from '../api'
 import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig, UserRole, UserPermissions, ModuleInfo } from '../types'
 import { errorMessage } from '../lib/errors'
 import type { IconComponent } from '../lib/icons'
@@ -104,6 +105,7 @@ export default function SettingsPage() {
   const navigate = useNavigate()
   const { theme, setTheme, themeNames } = useTheme()
   const { user: authUser, refreshModules } = useAuth()
+  const [wizard, setWizard] = useState<SetupStatus | null>(null)
   const [activeTab, setActiveTab] = useState<TabId>(() => {
     const saved = localStorage.getItem('labnas-settings-tab') as TabId | null
     return saved && TABS.some(t => t.id === saved) ? saved : 'general'
@@ -1684,6 +1686,17 @@ export default function SettingsPage() {
       {activeTab === 'backups' && isAdmin && <BackupsSection />}
 
       {activeTab === 'admin' && isAdmin && <AuditLogSection />}
+
+      {activeTab === 'admin' && isAdmin && (
+        <div className="flex items-center gap-3 text-sm" style={{ color: 'var(--text-secondary)' }}>
+          <span>Carpetas, nombre en la red, HTTPS, Telegram y clave de cifrado en pasos guiados.</span>
+          <button onClick={() => fetchSetup().then(setWizard).catch(() => {})} className="px-3 py-1.5 rounded-lg text-xs"
+            style={{ color: 'var(--accent)', border: '1px solid var(--border)' }}>
+            Abrir asistente inicial
+          </button>
+        </div>
+      )}
+      {wizard && <SetupWizard status={wizard} onClose={() => setWizard(null)} />}
 
       {/* Administracion: modulos (admin only) */}
       {activeTab === 'admin' && isAdmin && (

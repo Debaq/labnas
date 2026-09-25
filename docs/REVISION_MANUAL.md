@@ -1,6 +1,6 @@
 # Revisión manual antes del release
 
-Lo automatizado (67 tests de Rust, tests del frontend, clippy, ESLint, build) ya pasa en CI. Esta lista cubre lo que **no se ha visto en pantalla**: UI, navegador real, visor y hardware. Marcar cada punto; si algo falla, anotar qué se esperaba y qué pasó.
+Lo automatizado (68 tests de Rust, tests del frontend, clippy, ESLint, build) ya pasa en CI. Esta lista cubre lo que **no se ha visto en pantalla**: UI, navegador real, visor y hardware. Marcar cada punto; si algo falla, anotar qué se esperaba y qué pasó.
 
 ## Preparación
 
@@ -12,7 +12,10 @@ cd backend/target/release && ./labnas-backend          # sin sudo
 Base limpia: `LABNAS_HOME=/tmp/labnas-prueba ./labnas-backend` (no toca `~/.labnas`). Tener dos navegadores (o una ventana privada) para probar con dos usuarios a la vez.
 
 ## 1. Cuentas y sesión
-- [ ] Primer registro → queda admin y entra directo
+- [ ] Primer registro → queda admin y entra directo; aparece el **asistente inicial**
+- [ ] Asistente: recorrer los 6 pasos (carpetas, mDNS, HTTPS, Telegram, clave); "Terminar" solo se habilita al marcar el respaldo de la clave; al recargar no vuelve a salir
+- [ ] "Omitir" también lo cierra para siempre; Configuración > Administración > "Abrir asistente inicial" lo reabre
+- [ ] Un usuario no admin nunca ve el asistente
 - [ ] Segundo registro (otro navegador) → ve "Cuenta pendiente de aprobación"
 - [ ] Admin aprueba (Configuración > Usuarios) → el pendiente entra **solo, sin recargar** (evento `auth.changed`)
 - [ ] Contraseña de 7 caracteres → rechazada con mensaje

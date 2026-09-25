@@ -7,7 +7,8 @@ import Layout from './components/Layout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import { Loader2 } from 'lucide-react'
-import { lazy } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
+import { fetchSetup, type SetupStatus } from './api'
 
 // Paginas cargadas bajo demanda: el bundle inicial solo trae login, layout y dashboard
 const FilesPage = lazy(() => import('./pages/FilesPage'))
@@ -23,6 +24,7 @@ const InventoryPage = lazy(() => import('./pages/InventoryPage'))
 const PortfolioPage = lazy(() => import('./pages/PortfolioPage'))
 const PlaylistEditorPage = lazy(() => import('./pages/PlaylistEditorPage'))
 const SensorsPage = lazy(() => import('./pages/SensorsPage'))
+const SetupWizard = lazy(() => import('./components/SetupWizard'))
 
 // Registro de modulos: mapea module_id -> ruta + componente
 const MODULE_ROUTES: Record<string, { path: string; component: React.ComponentType }> = {
@@ -58,8 +60,20 @@ function LoadingScreen() {
   )
 }
 
+/** Admin: muestra el asistente de primer arranque hasta que se termine u omita */
+function SetupGate() {
+  const [status, setStatus] = useState<SetupStatus | null>(null)
+  useEffect(() => { fetchSetup().then(setStatus).catch(() => {}) }, [])
+  if (!status || status.done) return null
+  return (
+    <Suspense fallback={null}>
+      <SetupWizard status={status} onClose={() => setStatus({ ...status, done: true })} />
+    </Suspense>
+  )
+}
+
 function AppRoutes() {
-  const { user, loading, isModuleEnabled } = useAuth()
+  const { user, loading, isModuleEnabled, isAdmin } = useAuth()
 
   if (loading) {
     return <LoadingScreen />
@@ -70,22 +84,25 @@ function AppRoutes() {
   }
 
   return (
-    <Routes>
-      <Route element={<Layout />}>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        {Object.entries(MODULE_ROUTES)
-          .filter(([id]) => isModuleEnabled(id))
-          .map(([id, { path, component: Comp }]) => (
-            <Route key={id} path={path} element={<Comp />} />
-          ))}
-        {/* Rutas no-modulo: siempre disponibles */}
-        <Route path="/playlists/:id" element={<PlaylistEditorPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/admin" element={<Navigate to="/settings" replace />} />
-        {/* Catch-all: redirige a dashboard */}
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Route>
-    </Routes>
+    <>
+      {isAdmin && <SetupGate />}
+      <Routes>
+        <Route element={<Layout />}>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          {Object.entries(MODULE_ROUTES)
+            .filter(([id]) => isModuleEnabled(id))
+            .map(([id, { path, component: Comp }]) => (
+              <Route key={id} path={path} element={<Comp />} />
+            ))}
+          {/* Rutas no-modulo: siempre disponibles */}
+          <Route path="/playlists/:id" element={<PlaylistEditorPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/admin" element={<Navigate to="/settings" replace />} />
+          {/* Catch-all: redirige a dashboard */}
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Route>
+      </Routes>
+    </>
   )
 }
 

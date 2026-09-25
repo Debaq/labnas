@@ -338,3 +338,20 @@ export async function saveTls(settings: TlsSettings): Promise<TlsStatus> {
 export async function regenerateTls(): Promise<TlsStatus> {
   return jsonOrThrow(await api('/api/system/tls/regenerate', { method: 'POST' }), 'Error al regenerar el certificado')
 }
+
+// --- Asistente de primer arranque (admin) ---
+
+export interface SetupStatus {
+  done: boolean
+  secret_key_path: string
+  hostname: string
+}
+
+export async function fetchSetup(): Promise<SetupStatus> {
+  return jsonOrThrow(await api('/api/setup'), 'Error al obtener estado del asistente')
+}
+
+export async function finishSetup(): Promise<void> {
+  const res = await api('/api/setup/done', { method: 'POST' })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al terminar el asistente')
+}
