@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight, Mail, Download, Package, GraduationCap, Thermometer } from 'lucide-react'
-import { useTheme } from '../themes/ThemeContext'
 import { useAuth } from '../auth/AuthContext'
 import { shutdownServer, getBranding, fetchHealth, checkUpdate } from '../api'
 import MusicPanel from './MusicPanel'
@@ -25,7 +24,6 @@ const pageTitles: Record<string, string> = {
 }
 
 export default function Layout() {
-  const { theme, setTheme, themeNames } = useTheme()
   const { user, logout, can, isAdmin, enabledModules, isModuleEnabled } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()

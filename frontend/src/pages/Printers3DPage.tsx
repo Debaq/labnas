@@ -33,7 +33,6 @@ import {
   DollarSign,
   Pencil,
   FolderPlus,
-  GripVertical,
   ChevronRight,
   Check,
 } from 'lucide-react'
@@ -65,7 +64,6 @@ import {
 import type {
   Printer3DConfig,
   Printer3DStatus,
-  AddPrinter3DRequest,
   DetectPrintersResult,
   PrinterFileInfo,
   Printer3DSection,

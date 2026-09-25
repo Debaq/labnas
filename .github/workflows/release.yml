@@ -104,9 +104,10 @@ jobs:
           cp setup-tailscale.sh "$RELEASE_DIR/" 2>/dev/null || true
           cp VERSION "$RELEASE_DIR/"
 
-          # Tarball
+          # Tarball + checksum (el updater no instala sin .sha256)
           TARBALL="labnas-v${VERSION}-linux-${ARCH}.tar.gz"
           tar czf "$TARBALL" "$RELEASE_DIR"
+          sha256sum "$TARBALL" > "$TARBALL.sha256"
           echo "tarball=$TARBALL" >> "$GITHUB_ENV"
 
       - name: Crear release si no existe
@@ -138,7 +139,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.version.outputs.tag }}"
-          gh release upload "$TAG" "${{ env.tarball }}" --clobber
+          gh release upload "$TAG" "${{ env.tarball }}" "${{ env.tarball }}.sha256" --clobber
 
   viewer:
     name: Viewer ${{ matrix.arch }}
@@ -191,6 +192,7 @@ jobs:
           cp viewer/install.sh "$DIR/"
           TARBALL="labnas-viewer-v${VERSION}-linux-${{ matrix.arch }}.tar.gz"
           tar czf "$TARBALL" "$DIR"
+          sha256sum "$TARBALL" > "$TARBALL.sha256"
           echo "tarball=$TARBALL" >> "$GITHUB_ENV"
 
       - name: Crear release si no existe
@@ -219,4 +221,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ steps.version.outputs.tag }}" "${{ env.tarball }}" --clobber
+          gh release upload "${{ steps.version.outputs.tag }}" "${{ env.tarball }}" "${{ env.tarball }}.sha256" --clobber

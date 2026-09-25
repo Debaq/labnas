@@ -7,8 +7,7 @@ use tokio::process::Command;
 use crate::models::system::{AutostartStatus, DiskInfo, HealthResponse, SystemInfoResponse};
 use crate::state::AppState;
 
-const GITHUB_REPO: &str = "Debaq/labnas";
-const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+use crate::updater::CURRENT_VERSION;
 
 fn parse_semver(v: &str) -> Option<(u32, u32, u32)> {
     let v = v.strip_prefix('v').unwrap_or(v);
@@ -171,10 +170,7 @@ fn owner_name(path: &std::path::Path) -> Option<String> {
 /// Unidad systemd: corre como el dueño de la instalacion (no root), con capacidades
 /// solo para ping ICMP (escaner de red) y puerto 80.
 fn build_autostart_commands() -> (String, String) {
-    let exe_path = std::env::current_exe()
-        .ok()
-        .and_then(|p| std::fs::canonicalize(&p).ok())
-        .unwrap_or_default();
+    let exe_path = crate::updater::exe_path().unwrap_or_default();
     let work_dir = exe_path
         .parent()
         .unwrap_or(std::path::Path::new("/"))
@@ -324,68 +320,18 @@ pub async fn force_check_update(
 pub async fn do_update(
     State(state): State<AppState>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
-    let (latest, url) = fetch_latest_release(&state.http_client).await;
+    let release = crate::updater::fetch_release(&state.http_client, None).await
+        .ok_or((StatusCode::BAD_GATEWAY, "No se pudo consultar GitHub".to_string()))?;
+    let assets = crate::updater::assets_for(&release)
+        .ok_or((StatusCode::NOT_FOUND, "El ultimo release no tiene binario para esta arquitectura".to_string()))?;
 
-    let url = url.ok_or((StatusCode::NOT_FOUND, "No se encontro release".to_string()))?;
-    let latest = latest.unwrap_or_default();
+    crate::updater::install(&state.http_client, &assets).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
-    // Get current binary path
-    let exe_path = std::env::current_exe()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let install_dir = exe_path.parent()
-        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No se pudo determinar directorio".to_string()))?;
-
-    let tmp_dir = format!("/tmp/labnas-update-{}", uuid::Uuid::new_v4());
-
-    // Download
-    let resp = state.http_client.get(&url)
-        .timeout(Duration::from_secs(120))
-        .send().await
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Error descargando: {}", e)))?;
-
-    if !resp.status().is_success() {
-        return Err((StatusCode::BAD_REQUEST, format!("GitHub respondio {}", resp.status())));
-    }
-
-    let bytes = resp.bytes().await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error leyendo: {}", e)))?;
-
-    // Save tarball
-    tokio::fs::create_dir_all(&tmp_dir).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let tarball = format!("{}/labnas.tar.gz", tmp_dir);
-    tokio::fs::write(&tarball, &bytes).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    // Extract
-    let output = Command::new("tar")
-        .args(["xzf", &tarball, "-C", &tmp_dir])
-        .output().await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    if !output.status.success() {
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Error extrayendo tarball".to_string()));
-    }
-
-    // Copy new files over current installation
-    let extracted = format!("{}/labnas", tmp_dir);
-    let copy_result = Command::new("cp")
-        .args(["-rf", &format!("{}/.", extracted), &install_dir.to_string_lossy()])
-        .output().await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    if !copy_result.status.success() {
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Error copiando archivos".to_string()));
-    }
-
-    // Cleanup
-    let _ = tokio::fs::remove_dir_all(&tmp_dir).await;
-
-    state.log_activity("Actualizacion", &format!("Actualizado a {}", latest), "sistema").await;
-
+    state.log_activity("Actualizacion", &format!("v{} -> {}", CURRENT_VERSION, assets.tag), "sistema").await;
     request_restart(&state);
 
-    Ok((StatusCode::OK, format!("Actualizado a {}. Reiniciando...", latest)))
+    Ok((StatusCode::OK, format!("Actualizado a {}. Reiniciando...", assets.tag)))
 }
 
 /// POST /api/system/reinstall - Reinstala la versión actual
@@ -393,142 +339,54 @@ pub async fn reinstall(
     State(state): State<AppState>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
     let tag = format!("v{}", CURRENT_VERSION);
-    let url = fetch_release_url_by_tag(&state.http_client, &tag).await
+    let release = crate::updater::fetch_release(&state.http_client, Some(&tag)).await
         .ok_or((StatusCode::NOT_FOUND, format!("No se encontro release para {}", tag)))?;
+    let assets = crate::updater::assets_for(&release)
+        .ok_or((StatusCode::NOT_FOUND, format!("El release {} no tiene binario para esta arquitectura", tag)))?;
 
-    let exe_path = std::env::current_exe()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let install_dir = exe_path.parent()
-        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No se pudo determinar directorio".to_string()))?;
+    crate::updater::install(&state.http_client, &assets).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
-    let tmp_dir = format!("/tmp/labnas-reinstall-{}", uuid::Uuid::new_v4());
-
-    let resp = state.http_client.get(&url)
-        .timeout(Duration::from_secs(120))
-        .send().await
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Error descargando: {}", e)))?;
-
-    if !resp.status().is_success() {
-        return Err((StatusCode::BAD_REQUEST, format!("GitHub respondio {}", resp.status())));
-    }
-
-    let bytes = resp.bytes().await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error leyendo: {}", e)))?;
-
-    tokio::fs::create_dir_all(&tmp_dir).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let tarball = format!("{}/labnas.tar.gz", tmp_dir);
-    tokio::fs::write(&tarball, &bytes).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let output = Command::new("tar")
-        .args(["xzf", &tarball, "-C", &tmp_dir])
-        .output().await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    if !output.status.success() {
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Error extrayendo tarball".to_string()));
-    }
-
-    let extracted = format!("{}/labnas", tmp_dir);
-    let copy_result = Command::new("cp")
-        .args(["-rf", &format!("{}/.", extracted), &install_dir.to_string_lossy()])
-        .output().await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    if !copy_result.status.success() {
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Error copiando archivos".to_string()));
-    }
-
-    let _ = tokio::fs::remove_dir_all(&tmp_dir).await;
-
-    state.log_activity("Reinstalacion", &format!("Reinstalado v{}", CURRENT_VERSION), "sistema").await;
-
+    state.log_activity("Reinstalacion", &tag, "sistema").await;
     request_restart(&state);
 
-    Ok((StatusCode::OK, format!("Reinstalado v{}. Reiniciando...", CURRENT_VERSION)))
+    Ok((StatusCode::OK, format!("Reinstalado {}. Reiniciando...", tag)))
 }
 
-async fn fetch_release_url_by_tag(client: &reqwest::Client, tag: &str) -> Option<String> {
-    let url = format!("https://api.github.com/repos/{}/releases/tags/{}", GITHUB_REPO, tag);
-    let resp = client.get(&url)
-        .header("User-Agent", "LabNAS")
-        .header("Accept", "application/vnd.github+json")
-        .timeout(Duration::from_secs(10))
-        .send().await.ok()?;
-
-    if !resp.status().is_success() { return None; }
-
-    let json: serde_json::Value = resp.json().await.ok()?;
-    find_server_asset(&json)
+#[derive(serde::Serialize)]
+pub struct RollbackStatus {
+    pub available: bool,
+    pub version: Option<String>,
 }
 
-/// Arquitectura tal como aparece en el nombre del tarball del release
-fn release_arch() -> &'static str {
-    match std::env::consts::ARCH {
-        "arm" => "armv7",
-        other => other,
-    }
+/// GET /api/system/rollback - ¿Hay una version anterior guardada?
+pub async fn rollback_status() -> Json<RollbackStatus> {
+    let version = crate::updater::rollback_version();
+    Json(RollbackStatus { available: version.is_some(), version })
 }
 
-/// URL del tarball del servidor para esta arquitectura: `labnas-<tag>-linux-<arch>.tar.gz`.
-/// Nombre exacto para no confundirlo con otros assets (p.ej. labnas-viewer-<tag>-linux-<arch>).
-fn find_server_asset(release: &serde_json::Value) -> Option<String> {
-    let tag = release["tag_name"].as_str()?;
-    let expected = format!("labnas-{}-linux-{}.tar.gz", tag, release_arch());
-    release["assets"].as_array()?
-        .iter()
-        .find(|a| a["name"].as_str() == Some(expected.as_str()))
-        .and_then(|a| a["browser_download_url"].as_str().map(|s| s.to_string()))
+/// POST /api/system/rollback - Vuelve a la version anterior (repetirlo vuelve a la nueva)
+pub async fn do_rollback(
+    State(state): State<AppState>,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    let restored = tokio::task::spawn_blocking(crate::updater::swap_rollback).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    state.log_activity("Rollback", &format!("v{} -> v{}", CURRENT_VERSION, restored), "sistema").await;
+    request_restart(&state);
+
+    Ok((StatusCode::OK, format!("Restaurada v{}. Reiniciando...", restored)))
 }
 
 async fn fetch_latest_release(client: &reqwest::Client) -> (Option<String>, Option<String>) {
-    // Intentar con releases/latest primero
-    let url = format!("https://api.github.com/repos/{}/releases/latest", GITHUB_REPO);
-
-    let resp = client.get(&url)
-        .header("User-Agent", "LabNAS")
-        .header("Accept", "application/vnd.github+json")
-        .timeout(Duration::from_secs(10))
-        .send().await;
-
-    if let Ok(r) = resp {
-        if r.status().is_success() {
-            if let Ok(json) = r.json::<serde_json::Value>().await {
-                let tag = json["tag_name"].as_str().map(|s| s.to_string());
-
-                let download_url = find_server_asset(&json);
-
-                if tag.is_some() {
-                    return (tag, download_url);
-                }
-            }
-        }
+    match crate::updater::fetch_release(client, None).await {
+        Some(json) => (
+            json["tag_name"].as_str().map(|s| s.to_string()),
+            crate::updater::assets_for(&json).map(|a| a.tarball_url),
+        ),
+        None => (None, None),
     }
-
-    // Fallback: consultar tags (usa menos rate limit y funciona sin auth)
-    let tags_url = format!("https://api.github.com/repos/{}/tags?per_page=1", GITHUB_REPO);
-    let resp = client.get(&tags_url)
-        .header("User-Agent", "LabNAS")
-        .timeout(Duration::from_secs(10))
-        .send().await;
-
-    let resp = match resp {
-        Ok(r) if r.status().is_success() => r,
-        _ => return (None, None),
-    };
-
-    let json: serde_json::Value = match resp.json().await {
-        Ok(j) => j,
-        _ => return (None, None),
-    };
-
-    let tag = json.as_array()
-        .and_then(|arr| arr.first())
-        .and_then(|t| t["name"].as_str())
-        .map(|s| s.to_string());
-
-    (tag, None)
 }
 
 pub async fn update_check_loop(state: AppState) {
@@ -844,4 +702,18 @@ pub fn start_mdns_service(hostname: &str) -> Result<mdns_sd::ServiceDaemon, Stri
         .map_err(|e| format!("Error registrando: {}", e))?;
 
     Ok(mdns)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn comparacion_de_versiones() {
+        assert!(is_newer_version("v2.10.0", "2.9.9"));
+        assert!(is_newer_version("v3.0.0", "2.99.99"));
+        assert!(!is_newer_version("v2.8.2", "2.8.2"));
+        assert!(!is_newer_version("v2.8.1", "2.8.2"));
+        assert!(!is_newer_version("basura", "2.8.2"));
+    }
 }

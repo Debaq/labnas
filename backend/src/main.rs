@@ -5,6 +5,7 @@ mod middleware;
 mod models;
 mod state;
 mod storage;
+mod updater;
 
 use axum::{
     http::Method,
@@ -21,6 +22,19 @@ use state::AppState;
 
 #[tokio::main]
 async fn main() {
+    // Usado por el updater para verificar un binario recien descargado
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!("{}", updater::CURRENT_VERSION);
+        return;
+    }
+
+    updater::init();
+
+    // Version recien instalada que no logra arrancar => restaurar la anterior
+    if updater::startup_check() {
+        restart_self();
+    }
+
     warn_if_root();
 
     let pool = db::init_db();
@@ -49,7 +63,6 @@ async fn main() {
         db: pool,
         http_client: reqwest::Client::new(),
         shutdown: shutdown.clone(),
-        activity_log: Arc::new(Mutex::new(Vec::new())),
         sessions: Arc::new(Mutex::new(sessions)),
         link_codes: Arc::new(Mutex::new(std::collections::HashMap::new())),
         share_links: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -97,6 +110,8 @@ async fn main() {
         .route("/api/auth/users/{username}", delete(handlers::auth::delete_user))
         .route("/api/auth/link-code", post(handlers::auth::generate_link_code))
         .route("/api/notifications/telegram/chat/{chat_id}/link", post(handlers::auth::admin_link_chat))
+        // Auditoria (admin)
+        .route("/api/audit", get(handlers::audit::list_audit))
         // Health
         .route("/api/health", get(handlers::system::health_handler))
         // Modules
@@ -123,6 +138,8 @@ async fn main() {
         .route("/api/system/upload-limit", post(handlers::system::set_upload_limit))
         .route("/api/system/update/do", post(handlers::system::do_update))
         .route("/api/system/reinstall", post(handlers::system::reinstall))
+        .route("/api/system/rollback", get(handlers::system::rollback_status))
+        .route("/api/system/rollback", post(handlers::system::do_rollback))
         .route("/api/system/branding", get(handlers::system::get_branding))
         .route("/api/system/branding", post(handlers::system::set_branding))
         .route("/api/system/mdns", get(handlers::system::get_mdns_status))
@@ -321,6 +338,7 @@ async fn main() {
     tokio::spawn(handlers::notifications::task_reminder_loop(state.clone()));
     tokio::spawn(handlers::notifications::daily_notification_loop(state.clone()));
     tokio::spawn(handlers::system::update_check_loop(state.clone()));
+    tokio::spawn(handlers::audit::audit_cleanup_loop(state.clone()));
 
     // Background tasks: condicionales por modulo
     {
@@ -345,10 +363,7 @@ async fn main() {
     }
 
     // Static files
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| PathBuf::from("."));
+    let exe_dir = updater::install_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     let static_dir = std::env::var("LABNAS_STATIC")
         .map(PathBuf::from)
@@ -425,6 +440,12 @@ async fn main() {
     }
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+
+    // Si esta version viene de una actualizacion, confirmarla tras mantenerse viva
+    tokio::spawn(async {
+        tokio::time::sleep(updater::CONFIRM_AFTER).await;
+        updater::confirm_update();
+    });
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             shutdown.cancelled().await;
@@ -441,7 +462,7 @@ async fn main() {
 /// Re-ejecuta el binario (tras una actualizacion). Los sockets se cierran solos (CLOEXEC).
 fn restart_self() {
     use std::os::unix::process::CommandExt;
-    let Ok(exe) = std::env::current_exe() else {
+    let Ok(exe) = updater::exe_path() else {
         eprintln!("[LabNAS] No se pudo determinar el ejecutable para reiniciar");
         std::process::exit(1);
     };
@@ -450,6 +471,14 @@ fn restart_self() {
         .args(std::env::args_os().skip(1))
         .exec();
     eprintln!("[LabNAS] Error al reiniciar: {}", err);
+
+    // El binario nuevo no se pudo ejecutar: volver al anterior e intentar de nuevo
+    if updater::swap_rollback().is_ok() {
+        let err = std::process::Command::new(&exe)
+            .args(std::env::args_os().skip(1))
+            .exec();
+        eprintln!("[LabNAS] Error al reiniciar la version anterior: {}", err);
+    }
     std::process::exit(1);
 }
 

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
-  Package, Plus, Trash2, Pencil, X, Loader2, Search, Filter,
-  ShoppingCart, MapPin, Tag, ChevronDown, ChevronUp, ExternalLink,
+  Package, Plus, Trash2, Pencil, X, Loader2, Search,
+  MapPin, ChevronDown, ChevronUp, ExternalLink,
 } from 'lucide-react'
 import {
   fetchInventoryCategories, createInventoryCategory, updateInventoryCategory, deleteInventoryCategory,

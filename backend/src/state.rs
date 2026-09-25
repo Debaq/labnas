@@ -4,7 +4,7 @@ use crate::models::email::EmailMessage;
 use crate::models::network::NetworkHost;
 use crate::models::notifications::{UserPermissions, UserRole};
 use crate::models::sensors::SensorLatest;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicBool;
@@ -12,14 +12,13 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
 
-const MAX_ACTIVITY_LOG: usize = 200;
-
 #[derive(Debug, Clone, Serialize)]
 pub struct ActivityEvent {
-    pub timestamp: DateTime<Utc>,
+    pub id: i64,
+    pub timestamp: String,
+    pub username: String,
     pub action: String,
     pub details: String,
-    pub user: String,
 }
 
 /// Duracion de una sesion web
@@ -59,7 +58,6 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     /// Apagado ordenado: al cancelarse se detienen ambos listeners (3001 y 80)
     pub shutdown: tokio_util::sync::CancellationToken,
-    pub activity_log: Arc<Mutex<Vec<ActivityEvent>>>,
     pub sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
     pub link_codes: Arc<Mutex<HashMap<String, LinkCode>>>,
     pub share_links: Arc<Mutex<HashMap<String, ShareLink>>>,
@@ -114,18 +112,20 @@ pub struct LinkCode {
 }
 
 impl AppState {
+    /// Registra un evento en la auditoria (tabla `audit_log`). Nunca falla hacia el caller.
     pub async fn log_activity(&self, action: &str, details: &str, user: &str) {
-        let mut log = self.activity_log.lock().await;
-        log.push(ActivityEvent {
-            timestamp: Utc::now(),
-            action: action.to_string(),
-            details: details.to_string(),
-            user: user.to_string(),
-        });
-        // Keep only last N events
-        if log.len() > MAX_ACTIVITY_LOG {
-            let drain = log.len() - MAX_ACTIVITY_LOG;
-            log.drain(..drain);
+        let (action, details, user) = (action.to_string(), details.to_string(), user.to_string());
+        let res = crate::db::db_op(&self.db, move |conn| {
+            conn.execute(
+                "INSERT INTO audit_log (timestamp, username, action, details) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![Utc::now().to_rfc3339(), user, action, details],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .await;
+        if let Err((_, e)) = res {
+            eprintln!("[Auditoria] Error registrando evento: {}", e);
         }
     }
 }

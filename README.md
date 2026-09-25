@@ -466,8 +466,15 @@ labnas/
 LabNAS chequea GitHub cada 6h. Cuando hay update:
 - Admin recibe notificación Telegram
 - **Configuración** muestra botón "Actualizar"
-- Un click descarga, extrae, reemplaza, reinicia vía systemd
+- Un click descarga el tarball de su arquitectura y **verifica su SHA-256** (sin checksum no instala)
+- Comprueba que el binario nuevo arranque en la máquina (`labnas-backend --version`), guarda la versión actual en `.rollback/`, reemplaza los archivos y se re-ejecuta
+- **Rollback automático**: si la versión nueva cae 2 veces al arrancar, el siguiente arranque restaura la anterior. Si se mantiene viva 30 s, se da por buena
+- **Rollback manual**: botón "Volver a vX" en Configuración (repetirlo vuelve a la nueva)
 - También permite **reinstalar la versión actual** (archivos corruptos)
+
+## Auditoría
+
+Todas las acciones registradas (subidas, borrados, cambios de rol, actualizaciones, rollbacks...) se guardan en SQLite y se consultan en **Configuración > Administración > Auditoría**, con filtro por usuario y texto. Se conservan 180 días (setting `audit_retention_days`). El bot de Telegram las muestra con `/actividad`.
 
 ## Seguridad
 

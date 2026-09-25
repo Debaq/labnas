@@ -152,8 +152,8 @@ pub fn resolve_home() -> String {
     // 2. Derivar desde la ruta del binario:
     //    Si el binario está en /home/nick/labnas/labnas-backend
     //    el home es /home/nick
-    if let Ok(exe) = std::env::current_exe() {
-        if let Ok(exe) = std::fs::canonicalize(&exe) {
+    if let Ok(exe) = crate::updater::exe_path() {
+        {
             let mut path = exe.as_path();
             // Subir hasta encontrar /home/usuario
             while let Some(parent) = path.parent() {

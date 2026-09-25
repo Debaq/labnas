@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Radar, Monitor, Wifi, Loader2, Box, ShieldCheck, ShieldAlert, Tag, X } from 'lucide-react'
 import { scanNetwork, fetchHosts, labelDevice, unlabelDevice, fetchPrinters3D } from '../api'
-import type { NetworkHost, Printer3DConfig } from '../types'
+import type { NetworkHost } from '../types'
 
 export default function NetworkPage() {
   const navigate = useNavigate()

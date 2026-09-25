@@ -49,6 +49,38 @@ async function api(url: string, opts?: RequestInit): Promise<Response> {
   })
 }
 
+// --- Sistema ---
+
+export async function setUploadLimit(limitMb: number): Promise<void> {
+  const res = await api('/api/system/upload-limit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ limit_mb: limitMb }),
+  })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al guardar limite')
+}
+
+// --- Auditoria (admin) ---
+
+export interface AuditEvent {
+  id: number
+  timestamp: string
+  username: string
+  action: string
+  details: string
+}
+
+export async function fetchAudit(params: { user?: string; q?: string; before_id?: number; limit?: number }): Promise<AuditEvent[]> {
+  const qs = new URLSearchParams()
+  if (params.user) qs.set('user', params.user)
+  if (params.q) qs.set('q', params.q)
+  if (params.before_id) qs.set('before_id', String(params.before_id))
+  if (params.limit) qs.set('limit', String(params.limit))
+  const res = await api(`/api/audit?${qs}`)
+  if (!res.ok) throw new Error('Error al obtener auditoria')
+  return res.json()
+}
+
 // --- Files ---
 
 export interface StorageRoots {
@@ -445,12 +477,34 @@ export async function forceCheckUpdate(): Promise<{ current_version: string; lat
 
 export async function doUpdate(): Promise<string> {
   const res = await api('/api/system/update/do', { method: 'POST' })
-  return res.text()
+  const text = await res.text()
+  if (!res.ok) throw new Error(text || 'Error al actualizar')
+  return text
 }
 
 export async function doReinstall(): Promise<string> {
   const res = await api('/api/system/reinstall', { method: 'POST' })
-  return res.text()
+  const text = await res.text()
+  if (!res.ok) throw new Error(text || 'Error al reinstalar')
+  return text
+}
+
+export interface RollbackStatus {
+  available: boolean
+  version: string | null
+}
+
+export async function fetchRollbackStatus(): Promise<RollbackStatus> {
+  const res = await api('/api/system/rollback')
+  if (!res.ok) throw new Error('Error al consultar version anterior')
+  return res.json()
+}
+
+export async function doRollback(): Promise<string> {
+  const res = await api('/api/system/rollback', { method: 'POST' })
+  const text = await res.text()
+  if (!res.ok) throw new Error(text || 'Error al restaurar')
+  return text
 }
 
 // --- Branding ---

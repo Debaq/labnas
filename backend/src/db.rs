@@ -65,6 +65,16 @@ const MIGRATIONS: &[&str] = &[
         created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_sessions_username ON sessions(username);",
+    // 2: auditoria persistente (antes 200 eventos en RAM)
+    "CREATE TABLE IF NOT EXISTS audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT NOT NULL,
+        username TEXT NOT NULL,
+        action TEXT NOT NULL,
+        details TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_audit_username ON audit_log(username);",
 ];
 
 fn run_migrations(conn: &Connection) {

@@ -1,16 +1,16 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   Plus, Trash2, Pencil, X, Loader2, Search,
-  ChevronDown, ChevronUp, Check, Calendar, Users,
+  ChevronDown, ChevronUp, Calendar, Users,
   Microscope, BookOpen, GraduationCap, Wrench,
-  FolderOpen, Tag, FileText, DollarSign, Clock,
+  FolderOpen, Tag, DollarSign, Clock,
   MapPin, CheckSquare, Square,
 } from 'lucide-react'
 import {
   fetchPortfolio, createPortfolioEntry, updatePortfolioEntry, deletePortfolioEntry,
   togglePortfolioRequirement, togglePortfolioMilestone, fetchUsernames,
 } from '../api'
-import type { PortfolioEntry, PortfolioType, PortfolioStatus, PortfolioScope, PortfolioRequirement, PortfolioMilestone } from '../types'
+import type { PortfolioEntry, PortfolioType, PortfolioStatus, PortfolioScope } from '../types'
 
 const TYPE_CONFIG: Record<PortfolioType, { label: string; icon: typeof Microscope }> = {
   project: { label: 'Proyecto', icon: Microscope },

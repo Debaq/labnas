@@ -2596,19 +2596,18 @@ async fn handle_schedule_command(state: &AppState, chat_id: i64, text: &str) -> 
 }
 
 async fn build_activity_message(state: &AppState) -> String {
-    let log = state.activity_log.lock().await;
+    let events = crate::handlers::audit::recent(&state.db, 15).await;
 
-    if log.is_empty() {
+    if events.is_empty() {
         return "*Actividad*\n\nNo hay actividad registrada aun.".to_string();
     }
 
     let mut msg = String::from("*Actividad reciente*\n");
-    // Show last 15 events
-    let start = if log.len() > 15 { log.len() - 15 } else { 0 };
-
-    for event in &log[start..] {
-        let time = event.timestamp.with_timezone(&chrono::Local).format("%H:%M");
-        msg.push_str(&format!("\n`{}` {} - {}", time, event.action, event.details));
+    for event in events.iter().rev() {
+        let time = chrono::DateTime::parse_from_rfc3339(&event.timestamp)
+            .map(|t| t.with_timezone(&chrono::Local).format("%d/%m %H:%M").to_string())
+            .unwrap_or_default();
+        msg.push_str(&format!("\n`{}` {} - {} ({})", time, event.action, event.details, event.username));
     }
 
     msg

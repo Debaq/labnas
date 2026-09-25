@@ -6,8 +6,8 @@ import {
 } from 'lucide-react'
 import {
   fetchPlaylists, updatePlaylist, addTrackToPlaylist, removeTrackFromPlaylist,
-  moveTrackInPlaylist, loadPlaylist, searchMusic, getCurrentMusic, playMusic,
-  type Playlist, type MusicTrack, type MusicState,
+  moveTrackInPlaylist, loadPlaylist, searchMusic, playMusic,
+  type Playlist, type MusicTrack,
 } from '../api'
 
 function formatDuration(secs: number) {

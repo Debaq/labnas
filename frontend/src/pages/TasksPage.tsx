@@ -86,7 +86,6 @@ export default function TasksPage() {
   const [editingEventId, setEditingEventId] = useState<string | null>(null)
   const [calendarMonth, setCalendarMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1) })
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
-  const [calendarView, setCalendarView] = useState<'month' | 'week'>('month')
   const [categories, setCategories] = useState<EventCategory[]>([])
   const [eventCategory, setEventCategory] = useState('')
   const [showCategoryManager, setShowCategoryManager] = useState(false)
@@ -559,7 +558,7 @@ export default function TasksPage() {
                                 {ev.time.slice(0, 5)}{ev.end_time ? ` - ${ev.end_time.slice(0, 5)}` : ''}
                               </span>
                               <h4 className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{ev.title}</h4>
-                              {ev.notify_telegram === false && <BellOff size={10} style={{ color: 'var(--text-secondary)', opacity: 0.5 }} title="Sin aviso Telegram" />}
+                              {ev.notify_telegram === false && <span title="Sin aviso Telegram"><BellOff size={10} style={{ color: 'var(--text-secondary)', opacity: 0.5 }} /></span>}
                             </div>
                             {ev.description && <p className="text-[10px] mt-1" style={{ color: 'var(--text-primary)', opacity: 0.8 }}>{ev.description}</p>}
                             {ev.location && (

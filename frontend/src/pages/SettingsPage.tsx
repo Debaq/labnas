@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine, Pencil, Music, HelpCircle, X, RefreshCw, Shield, LayoutDashboard, FolderOpen, Network, Printer, Box, ClipboardList, FileText, Mail, Package, GraduationCap, Thermometer, ChevronUp, ChevronDown, AlertTriangle, Bell, Server, SlidersHorizontal } from 'lucide-react'
+import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine, Pencil, Music, HelpCircle, X, RefreshCw, Shield, LayoutDashboard, FolderOpen, Network, Printer, Box, ClipboardList, FileText, Mail, Package, GraduationCap, Thermometer, ChevronUp, ChevronDown, AlertTriangle, Bell, Server, SlidersHorizontal, RotateCcw } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import StorageRootsSection from '../components/StorageRootsSection'
+import AuditLogSection from '../components/AuditLogSection'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, getThemeNames, type ThemeName } from '../themes/themes'
-import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, forceCheckUpdate, doUpdate, doReinstall, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, updateService, setLastfmKey, fetchHealth, getMpvArgs, setMpvArgs as saveMpvArgs, fetchModules, toggleModule, reorderModules, type LabBranding, type LabService } from '../api'
+import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, forceCheckUpdate, doUpdate, doReinstall, fetchRollbackStatus, doRollback, type RollbackStatus, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, updateService, setLastfmKey, fetchHealth, getMpvArgs, setMpvArgs as saveMpvArgs, setUploadLimit, fetchModules, toggleModule, reorderModules, type LabBranding, type LabService } from '../api'
 import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig, UserRole, UserPermissions, ModuleInfo } from '../types'
 
 const MODULE_META: Record<string, { label: string; icon: any; description: string }> = {
@@ -113,6 +114,9 @@ export default function SettingsPage() {
   const [updating, setUpdating] = useState(false)
   const [checking, setChecking] = useState(false)
   const [reinstalling, setReinstalling] = useState(false)
+  const [rollback, setRollback] = useState<RollbackStatus | null>(null)
+  const [rollingBack, setRollingBack] = useState(false)
+  const [updateMsg, setUpdateMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [mdns, setMdnsState] = useState<{ enabled: boolean; hostname: string; url: string } | null>(null)
   const [mdnsHostname, setMdnsHostname] = useState('')
   const [branding, setBrandingState] = useState<LabBranding | null>(null)
@@ -204,6 +208,7 @@ export default function SettingsPage() {
     fetchAutostartStatus().then(setAutostart).catch(() => {})
     fetchWebUsers().then(setWebUsers).catch(() => {})
     checkUpdate().then(setUpdateInfo).catch(() => {})
+    fetchRollbackStatus().then(setRollback).catch(() => {})
     getMdnsStatus().then(s => { setMdnsState(s); setMdnsHostname(s.hostname) }).catch(() => {})
     getBranding().then(setBrandingState).catch(() => {})
     getServices().then(setServices).catch(() => {})
@@ -1561,7 +1566,10 @@ export default function SettingsPage() {
               onClick={async () => {
                 if (!confirm('Actualizar LabNAS? El servidor se reiniciara.')) return
                 setUpdating(true)
-                try { await doUpdate() } catch {} finally { setUpdating(false) }
+                setUpdateMsg(null)
+                try { setUpdateMsg({ ok: true, text: await doUpdate() }) }
+                catch (e) { setUpdateMsg({ ok: false, text: e instanceof Error ? e.message : String(e) }) }
+                finally { setUpdating(false) }
               }}
               disabled={updating}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium w-full justify-center"
@@ -1576,7 +1584,10 @@ export default function SettingsPage() {
               onClick={async () => {
                 if (!confirm('Reinstalar la version actual? Se descargara y reemplazara el binario. El servidor se reiniciara.')) return
                 setReinstalling(true)
-                try { await doReinstall() } catch {} finally { setReinstalling(false) }
+                setUpdateMsg(null)
+                try { setUpdateMsg({ ok: true, text: await doReinstall() }) }
+                catch (e) { setUpdateMsg({ ok: false, text: e instanceof Error ? e.message : String(e) }) }
+                finally { setReinstalling(false) }
               }}
               disabled={reinstalling}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium w-full justify-center"
@@ -1585,6 +1596,27 @@ export default function SettingsPage() {
               {reinstalling ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={14} />}
               {reinstalling ? 'Reinstalando...' : 'Reinstalar version actual'}
             </button>
+          )}
+          {isAdmin && rollback?.available && (
+            <button
+              onClick={async () => {
+                if (!confirm(`Volver a la version anterior (v${rollback.version})? El servidor se reiniciara.`)) return
+                setRollingBack(true)
+                setUpdateMsg(null)
+                try { setUpdateMsg({ ok: true, text: await doRollback() }) }
+                catch (e) { setUpdateMsg({ ok: false, text: e instanceof Error ? e.message : String(e) }) }
+                finally { setRollingBack(false) }
+              }}
+              disabled={rollingBack}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium w-full justify-center"
+              style={{ color: 'var(--warning)', border: '1px solid var(--warning)' }}
+            >
+              {rollingBack ? <Loader2 size={16} className="animate-spin" /> : <RotateCcw size={14} />}
+              {rollingBack ? 'Restaurando...' : `Volver a v${rollback.version}`}
+            </button>
+          )}
+          {updateMsg && (
+            <p className="text-sm" style={{ color: updateMsg.ok ? 'var(--success)' : 'var(--danger)' }}>{updateMsg.text}</p>
           )}
           {sysInfo && (
             <>
@@ -1619,13 +1651,7 @@ export default function SettingsPage() {
                 }}
                 onBlur={async (e) => {
                   const val = parseInt(e.target.value) || 50
-                  try {
-                    await fetch('/api/system/upload-limit', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', ...(() => { try { const t = JSON.parse(localStorage.getItem('labnas_auth') || '{}').token; return t ? { Authorization: `Bearer ${t}` } : {} } catch { return {} } })() },
-                      body: JSON.stringify({ limit_mb: val }),
-                    })
-                  } catch {}
+                  try { await setUploadLimit(val) } catch {}
                 }}
                 className="w-16 px-2 py-1 rounded-lg text-sm text-right outline-none"
                 style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
@@ -1644,6 +1670,8 @@ export default function SettingsPage() {
       </section>}
 
       {activeTab === 'system' && isAdmin && <StorageRootsSection />}
+
+      {activeTab === 'admin' && isAdmin && <AuditLogSection />}
 
       {/* Administracion: modulos (admin only) */}
       {activeTab === 'admin' && isAdmin && (
