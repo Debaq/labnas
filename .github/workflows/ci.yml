@@ -41,6 +41,36 @@ jobs:
         working-directory: backend
         run: cargo test
 
+  musl:
+    name: Backend (build musl estatico)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Instalar musl
+        run: sudo apt-get update && sudo apt-get install -y musl-tools pkg-config perl make
+
+      - name: Cache Rust
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            backend/target
+          key: ${{ runner.os }}-ci-musl-${{ hashFiles('backend/Cargo.lock') }}
+
+      # Mismo target y features que el release: detecta a tiempo dependencias que no enlazan en musl
+      - name: cargo build (musl)
+        working-directory: backend
+        env:
+          OPENSSL_STATIC: "1"
+        run: cargo build --target x86_64-unknown-linux-musl --features vendored-ssl
+
   frontend:
     name: Frontend (tipos + lint + build)
     runs-on: ubuntu-24.04
