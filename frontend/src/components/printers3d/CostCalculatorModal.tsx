@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Plus, Trash2, Upload, X, Calculator, DollarSign } from 'lucide-react'
+import { Plus, Trash2, Upload, X, Calculator, DollarSign, FileCode } from 'lucide-react'
+import { readGcodeInfo, gramsFromMeters } from '../../lib/gcode'
 import type { Printer3DConfig } from '../../types'
 
 // ── Calculadora de costos 3D ──
@@ -90,6 +91,36 @@ export default function CostCalculatorModal({ printers, onClose }: { printers: P
     }
     reader.readAsArrayBuffer(file)
     e.target.value = ''
+  }
+
+  // Metadatos del gcode (peso y tiempo del slicer)
+  const [gcodeNote, setGcodeNote] = useState<string | null>(null)
+
+  async function handleGcodeFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const info = await readGcodeInfo(file)
+    const parts: string[] = []
+    let grams = info.grams
+    if (grams === undefined && info.meters !== undefined) {
+      const d = Number(materialDensity) || 1.24 // PLA si no hay densidad
+      grams = gramsFromMeters(info.meters, d)
+      parts.push(`${info.meters.toFixed(2)} m`)
+    }
+    if (grams !== undefined) {
+      setMaterialWeight(Math.round(grams * 10) / 10)
+      parts.push(`${grams.toFixed(1)} g`)
+    }
+    if (info.seconds !== undefined) {
+      setPrintHours(Math.round((info.seconds / 3600) * 100) / 100)
+      const h = Math.floor(info.seconds / 3600)
+      const m = Math.round((info.seconds % 3600) / 60)
+      parts.push(h > 0 ? `${h}h ${m}m` : `${m}m`)
+    }
+    setGcodeNote(parts.length
+      ? `${file.name}: ${parts.join(' · ')}${info.slicer ? ` (${info.slicer})` : ''}`
+      : `${file.name}: sin metadatos de slicer`)
   }
 
   // Electricidad
@@ -207,6 +238,15 @@ export default function CostCalculatorModal({ printers, onClose }: { printers: P
                     <Upload size={12} /> Cargar STL
                     <input type="file" accept=".stl" className="hidden" onChange={handleSTLFile} />
                   </label>
+                  <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer"
+                    style={{ color: 'var(--accent)', border: '1px dashed var(--border)' }}
+                    title="Lee peso y tiempo estimados del slicer (PrusaSlicer, Cura, Orca, Bambu)">
+                    <FileCode size={12} /> Cargar GCODE
+                    <input type="file" accept=".gcode,.gco,.g,.bgcode" className="hidden" onChange={handleGcodeFile} />
+                  </label>
+                  {gcodeNote && (
+                    <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>{gcodeNote}</span>
+                  )}
                   {stlVolume !== null && (
                     <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
                       {stlFileName}: {stlVolume.toFixed(2)} cm3
