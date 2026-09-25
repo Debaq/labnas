@@ -1821,6 +1821,34 @@ export async function fetchReceiverStatus(): Promise<import('../types').Receiver
   return res.json()
 }
 
+/** Genera (o reemplaza) el token del dispositivo; se muestra una sola vez */
+export async function createSensorToken(id: string): Promise<string> {
+  const res = await api(`/api/sensors/devices/${id}/token`, { method: 'POST' })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al generar token')
+  return (await res.json()).token
+}
+
+export async function deleteSensorToken(id: string): Promise<void> {
+  const res = await api(`/api/sensors/devices/${id}/token`, { method: 'DELETE' })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al quitar token')
+}
+
+export async function fetchSensorSecurity(): Promise<{ require_token: boolean }> {
+  const res = await api('/api/sensors/security')
+  if (!res.ok) throw new Error('Error al obtener seguridad de sensores')
+  return res.json()
+}
+
+export async function setSensorSecurity(requireToken: boolean): Promise<{ require_token: boolean }> {
+  const res = await api('/api/sensors/security', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ require_token: requireToken }),
+  })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al guardar')
+  return res.json()
+}
+
 // ═══════════════════════════════════════
 // Modules
 // ═══════════════════════════════════════

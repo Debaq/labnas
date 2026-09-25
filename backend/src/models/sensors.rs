@@ -17,6 +17,8 @@ pub struct SensorDevice {
     pub last_seen: Option<String>,
     pub config: String,
     pub created_at: String,
+    /// Tiene token propio (se exige en cada envio)
+    pub has_token: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +52,9 @@ pub struct SensorDataPayload {
     #[serde(default)]
     pub rssi: Option<i32>,
     pub readings: Vec<SensorReadingEntry>,
+    /// Token del dispositivo (alternativa al header X-Sensor-Token)
+    #[serde(default)]
+    pub token: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

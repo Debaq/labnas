@@ -115,6 +115,8 @@ const MIGRATIONS: &[&str] = &[
     UPDATE printers3d SET api_key = labnas_encrypt(api_key) WHERE api_key IS NOT NULL AND api_key != '';
     UPDATE email_accounts SET password = labnas_encrypt(password) WHERE password != '';
     UPDATE settings SET value = labnas_encrypt(value) WHERE key IN ('groq_api_key', 'lastfm_api_key') AND value != '';",
+    // 6: token por dispositivo de sensores (se guarda solo el hash)
+    "ALTER TABLE sensor_devices ADD COLUMN token_hash TEXT;",
 ];
 
 fn run_migrations(conn: &Connection) {

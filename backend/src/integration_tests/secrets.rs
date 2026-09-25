@@ -48,6 +48,8 @@ async fn migracion_cifra_secretos_en_claro() {
         let conn = rusqlite::Connection::open(s.home.join(".labnas/labnas.db")).unwrap();
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('lastfm_api_key', 'lastfm-en-claro')", []).unwrap();
         conn.execute("UPDATE notification_config SET bot_token = '123:token-en-claro' WHERE id = 1", []).unwrap();
+        // lo que agregan las migraciones posteriores a la 5
+        conn.execute("ALTER TABLE sensor_devices DROP COLUMN token_hash", []).unwrap();
         conn.pragma_update(None, "user_version", 4).unwrap();
     }
 

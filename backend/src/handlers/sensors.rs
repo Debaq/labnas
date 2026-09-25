@@ -20,7 +20,8 @@ pub async fn list_devices(
 ) -> Json<Vec<SensorDevice>> {
     let devices = crate::db::db_op(&state.db, |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, name, mac, device_type, connection, status, battery, rssi, last_seen, config, created_at
+            "SELECT id, name, mac, device_type, connection, status, battery, rssi, last_seen, config, created_at,
+                    token_hash IS NOT NULL
              FROM sensor_devices ORDER BY created_at DESC"
         ).map_err(|e| e.to_string())?;
         let rows = stmt.query_map([], |row| {
@@ -36,6 +37,7 @@ pub async fn list_devices(
                 last_seen: row.get(8)?,
                 config: row.get(9)?,
                 created_at: row.get(10)?,
+                has_token: row.get(11)?,
             })
         }).map_err(|e| e.to_string())?;
         let mut result = Vec::new();
@@ -66,6 +68,7 @@ pub async fn register_device(
         last_seen: None,
         config: "{}".to_string(),
         created_at: now.clone(),
+        has_token: false,
     };
     let d = device.clone();
     crate::db::db_op_status(&state.db, move |conn| {
@@ -157,9 +160,115 @@ pub async fn update_device_name(
 
 pub async fn ingest_data(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(payload): Json<SensorDataPayload>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    let token = headers
+        .get("x-sensor-token")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .or_else(|| payload.token.clone());
+    check_sensor_token(&state, &payload.mac, token.as_deref()).await?;
     process_sensor_data(&state, payload).await
+}
+
+// ═══════════════════════════════════════
+// Token por dispositivo (solo HTTP; el receptor serie es local)
+// ═══════════════════════════════════════
+
+const REQUIRE_TOKEN_SETTING: &str = "sensor_require_token";
+
+fn token_hash(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(token.as_bytes()).iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+/// Un dispositivo con token siempre debe presentarlo. Sin token: se acepta salvo que
+/// el admin haya activado "exigir token" (incluye el autoregistro de desconocidos).
+async fn check_sensor_token(state: &AppState, mac: &str, token: Option<&str>) -> Result<(), (StatusCode, String)> {
+    let mac = normalize_mac(mac);
+    let (require, stored) = crate::db::db_op(&state.db, move |conn| {
+        let require = crate::db::get_setting_bool(conn, REQUIRE_TOKEN_SETTING);
+        let stored: Option<Option<String>> = conn
+            .query_row("SELECT token_hash FROM sensor_devices WHERE mac = ?1", params![mac], |r| r.get(0))
+            .ok();
+        Ok((require, stored.flatten()))
+    })
+    .await?;
+
+    match (stored, token) {
+        (Some(hash), Some(t)) if token_hash(t) == hash => Ok(()),
+        (Some(_), _) => Err((StatusCode::UNAUTHORIZED, "Token de sensor invalido".to_string())),
+        (None, _) if require => Err((StatusCode::UNAUTHORIZED, "Este servidor exige token de sensor".to_string())),
+        (None, _) => Ok(()),
+    }
+}
+
+#[derive(serde::Serialize)]
+pub struct SensorTokenResponse {
+    /// Se muestra una sola vez: en la base queda solo su hash
+    pub token: String,
+}
+
+/// POST /api/sensors/devices/{id}/token — genera (o reemplaza) el token del dispositivo
+pub async fn create_device_token(
+    State(state): State<AppState>,
+    axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
+    Path(id): Path<String>,
+) -> Result<Json<SensorTokenResponse>, (StatusCode, String)> {
+    let token = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+    let (hash, id2) = (token_hash(&token), id.clone());
+    let n = crate::db::db_op(&state.db, move |conn| {
+        conn.execute("UPDATE sensor_devices SET token_hash = ?1 WHERE id = ?2", params![hash, id2])
+            .map_err(|e| e.to_string())
+    })
+    .await?;
+    if n == 0 {
+        return Err((StatusCode::NOT_FOUND, "Dispositivo no encontrado".to_string()));
+    }
+    state.log_activity("Sensores", &format!("Token generado para {}", id), &session.username).await;
+    Ok(Json(SensorTokenResponse { token }))
+}
+
+/// DELETE /api/sensors/devices/{id}/token — quita el token del dispositivo
+pub async fn delete_device_token(
+    State(state): State<AppState>,
+    axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let id2 = id.clone();
+    crate::db::db_op(&state.db, move |conn| {
+        conn.execute("UPDATE sensor_devices SET token_hash = NULL WHERE id = ?1", params![id2])
+            .map_err(|e| e.to_string())
+    })
+    .await?;
+    state.log_activity("Sensores", &format!("Token revocado para {}", id), &session.username).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct SensorSecurity {
+    pub require_token: bool,
+}
+
+/// GET /api/sensors/security
+pub async fn get_security(State(state): State<AppState>) -> Result<Json<SensorSecurity>, (StatusCode, String)> {
+    let require_token = crate::db::db_op(&state.db, |conn| Ok(crate::db::get_setting_bool(conn, REQUIRE_TOKEN_SETTING))).await?;
+    Ok(Json(SensorSecurity { require_token }))
+}
+
+/// PUT /api/sensors/security (admin)
+pub async fn set_security(
+    State(state): State<AppState>,
+    axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
+    Json(req): Json<SensorSecurity>,
+) -> Result<Json<SensorSecurity>, (StatusCode, String)> {
+    let v = if req.require_token { "true" } else { "false" };
+    crate::db::db_op(&state.db, move |conn| crate::db::set_setting(conn, REQUIRE_TOKEN_SETTING, v)).await?;
+    state
+        .log_activity("Sensores", &format!("Exigir token: {}", req.require_token), &session.username)
+        .await;
+    Ok(Json(req))
 }
 
 /// Avisa a la UI que hay lecturas nuevas (recarga lo que muestra)
@@ -419,7 +528,8 @@ pub async fn get_latest(
 ) -> Json<Vec<SensorLatest>> {
     let devices: Vec<SensorDevice> = crate::db::db_op(&state.db, |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, name, mac, device_type, connection, status, battery, rssi, last_seen, config, created_at
+            "SELECT id, name, mac, device_type, connection, status, battery, rssi, last_seen, config, created_at,
+                    token_hash IS NOT NULL
              FROM sensor_devices ORDER BY created_at DESC"
         ).map_err(|e| e.to_string())?;
         let rows = stmt.query_map([], |row| {
@@ -435,6 +545,7 @@ pub async fn get_latest(
                 last_seen: row.get(8)?,
                 config: row.get(9)?,
                 created_at: row.get(10)?,
+                has_token: row.get(11)?,
             })
         }).map_err(|e| e.to_string())?;
         let mut result = Vec::new();

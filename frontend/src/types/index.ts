@@ -436,6 +436,7 @@ export interface SensorDevice {
   last_seen: string | null
   config: string
   created_at: string
+  has_token: boolean
 }
 
 export interface SensorReading {

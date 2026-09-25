@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useEvent, useEventsConnected } from '../events/useEvents'
+import SensorSecurityPanel from '../components/SensorSecurityPanel'
 import {
   Thermometer, Wifi, Radio, Battery, BatteryLow, BatteryMedium, BatteryFull, BatteryWarning,
   Signal, SignalLow, SignalMedium, SignalHigh, Plus, Trash2, Check, X, Loader2,
@@ -609,6 +610,8 @@ export default function SensorsPage() {
           </div>
         </div>
       )}
+
+      {isAdmin && <SensorSecurityPanel />}
     </div>
   )
 }

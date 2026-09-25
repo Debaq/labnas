@@ -8,3 +8,4 @@ mod events;
 mod files;
 mod secrets;
 mod security;
+mod sensors;

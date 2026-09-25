@@ -608,6 +608,10 @@ fn api_routes() -> Router<AppState> {
         .route("/api/sensors/alerts/{id}", delete(handlers::sensors::delete_alert))
         .route("/api/sensors/receiver/config", post(handlers::sensors::configure_receiver))
         .route("/api/sensors/receiver/status", get(handlers::sensors::receiver_status))
+        .route("/api/sensors/devices/{id}/token", post(handlers::sensors::create_device_token))
+        .route("/api/sensors/devices/{id}/token", delete(handlers::sensors::delete_device_token))
+        .route("/api/sensors/security", get(handlers::sensors::get_security))
+        .route("/api/sensors/security", put(handlers::sensors::set_security))
 }
 
 #[cfg(test)]

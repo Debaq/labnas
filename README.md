@@ -156,6 +156,11 @@ Módulos disponibles:
 - Compatibilidad con ESP32 y similares
 - Gráficos de series temporales
 - Alertas por umbrales
+- **Token por dispositivo** (Sensores > Seguridad de sensores, admin): el sensor lo envía en el header `X-Sensor-Token` o en el campo `token` del JSON de `POST /api/sensors/data`. En la base se guarda solo su hash. Con "exigir token" activo se rechazan lecturas sin token válido y dispositivos desconocidos; sin él (por defecto) los sensores sin token siguen funcionando
+
+  ```json
+  { "mac": "AA:BB:CC:DD:EE:FF", "token": "<token>", "readings": [{ "key": "temp", "val": 21.5 }] }
+  ```
 
 ### Escáner de red
 - Scan ICMP con descubrimiento automático
