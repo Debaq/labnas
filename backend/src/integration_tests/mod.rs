@@ -7,6 +7,7 @@ mod backups;
 mod events;
 mod files;
 mod folders;
+mod https;
 mod network;
 mod printers;
 mod secrets;

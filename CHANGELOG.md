@@ -24,6 +24,7 @@ Cambios grandes pensados para una instalación nueva. Leer **Cambios que afectan
 - HTML/XML/JS se previsualizan como texto y SVG sin scripts
 
 ### Nuevo
+- **HTTPS** en 3443 (y 443 con permiso): certificado autofirmado automático o propio (p.ej. `tailscale cert`), recarga en caliente, descarga del certificado con huella para instalarlo, redirección HTTP→HTTPS opcional (excepto sensores, localhost y el visor)
 - **Visor de escritorio** (`labnas-viewer`): ventana nativa sin navegador, notificaciones nativas, ícono en la bandeja, descubre el NAS por mDNS
 - **Tiempo real** (WebSocket `/api/live`): impresoras, música, sensores y respaldos sin consultar cada pocos segundos; notificaciones en la web y en el visor
 - **Respaldos programados** con snapshots incrementales (rsync `--link-dest`) + copia diaria de la base

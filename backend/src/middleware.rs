@@ -48,6 +48,8 @@ fn is_public(path: &str) -> bool {
             | "/api/auth/has-users"
             | "/api/system/branding"
             | "/api/sensors/data"
+            // certificado publico del servidor, para instalarlo como confiable
+            | "/api/tls/cert.pem"
     ) || path.starts_with("/api/share/")
         // validada por un token de un solo archivo (handlers::files::serve_preview)
         || path.starts_with("/api/preview/")
@@ -263,6 +265,7 @@ mod tests {
         assert_eq!(acc(Method::PUT, "/api/files/webdav"), Admin);
         assert_eq!(acc(Method::POST, "/api/network/wake/aa:bb:cc:dd:ee:ff"), Operator);
         assert_eq!(acc(Method::GET, "/api/system/smart"), Admin);
+        assert_eq!(acc(Method::PUT, "/api/system/tls"), Admin);
         // ruta inventada: denegada por defecto
         assert_eq!(acc(Method::GET, "/api/nueva/ruta"), Admin);
     }

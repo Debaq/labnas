@@ -64,6 +64,12 @@ Base limpia: `LABNAS_HOME=/tmp/labnas-prueba ./labnas-backend` (no toca `~/.labn
 - [ ] Ícono en la bandeja; cerrar la ventana la oculta; llegan notificaciones nativas; "Salir" cierra
 - [ ] Descargar un archivo → queda en `~/Descargas` con notificación; un link externo abre el navegador del sistema
 
-## 10. Actualización (necesita un release real)
+## 10. HTTPS (Configuración > Sistema)
+- [ ] Abrir `https://IP:3443`: el navegador avisa (autofirmado); descargar el certificado, comparar la huella e instalarlo → ya no avisa
+- [ ] Login, terminal y música funcionan por HTTPS (WebSocket `wss://`)
+- [ ] Activar "Redirigir", reiniciar: `http://IP:3001` lleva a HTTPS; `http://localhost:3001` y el visor siguen por HTTP; los sensores siguen enviando
+- [ ] (Opcional) Certificado de Tailscale: cargar rutas → el navegador ya no avisa, sin reiniciar
+
+## 11. Actualización (necesita un release real)
 - [ ] Desde la versión anterior instalada, "Actualizar" → descarga, verifica checksum, reinicia en la nueva
 - [ ] "Volver a vX" → vuelve a la anterior y la sesión sigue abierta

@@ -4,6 +4,7 @@ import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, 
 import { useAuth } from '../auth/AuthContext'
 import StorageRootsSection from '../components/StorageRootsSection'
 import SmartSection from '../components/SmartSection'
+import HttpsSection from '../components/HttpsSection'
 import AuditLogSection from '../components/AuditLogSection'
 import BackupsSection from '../components/BackupsSection'
 import { useTheme } from '../themes/ThemeContext'
@@ -1675,6 +1676,8 @@ export default function SettingsPage() {
       </section>}
 
       {activeTab === 'system' && isAdmin && <StorageRootsSection />}
+
+      {activeTab === 'system' && isAdmin && <HttpsSection />}
 
       {activeTab === 'system' && isAdmin && <SmartSection />}
 

@@ -236,6 +236,8 @@ fn main() -> wry::Result<()> {
     let ipc_proxy = proxy.clone();
 
     let builder = WebViewBuilder::new_with_web_context(&mut web_context)
+        // El servidor no redirige al visor a HTTPS (WebKitGTK rechazaria el autofirmado)
+        .with_user_agent(format!("Mozilla/5.0 (X11; Linux) AppleWebKit/605.1.15 LabNAS-Viewer/{}", env!("CARGO_PKG_VERSION")))
         .with_html(loading_page(&url))
         .with_initialization_script(INIT_SCRIPT)
         .with_devtools(cfg!(debug_assertions))

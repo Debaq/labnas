@@ -301,3 +301,40 @@ export async function setSmartEnabled(enabled: boolean): Promise<SmartInfo> {
   if (!res.ok) throw new Error((await res.text()) || 'Error al guardar')
   return res.json()
 }
+
+// --- HTTPS (admin) ---
+
+export interface TlsCertInfo {
+  fingerprint_sha256: string
+  not_after: string
+  days_left: number
+  names: string[]
+  issuer: string
+}
+
+export interface TlsStatus {
+  enabled: boolean
+  redirect: boolean
+  cert_path: string
+  key_path: string
+  port: number
+  source: 'autofirmado' | 'propio' | ''
+  cert: TlsCertInfo | null
+  error: string | null
+}
+
+export type TlsSettings = Pick<TlsStatus, 'enabled' | 'redirect' | 'cert_path' | 'key_path'>
+
+export async function fetchTls(): Promise<TlsStatus> {
+  return jsonOrThrow(await api('/api/system/tls'), 'Error al obtener HTTPS')
+}
+
+export async function saveTls(settings: TlsSettings): Promise<TlsStatus> {
+  return jsonOrThrow(await api('/api/system/tls', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings),
+  }), 'Error al guardar HTTPS')
+}
+
+export async function regenerateTls(): Promise<TlsStatus> {
+  return jsonOrThrow(await api('/api/system/tls/regenerate', { method: 'POST' }), 'Error al regenerar el certificado')
+}

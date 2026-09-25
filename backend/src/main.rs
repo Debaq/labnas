@@ -7,6 +7,7 @@ mod models;
 mod state;
 mod secrets;
 mod storage;
+mod tls;
 mod updater;
 
 use axum::{
@@ -31,6 +32,9 @@ async fn main() {
     }
 
     updater::init();
+
+    // Proveedor criptografico de rustls: ring (compila en musl/ARM sin aws-lc)
+    let _ = rustls::crypto::ring::default_provider().install_default();
 
     // Version recien instalada que no logra arrancar => restaurar la anterior
     if updater::startup_check() {
@@ -150,7 +154,24 @@ async fn main() {
     println!("  Local:  http://localhost:3001");
     println!("  Red:    http://{}:3001", local_ip);
 
-    // Try to also listen on port 80 (requires root/sudo)
+    // HTTPS con el mismo router (3443, y 443 si hay permiso)
+    let (https_port, tls_redirect) = start_https(&state, app.clone(), shutdown.clone()).await;
+    if let Some(p) = https_port {
+        let port = if p == 443 { String::new() } else { format!(":{}", p) };
+        println!("  \x1b[32mHTTPS:  https://{}{}\x1b[0m", local_ip, port);
+    }
+
+    // HTTP: opcionalmente redirige a HTTPS (salvo sensores, health y localhost)
+    let app = match https_port {
+        Some(p) if tls_redirect => {
+            println!("  HTTP redirige a HTTPS");
+            app.layer(axum_mw::from_fn(tls::redirect_middleware))
+                .layer(axum::Extension(tls::Redirect { https_port: p }))
+        }
+        _ => app,
+    };
+
+    // Puerto 80 (requiere CAP_NET_BIND_SERVICE, ver servicio systemd)
     let has_port_80 = match tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], 80))).await {
         Ok(listener_80) => {
             let app_80 = app.clone();
@@ -165,7 +186,7 @@ async fn main() {
             true
         }
         Err(_) => {
-            println!("  \x1b[33m(Puerto 80 no disponible - ejecuta con sudo para habilitarlo)\x1b[0m");
+            println!("  \x1b[33m(Puerto 80 no disponible: requiere CAP_NET_BIND_SERVICE, ver servicio systemd)\x1b[0m");
             false
         }
     };
@@ -199,6 +220,64 @@ async fn main() {
     if restart_requested.load(std::sync::atomic::Ordering::SeqCst) {
         restart_self();
     }
+}
+
+/// Levanta HTTPS si esta activo. Devuelve (puerto principal, redirigir HTTP).
+async fn start_https(
+    state: &AppState,
+    app: Router,
+    shutdown: tokio_util::sync::CancellationToken,
+) -> (Option<u16>, bool) {
+    let Ok(settings) = db::db_op(&state.db, |c| Ok(tls::load_settings(c))).await else { return (None, false) };
+    if !settings.enabled {
+        return (None, false);
+    }
+    let paths = db::db_op(&state.db, |c| tls::active_paths(c).map(|(cert, key, _)| (cert, key))).await;
+    let (cert, key) = match paths {
+        Ok(p) => p,
+        Err((_, e)) => {
+            eprintln!("[TLS] Sin certificado, HTTPS desactivado: {}", e);
+            return (None, false);
+        }
+    };
+    let config = match tls::rustls_config(&cert, &key).await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[TLS] {}", e);
+            return (None, false);
+        }
+    };
+    tls::set_live(config.clone());
+
+    let mut main_port = None;
+    for port in [443u16, tls::HTTPS_PORT] {
+        let Ok(listener) = std::net::TcpListener::bind(("0.0.0.0", port)) else {
+            if port == tls::HTTPS_PORT {
+                eprintln!("[TLS] No se pudo abrir el puerto {}", port);
+            }
+            continue;
+        };
+        let _ = listener.set_nonblocking(true);
+        let server = match axum_server::tls_rustls::from_tcp_rustls(listener, config.clone()) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[TLS] Puerto {}: {}", port, e);
+                continue;
+            }
+        };
+        let handle = axum_server::Handle::new();
+        let (h, sd) = (handle.clone(), shutdown.clone());
+        tokio::spawn(async move {
+            sd.cancelled().await;
+            h.graceful_shutdown(Some(std::time::Duration::from_secs(5)));
+        });
+        let app = app.clone();
+        tokio::spawn(async move {
+            let _ = server.handle(handle).serve(app.into_make_service()).await;
+        });
+        main_port.get_or_insert(port);
+    }
+    (main_port, settings.redirect)
 }
 
 /// Re-ejecuta el binario (tras una actualizacion). Los sockets se cierran solos (CLOEXEC).
@@ -444,6 +523,10 @@ fn api_routes() -> Router<AppState> {
         .route("/api/system/upload-limit", post(handlers::system::set_upload_limit))
         .route("/api/system/update/do", post(handlers::system::do_update))
         .route("/api/system/reinstall", post(handlers::system::reinstall))
+        .route("/api/system/tls", get(tls::get_tls))
+        .route("/api/system/tls", put(tls::set_tls))
+        .route("/api/system/tls/regenerate", post(tls::regenerate))
+        .route("/api/tls/cert.pem", get(tls::download_cert))
         .route("/api/system/smart", get(handlers::smart::get_smart))
         .route("/api/system/smart", put(handlers::smart::set_smart))
         .route("/api/system/rollback", get(handlers::system::rollback_status))

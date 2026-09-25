@@ -499,6 +499,15 @@ Cada conexión recibe solo lo de su rol y de módulos activos. El WebSocket se a
 
 Click en un archivo del explorador abre la vista previa: imágenes, video y audio (con adelantar/retroceder), PDF y texto/código (primeros 512 KB). Se sirven con un **link temporal de un solo archivo** (30 min), no con el token de sesión. HTML/XML/JS se muestran como texto y los SVG sin permitir scripts, para que un archivo subido no pueda ejecutar código en LabNAS. Las descargas usan el mismo mecanismo (en streaming, sin cargar el archivo en memoria del navegador).
 
+## HTTPS
+
+Activo por defecto en **`https://<servidor>:3443`** (y en 443 si el servicio tiene `CAP_NET_BIND_SERVICE`), junto al HTTP de siempre en 3001. Se configura en **Configuración > Sistema > HTTPS**.
+
+- **Certificado autofirmado** generado solo para `localhost`, el nombre mDNS, el hostname y las IPs del equipo (10 años; se regenera si vence o con el botón "Regenerar"). El navegador avisa hasta instalarlo en cada equipo: se descarga desde la misma página (`/api/tls/cert.pem`) y se verifica comparando la huella SHA-256
+- **Certificado propio** (válido sin advertencias), por ejemplo con Tailscale: `sudo tailscale cert --cert-file ~/.labnas/tls/ts.crt --key-file ~/.labnas/tls/ts.key <equipo>.<tailnet>.ts.net` y cargar esas rutas. Se recarga en caliente
+- **Redirigir HTTP → HTTPS** (opcional): excluye la ingesta de sensores (un ESP32 rara vez maneja TLS), `/api/health`, `localhost` y el visor de escritorio. Activar/desactivar HTTPS o la redirección se aplica al reiniciar
+- TLS con rustls + ring (sin OpenSSL ni aws-lc en el servidor)
+
 ## WebDAV (montar como unidad)
 
 Desactivado por defecto; se activa en **Configuración > Sistema > Carpetas accesibles**. Dirección: `http://<servidor>:3001/dav/`, con el mismo usuario y contraseña de la web.
@@ -507,7 +516,7 @@ Desactivado por defecto; se activa en **Configuración > Sistema > Carpetas acce
 - Borrar desde el explorador del sistema envía a la **papelera** de LabNAS
 - Rutas canonicalizadas (sin `..` ni symlinks que escapen) y `~/.labnas` bloqueado; mismo bloqueo por intentos fallidos que el login
 - Linux: `dav://<servidor>:3001/dav/` en el gestor de archivos (o `davfs2`); macOS: Finder > Ir > Conectarse al servidor
-- Windows sobre HTTP (sin TLS) requiere habilitar Basic en el cliente WebDAV (`HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters\BasicAuthLevel = 2`) o usar WinSCP / Cyberduck. Sin HTTPS la contraseña viaja en claro: úsalo solo en la LAN o sobre Tailscale
+- Mejor por HTTPS (`https://<servidor>:3443/dav/`, con el certificado instalado o uno propio). Windows sobre HTTP (sin TLS) requiere habilitar Basic en el cliente WebDAV (`HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters\BasicAuthLevel = 2`) o usar WinSCP / Cyberduck. Sin HTTPS la contraseña viaja en claro: úsalo solo en la LAN o sobre Tailscale
 
 ## Salud de discos (SMART)
 
