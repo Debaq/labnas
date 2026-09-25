@@ -118,3 +118,14 @@ async fn sesiones_sobreviven_reinicio() {
     assert_eq!(s.get("/api/auth/me", &other).await.status, 401);
     assert_eq!(s.get("/api/auth/me", &admin).await.status, 200);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sin_cors_para_otros_origenes() {
+    let s = Server::start().await;
+    let admin = s.admin().await;
+    let r = s
+        .raw(s.client().get(format!("{}/api/auth/me", s.base)).bearer_auth(&admin).header("Origin", "http://evil.example"))
+        .await;
+    assert_eq!(r.status, 200);
+    assert_eq!(r.header("access-control-allow-origin"), "", "no se autoriza a otros origenes");
+}

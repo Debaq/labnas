@@ -17,7 +17,7 @@ use axum::{
 };
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 
 use state::AppState;
@@ -341,18 +341,37 @@ fn new_state(pool: db::DbPool) -> AppState {
     }
 }
 
-/// API completa: rutas + limite de subida + permisos + CORS
-fn build_api(state: &AppState, upload_limit_mb: u32) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
-        .allow_headers(Any);
+/// Origenes externos autorizados por CORS (`LABNAS_CORS_ORIGINS`, separados por coma).
+/// Por defecto ninguno: la web, el visor y el proxy de desarrollo son mismo origen.
+fn cors_origins() -> Vec<axum::http::HeaderValue> {
+    std::env::var("LABNAS_CORS_ORIGINS")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|o| !o.is_empty())
+        .filter_map(|o| o.parse().ok())
+        .collect()
+}
 
-    api_routes()
+/// API completa: rutas + limite de subida + permisos (+ CORS solo si se configuro)
+fn build_api(state: &AppState, upload_limit_mb: u32) -> Router {
+    let api = api_routes()
         .layer(axum::extract::DefaultBodyLimit::max(upload_limit_mb as usize * 1024 * 1024))
-        .layer(axum_mw::from_fn_with_state(state.clone(), middleware::permission_check))
-        .layer(cors)
-        .with_state(state.clone())
+        .layer(axum_mw::from_fn_with_state(state.clone(), middleware::permission_check));
+
+    let origins = cors_origins();
+    let api = if origins.is_empty() {
+        api
+    } else {
+        println!("[LabNAS] CORS habilitado para: {:?}", origins);
+        api.layer(
+            CorsLayer::new()
+                .allow_origin(AllowOrigin::list(origins))
+                .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+                .allow_headers([axum::http::header::AUTHORIZATION, axum::http::header::CONTENT_TYPE]),
+        )
+    };
+    api.with_state(state.clone())
 }
 
 /// Todas las rutas de la API (sin estado ni capas). `Router::route` hace panic ante

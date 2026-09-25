@@ -11,7 +11,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // WebSockets (terminal y bus de eventos): deben ir antes de '/api'
       '/api/terminal': {
+        target: 'http://localhost:3001',
+        ws: true,
+      },
+      '/api/live': {
         target: 'http://localhost:3001',
         ws: true,
       },

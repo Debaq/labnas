@@ -524,6 +524,7 @@ Todas las acciones registradas (subidas, borrados, cambios de rol, actualizacion
 - Passwords con bcrypt (cost 10, mínimo 8 caracteres); bloqueo de 5 min tras 5 intentos fallidos
 - Sesiones de 24h persistidas en SQLite (sobreviven reinicios); cambiar la contraseña cierra las demás
 - `labnas.db` con permisos 600
+- Sin CORS por defecto (la web y el visor son mismo origen); para autorizar un origen externo: `LABNAS_CORS_ORIGINS=https://dashboard.lab.cl`
 - Secretos cifrados en la base (token del bot, API keys de impresoras/Groq/Last.fm, contraseñas de correo) con XChaCha20-Poly1305; la clave está en `~/.labnas/secret.key` (600)
 - Token del bot jamás expuesto en la API
 - Comandos CUPS sanitizados contra inyección
