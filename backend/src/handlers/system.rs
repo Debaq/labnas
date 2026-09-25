@@ -402,42 +402,11 @@ pub async fn update_check_loop(state: AppState) {
         if is_newer_version(&latest, CURRENT_VERSION) {
             println!("[LabNAS] Nueva version disponible: {} (actual: {})", latest, current);
 
-            // Read token and admin chats from DB (sync scope, no await)
-            let tg_data: Option<(String, Vec<i64>)> = {
-                let conn = match crate::db::get_conn(&state.db) {
-                    Ok(c) => c,
-                    Err(_) => continue,
-                };
-                let token: Option<String> = conn.query_row(
-                    "SELECT bot_token FROM notification_config WHERE id = 1",
-                    [],
-                    |row| row.get(0),
-                ).ok().flatten();
-
-                token.map(|t| {
-                    let mut stmt = conn.prepare(
-                        "SELECT chat_id FROM telegram_chats WHERE role = 'admin'"
-                    ).unwrap();
-                    let chat_ids: Vec<i64> = stmt.query_map([], |row| row.get(0))
-                        .unwrap()
-                        .filter_map(|r| r.ok())
-                        .collect();
-                    (t, chat_ids)
-                })
-            };
-
-            // Now send notifications (async, conn already dropped)
-            if let Some((token, chat_ids)) = tg_data {
-                let msg = format!(
-                    "*Actualizacion disponible*\n\nActual: `{}`\nNueva: `{}`\n\nActualiza desde Configuracion en la web.",
-                    current, latest
-                );
-                for chat_id in &chat_ids {
-                    let _ = crate::handlers::notifications::send_tg_public(
-                        &state.http_client, &token, *chat_id, &msg
-                    ).await;
-                }
-            }
+            let msg = format!(
+                "*Actualizacion disponible*\n\nActual: `{}`\nNueva: `{}`\n\nActualiza desde Configuracion en la web.",
+                current, latest
+            );
+            crate::handlers::notifications::notify_admins(&state, &msg).await;
         }
     }
 }

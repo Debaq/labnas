@@ -150,45 +150,15 @@ pub async fn create_report(
     let title = report.title.clone();
     let rtype = report.report_type.clone();
     let by = report.submitted_by.clone();
-    let http = state.http_client.clone();
-
-    // Read DB synchronously before spawning async task
-    let tg_data: Option<(String, Vec<i64>)> = crate::db::get_conn(&state.db)
-        .ok()
-        .and_then(|conn| {
-            let token: Option<String> = conn
-                .query_row("SELECT bot_token FROM notification_config WHERE id = 1", [], |row| row.get(0))
-                .ok()?;
-            let token = token?;
-            let mut stmt = conn.prepare("SELECT chat_id FROM telegram_chats WHERE role = 'admin'").ok()?;
-            let chats: Vec<i64> = stmt
-                .query_map([], |row| row.get(0))
-                .ok()?
-                .filter_map(|r| r.ok())
-                .collect();
-            Some((token, chats))
-        });
-
-    if let Some((token, chats)) = tg_data {
-        tokio::spawn(async move {
-            let emoji = if rtype == "bug" { "[Bug]" } else { "[Solicitud]" };
-            let msg = format!(
-                "{} *Nuevo reporte*\n\nTipo: {}\nDe: {}\nTitulo: {}",
-                emoji, rtype, by, title
-            );
-            for chat_id in chats {
-                let _ = http
-                    .post(format!("https://api.telegram.org/bot{}/sendMessage", token))
-                    .json(&serde_json::json!({
-                        "chat_id": chat_id,
-                        "text": msg,
-                        "parse_mode": "Markdown"
-                    }))
-                    .send()
-                    .await;
-            }
-        });
-    }
+    let state_bg = state.clone();
+    tokio::spawn(async move {
+        let emoji = if rtype == "bug" { "[Bug]" } else { "[Solicitud]" };
+        let msg = format!(
+            "{} *Nuevo reporte*\n\nTipo: {}\nDe: {}\nTitulo: {}",
+            emoji, rtype, by, title
+        );
+        crate::handlers::notifications::notify_admins(&state_bg, &msg).await;
+    });
 
     state
         .log_activity(

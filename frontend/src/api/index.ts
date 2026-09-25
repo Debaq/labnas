@@ -60,6 +60,66 @@ export async function setUploadLimit(limitMb: number): Promise<void> {
   if (!res.ok) throw new Error((await res.text()) || 'Error al guardar limite')
 }
 
+// --- Respaldos (admin) ---
+
+export interface BackupJob {
+  id: string
+  name: string
+  source: string
+  destination: string
+  hour: number
+  minute: number
+  keep: number
+  include_db: boolean
+  enabled: boolean
+  last_run: string | null
+  last_status: 'ok' | 'warning' | 'error' | 'running' | null
+  last_message: string | null
+  created_at: string
+  running: boolean
+}
+
+export type BackupJobInput = Pick<BackupJob, 'name' | 'source' | 'destination' | 'hour' | 'minute' | 'keep' | 'include_db' | 'enabled'>
+
+export interface BackupsInfo {
+  jobs: BackupJob[]
+  rsync_available: boolean
+  db_backups: string[]
+  db_backups_dir: string
+}
+
+async function jsonOrThrow<T>(res: Response, fallback: string): Promise<T> {
+  if (!res.ok) throw new Error((await res.text()) || fallback)
+  return res.json()
+}
+
+export async function fetchBackups(): Promise<BackupsInfo> {
+  return jsonOrThrow(await api('/api/backups'), 'Error al obtener respaldos')
+}
+
+export async function saveBackup(job: BackupJobInput, id?: string): Promise<BackupJob> {
+  const res = await api(id ? `/api/backups/${id}` : '/api/backups', {
+    method: id ? 'PUT' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(job),
+  })
+  return jsonOrThrow(res, 'Error al guardar respaldo')
+}
+
+export async function deleteBackup(id: string): Promise<void> {
+  const res = await api(`/api/backups/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al eliminar respaldo')
+}
+
+export async function runBackup(id: string): Promise<void> {
+  const res = await api(`/api/backups/${id}/run`, { method: 'POST' })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al iniciar respaldo')
+}
+
+export async function fetchBackupSnapshots(id: string): Promise<string[]> {
+  return jsonOrThrow(await api(`/api/backups/${id}/snapshots`), 'Error al obtener snapshots')
+}
+
 // --- Auditoria (admin) ---
 
 export interface AuditEvent {

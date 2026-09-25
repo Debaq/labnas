@@ -86,7 +86,7 @@ pub fn validate_roots(roots: &[String]) -> Result<Vec<String>, ApiError> {
 
 /// Canonicaliza `raw`. Si no existe, canonicaliza el ancestro existente mas cercano
 /// y agrega el resto (sin permitir `..`).
-fn canonicalize_lenient(raw: &Path) -> Result<PathBuf, ApiError> {
+pub fn canonicalize_lenient(raw: &Path) -> Result<PathBuf, ApiError> {
     if let Ok(p) = std::fs::canonicalize(raw) {
         return Ok(p);
     }

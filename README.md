@@ -472,6 +472,18 @@ LabNAS chequea GitHub cada 6h. Cuando hay update:
 - **Rollback manual**: botón "Volver a vX" en Configuración (repetirlo vuelve a la nueva)
 - También permite **reinstalar la versión actual** (archivos corruptos)
 
+## Respaldos
+
+**Configuración > Respaldos** (admin). Cada tarea copia una carpeta (dentro de las carpetas accesibles) a un destino local —un disco externo o una carpeta de red montada (NFS/SMB)— todos los días a la hora elegida.
+
+- **Snapshots incrementales** con `rsync --link-dest`: cada copia (`<destino>/AAAA-MM-DD_HHMMSS/`) es completa y navegable, pero los archivos sin cambios son hardlinks a la anterior y no ocupan espacio de nuevo. `latest` apunta a la última
+- Se conservan las últimas N copias; opcionalmente incluye la base de datos de LabNAS (`_labnas/labnas.db`)
+- Si el equipo estaba apagado a la hora programada, la copia se hace al volver
+- Fallos y advertencias se notifican a los admins por Telegram y quedan en la auditoría
+- Además, `labnas.db` se copia sola cada día en `~/.labnas/backups/` (se conservan 7)
+
+Requiere `rsync` en el servidor.
+
 ## Auditoría
 
 Todas las acciones registradas (subidas, borrados, cambios de rol, actualizaciones, rollbacks...) se guardan en SQLite y se consultan en **Configuración > Administración > Auditoría**, con filtro por usuario y texto. Se conservan 180 días (setting `audit_retention_days`). El bot de Telegram las muestra con `/actividad`.

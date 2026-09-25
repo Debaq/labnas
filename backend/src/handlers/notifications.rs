@@ -426,6 +426,36 @@ async fn call_telegram<T: serde::de::DeserializeOwned>(
     }
 }
 
+/// Envia un mensaje (Markdown) a todos los chats de Telegram con rol admin.
+/// No hace nada si el bot no esta configurado.
+pub async fn notify_admins(state: &AppState, text: &str) {
+    let tg_data = crate::db::db_op(&state.db, |conn| {
+        let token: Option<String> = conn
+            .query_row("SELECT bot_token FROM notification_config WHERE id = 1", [], |row| row.get(0))
+            .ok()
+            .flatten();
+        let Some(token) = token.filter(|t| !t.is_empty()) else { return Ok(None) };
+        let mut stmt = conn
+            .prepare("SELECT chat_id FROM telegram_chats WHERE role = 'admin'")
+            .map_err(|e| e.to_string())?;
+        let chats: Vec<i64> = stmt
+            .query_map([], |row| row.get(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(Some((token, chats)))
+    })
+    .await
+    .ok()
+    .flatten();
+
+    if let Some((token, chats)) = tg_data {
+        for chat_id in chats {
+            let _ = send_telegram_message(&state.http_client, &token, chat_id, text).await;
+        }
+    }
+}
+
 pub async fn send_tg_public(
     client: &reqwest::Client,
     token: &str,

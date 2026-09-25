@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine, Pencil, Music, HelpCircle, X, RefreshCw, Shield, LayoutDashboard, FolderOpen, Network, Printer, Box, ClipboardList, FileText, Mail, Package, GraduationCap, Thermometer, ChevronUp, ChevronDown, AlertTriangle, Bell, Server, SlidersHorizontal, RotateCcw } from 'lucide-react'
+import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine, Pencil, Music, HelpCircle, X, RefreshCw, Shield, LayoutDashboard, FolderOpen, Network, Printer, Box, ClipboardList, FileText, Mail, Package, GraduationCap, Thermometer, ChevronUp, ChevronDown, AlertTriangle, Bell, Server, SlidersHorizontal, RotateCcw, Archive } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import StorageRootsSection from '../components/StorageRootsSection'
 import AuditLogSection from '../components/AuditLogSection'
+import BackupsSection from '../components/BackupsSection'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, getThemeNames, type ThemeName } from '../themes/themes'
 import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, forceCheckUpdate, doUpdate, doReinstall, fetchRollbackStatus, doRollback, type RollbackStatus, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, updateService, setLastfmKey, fetchHealth, getMpvArgs, setMpvArgs as saveMpvArgs, setUploadLimit, fetchModules, toggleModule, reorderModules, type LabBranding, type LabService } from '../api'
@@ -25,7 +26,7 @@ const MODULE_META: Record<string, { label: string; icon: any; description: strin
   music:      { label: 'Musica',           icon: Music,           description: 'Reproductor de musica (yt-dlp + mpv)' },
 }
 
-type TabId = 'general' | 'lab' | 'users' | 'notifications' | 'network' | 'media' | 'system' | 'admin'
+type TabId = 'general' | 'lab' | 'users' | 'notifications' | 'network' | 'media' | 'system' | 'backups' | 'admin'
 
 const TABS: { id: TabId; label: string; icon: any; adminOnly: boolean }[] = [
   { id: 'general',       label: 'General',        icon: SlidersHorizontal, adminOnly: false },
@@ -35,6 +36,7 @@ const TABS: { id: TabId; label: string; icon: any; adminOnly: boolean }[] = [
   { id: 'network',       label: 'Red',            icon: Globe,             adminOnly: true  },
   { id: 'media',         label: 'Multimedia',     icon: Music,             adminOnly: true  },
   { id: 'system',        label: 'Sistema',        icon: Server,            adminOnly: true  },
+  { id: 'backups',       label: 'Respaldos',      icon: Archive,           adminOnly: true  },
   { id: 'admin',         label: 'Administracion', icon: Shield,            adminOnly: true  },
 ]
 
@@ -1670,6 +1672,8 @@ export default function SettingsPage() {
       </section>}
 
       {activeTab === 'system' && isAdmin && <StorageRootsSection />}
+
+      {activeTab === 'backups' && isAdmin && <BackupsSection />}
 
       {activeTab === 'admin' && isAdmin && <AuditLogSection />}
 

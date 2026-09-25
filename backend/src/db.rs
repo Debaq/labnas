@@ -75,6 +75,22 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
     CREATE INDEX IF NOT EXISTS idx_audit_username ON audit_log(username);",
+    // 3: tareas de respaldo programadas
+    "CREATE TABLE IF NOT EXISTS backup_jobs (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        source TEXT NOT NULL,
+        destination TEXT NOT NULL,
+        hour INTEGER NOT NULL DEFAULT 3,
+        minute INTEGER NOT NULL DEFAULT 0,
+        keep INTEGER NOT NULL DEFAULT 7,
+        include_db INTEGER NOT NULL DEFAULT 1,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_run TEXT,
+        last_status TEXT,
+        last_message TEXT,
+        created_at TEXT NOT NULL
+    );",
 ];
 
 fn run_migrations(conn: &Connection) {

@@ -110,6 +110,13 @@ async fn main() {
         .route("/api/auth/users/{username}", delete(handlers::auth::delete_user))
         .route("/api/auth/link-code", post(handlers::auth::generate_link_code))
         .route("/api/notifications/telegram/chat/{chat_id}/link", post(handlers::auth::admin_link_chat))
+        // Respaldos (admin)
+        .route("/api/backups", get(handlers::backups::list_backups))
+        .route("/api/backups", post(handlers::backups::create_backup))
+        .route("/api/backups/{id}", put(handlers::backups::update_backup))
+        .route("/api/backups/{id}", delete(handlers::backups::delete_backup))
+        .route("/api/backups/{id}/run", post(handlers::backups::run_backup_now))
+        .route("/api/backups/{id}/snapshots", get(handlers::backups::list_snapshots))
         // Auditoria (admin)
         .route("/api/audit", get(handlers::audit::list_audit))
         // Health
@@ -339,6 +346,7 @@ async fn main() {
     tokio::spawn(handlers::notifications::daily_notification_loop(state.clone()));
     tokio::spawn(handlers::system::update_check_loop(state.clone()));
     tokio::spawn(handlers::audit::audit_cleanup_loop(state.clone()));
+    tokio::spawn(handlers::backups::backup_scheduler_loop(state.clone()));
 
     // Background tasks: condicionales por modulo
     {

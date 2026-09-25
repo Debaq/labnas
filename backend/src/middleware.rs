@@ -240,6 +240,9 @@ mod tests {
         assert_eq!(acc(Method::PUT, "/api/files/roots"), Admin);
         assert_eq!(acc(Method::GET, "/api/system/autostart"), Admin);
         assert_eq!(acc(Method::GET, "/api/reports"), Admin);
+        assert_eq!(acc(Method::GET, "/api/backups"), Admin);
+        assert_eq!(acc(Method::POST, "/api/backups/abc/run"), Admin);
+        assert_eq!(acc(Method::GET, "/api/audit"), Admin);
         // ruta inventada: denegada por defecto
         assert_eq!(acc(Method::GET, "/api/nueva/ruta"), Admin);
     }
