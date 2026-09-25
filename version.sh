@@ -30,6 +30,10 @@ sync_version() {
     sed -i "s/^version = \".*\"/version = \"${version}\"/" "$ROOT_DIR/backend/Cargo.toml"
     echo -e "  ${GREEN}✓${NC} backend/Cargo.toml → ${version}"
 
+    # viewer/Cargo.toml
+    sed -i "s/^version = \".*\"/version = \"${version}\"/" "$ROOT_DIR/viewer/Cargo.toml"
+    echo -e "  ${GREEN}✓${NC} viewer/Cargo.toml → ${version}"
+
     # package.json
     sed -i "s/\"version\": \".*\"/\"version\": \"${version}\"/" "$ROOT_DIR/frontend/package.json"
     echo -e "  ${GREEN}✓${NC} frontend/package.json → ${version}"

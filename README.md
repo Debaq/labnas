@@ -336,6 +336,23 @@ cd labnas
 
 Script `version.sh` para bump de versión antes de commit release.
 
+## Visor de escritorio (opcional)
+
+`viewer/` contiene **labnas-viewer**, una ventana nativa (Rust + [wry](https://github.com/tauri-apps/wry), WebKitGTK del sistema) que abre la web UI sin depender de un navegador. Binario de ~800 KB.
+
+```bash
+# Requiere webkit2gtk-4.1 y gtk3 (Arch: sudo pacman -S webkit2gtk-4.1)
+./viewer/install.sh          # compila e instala en ~/.local (binario + .desktop + icono)
+labnas-viewer                # abre http://localhost:3001
+labnas-viewer http://192.168.1.10:3001
+```
+
+- URL: argumento CLI → `LABNAS_URL` → `~/.config/labnas-viewer/url` → `http://localhost:3001`
+- Si el servidor aún no responde, muestra una pantalla de espera y carga sola cuando levanta
+- Sesión persistente (localStorage/cookies en `~/.local/share/labnas-viewer`)
+- Descargas a `~/Descargas` con notificación; enlaces externos se abren con `xdg-open`
+- Atajos: `F5` recargar, `Ctrl+Q` salir
+
 ## Configuración
 
 Config persiste en `~/.labnas/` (SQLite + assets). Override con `LABNAS_CONFIG`.
@@ -417,6 +434,7 @@ labnas/
     themes/              # 4 temas + auto
     auth/                # Contexto auth + hooks permisos
     api/                 # Cliente API tipado
+  viewer/                # Visor de escritorio nativo (wry/WebKitGTK)
   labnas.sh              # Script interactivo dev/build/run
   version.sh             # Bump de versión
   setup-mdns.sh          # Helper mDNS
