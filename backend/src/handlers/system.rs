@@ -678,8 +678,24 @@ pub fn start_mdns_service(hostname: &str) -> Result<mdns_sd::ServiceDaemon, Stri
     mdns.register(service_info)
         .map_err(|e| format!("Error registrando: {}", e))?;
 
+    // Tipo propio para que el visor de escritorio encuentre LabNAS entre otros _http
+    let labnas_info = mdns_sd::ServiceInfo::new(
+        LABNAS_MDNS_TYPE,
+        instance_name,
+        &format!("{}.local.", hostname),
+        local_ip,
+        3001,
+        &[("version", crate::updater::CURRENT_VERSION)][..],
+    )
+    .map_err(|e| format!("Error creando servicio LabNAS: {}", e))?;
+    mdns.register(labnas_info)
+        .map_err(|e| format!("Error registrando servicio LabNAS: {}", e))?;
+
     Ok(mdns)
 }
+
+/// Servicio mDNS que busca el visor de escritorio
+pub const LABNAS_MDNS_TYPE: &str = "_labnas._tcp.local.";
 
 #[cfg(test)]
 mod tests {

@@ -379,7 +379,8 @@ labnas-viewer                # abre http://localhost:3001
 labnas-viewer http://192.168.1.10:3001
 ```
 
-- URL: argumento CLI → `LABNAS_URL` → `~/.config/labnas-viewer/url` → `http://localhost:3001`
+- URL: argumento CLI → `LABNAS_URL` → `~/.config/labnas-viewer/url` → **LabNAS en la red por mDNS** (si el servidor tiene mDNS activo) → `http://localhost:3001`. `labnas-viewer --buscar` muestra el LabNAS encontrado
+- **Icono en la bandeja** (si el escritorio la tiene): cerrar la ventana la oculta y siguen llegando las notificaciones; "Salir" desde la bandeja o `Ctrl+Q` lo cierra
 - Si el servidor aún no responde, muestra una pantalla de espera y carga sola cuando levanta
 - Sesión persistente (localStorage/cookies en `~/.local/share/labnas-viewer`)
 - Descargas a `~/Descargas` con notificación; enlaces externos se abren con `xdg-open`

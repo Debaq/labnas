@@ -3,14 +3,19 @@
 //!
 //! URL a cargar (primera que exista):
 //!   1. argumento CLI:            labnas-viewer http://192.168.1.10:3001
+//!      (`labnas-viewer --buscar` solo muestra el LabNAS encontrado por mDNS)
 //!   2. variable de entorno:      LABNAS_URL
 //!   3. archivo de config:        ~/.config/labnas-viewer/url
-//!   4. por defecto:              http://localhost:3001
+//!   4. LabNAS en la red por mDNS (_labnas._tcp; requiere mDNS activo en el servidor)
+//!   5. por defecto:              http://localhost:3001
+//!
+//! Con bandeja del sistema (libappindicator), cerrar la ventana la oculta y el visor
+//! sigue recibiendo notificaciones; "Salir" desde la bandeja o Ctrl+Q lo cierra.
 
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tao::dpi::LogicalSize;
 use tao::event::{Event, WindowEvent};
@@ -25,7 +30,81 @@ const DEFAULT_URL: &str = "http://localhost:3001";
 
 enum UserEvent {
     ServerReady,
+    Show,
     Quit,
+}
+
+const MDNS_TYPE: &str = "_labnas._tcp.local.";
+const MDNS_TIMEOUT: Duration = Duration::from_millis(2500);
+
+/// Busca un LabNAS en la red local por mDNS
+fn discover_labnas() -> Option<String> {
+    use mdns_sd::{ServiceDaemon, ServiceEvent};
+    let mdns = ServiceDaemon::new().ok()?;
+    let rx = mdns.browse(MDNS_TYPE).ok()?;
+    let deadline = Instant::now() + MDNS_TIMEOUT;
+    let mut found = None;
+    while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+        match rx.recv_timeout(left) {
+            Ok(ServiceEvent::ServiceResolved(info)) => {
+                if let Some(ip) = info.get_addresses_v4().into_iter().next() {
+                    found = Some(format!("http://{}:{}", ip, info.get_port()));
+                    break;
+                }
+            }
+            Ok(_) => continue,
+            Err(_) => break,
+        }
+    }
+    let _ = mdns.shutdown();
+    found
+}
+
+/// Icono de LabNAS (PNG embebido) como RGBA
+fn icon_rgba() -> Option<(Vec<u8>, u32, u32)> {
+    let decoder = png::Decoder::new(std::io::Cursor::new(include_bytes!("../assets/tray.png").as_slice()));
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut buf).ok()?;
+    buf.truncate(info.buffer_size());
+    (info.color_type == png::ColorType::Rgba).then_some((buf, info.width, info.height))
+}
+
+/// Icono en la bandeja con "Abrir" y "Salir". None si el escritorio no tiene bandeja.
+fn build_tray(proxy: &tao::event_loop::EventLoopProxy<UserEvent>) -> Option<tray_icon::TrayIcon> {
+    use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+    let (rgba, w, h) = icon_rgba()?;
+    let icon = tray_icon::Icon::from_rgba(rgba, w, h).ok()?;
+    let open = MenuItem::new("Abrir LabNAS", true, None);
+    let quit = MenuItem::new("Salir", true, None);
+    let menu = Menu::new();
+    menu.append_items(&[&open, &PredefinedMenuItem::separator(), &quit]).ok()?;
+    let (open_id, quit_id) = (open.id().clone(), quit.id().clone());
+
+    let menu_proxy = proxy.clone();
+    MenuEvent::set_event_handler(Some(move |e: MenuEvent| {
+        let ev = if e.id == quit_id { UserEvent::Quit } else if e.id == open_id { UserEvent::Show } else { return };
+        let _ = menu_proxy.send_event(ev);
+    }));
+    let click_proxy = proxy.clone();
+    tray_icon::TrayIconEvent::set_event_handler(Some(move |e: tray_icon::TrayIconEvent| {
+        if matches!(e, tray_icon::TrayIconEvent::Click { .. } | tray_icon::TrayIconEvent::DoubleClick { .. }) {
+            let _ = click_proxy.send_event(UserEvent::Show);
+        }
+    }));
+
+    match tray_icon::TrayIconBuilder::new()
+        .with_icon(icon)
+        .with_tooltip("LabNAS")
+        .with_menu(Box::new(menu))
+        .build()
+    {
+        Ok(t) => Some(t),
+        Err(e) => {
+            eprintln!("[labnas-viewer] sin bandeja del sistema: {e}");
+            None
+        }
+    }
 }
 
 fn resolve_url() -> String {
@@ -42,6 +121,10 @@ fn resolve_url() -> String {
         && let Some(line) = content.lines().map(str::trim).find(|l| !l.is_empty())
     {
         return line.to_string();
+    }
+    if let Some(url) = discover_labnas() {
+        println!("[labnas-viewer] LabNAS encontrado por mDNS: {url}");
+        return url;
     }
     DEFAULT_URL.to_string()
 }
@@ -114,6 +197,18 @@ addEventListener('keydown', (e) => {
 "#;
 
 fn main() -> wry::Result<()> {
+    // Diagnostico: buscar LabNAS en la red y salir
+    if std::env::args().nth(1).as_deref() == Some("--buscar") {
+        match discover_labnas() {
+            Some(url) => println!("{url}"),
+            None => {
+                eprintln!("No se encontro LabNAS por mDNS (¿mDNS activado en Configuracion > Red?)");
+                std::process::exit(1);
+            }
+        }
+        return Ok(());
+    }
+
     let url = resolve_url();
     let addr = server_addr(&url);
 
@@ -126,8 +221,12 @@ fn main() -> wry::Result<()> {
         .with_title("LabNAS")
         .with_inner_size(LogicalSize::new(1280.0, 800.0))
         .with_min_inner_size(LogicalSize::new(480.0, 360.0))
+        .with_window_icon(icon_rgba().and_then(|(rgba, w, h)| tao::window::Icon::from_rgba(rgba, w, h).ok()))
         .build(&event_loop)
         .expect("no se pudo crear la ventana");
+
+    // Debe crearse en el hilo del event loop (gtk); se mantiene vivo hasta salir
+    let tray = build_tray(&proxy);
 
     // Datos persistentes (localStorage con la sesión, cookies, caché)
     let data_dir: Option<PathBuf> = dirs::data_dir().map(|d| d.join("labnas-viewer"));
@@ -188,6 +287,14 @@ fn main() -> wry::Result<()> {
                 if let Err(e) = webview.load_url(&url) {
                     eprintln!("[labnas-viewer] error cargando {url}: {e}");
                 }
+            }
+            Event::UserEvent(UserEvent::Show) => {
+                window.set_visible(true);
+                window.set_focus();
+            }
+            // Con bandeja, cerrar solo oculta (siguen llegando notificaciones)
+            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } if tray.is_some() => {
+                window.set_visible(false);
             }
             Event::UserEvent(UserEvent::Quit)
             | Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
