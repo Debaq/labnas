@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 dirs = "7.0.0"
+serde_json = "1.0.151"
 tao = "0.37.0"
 wry = "0.57.0"
 

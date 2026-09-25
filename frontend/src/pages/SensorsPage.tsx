@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEvent, useEventsConnected } from '../events/useEvents'
 import {
   Thermometer, Wifi, Radio, Battery, BatteryLow, BatteryMedium, BatteryFull, BatteryWarning,
   Signal, SignalLow, SignalMedium, SignalHigh, Plus, Trash2, Check, X, Loader2,
@@ -121,17 +122,29 @@ export default function SensorsPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  // Polling cada 10s
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const [l, r] = await Promise.all([fetchSensorLatest(), fetchReceiverStatus()])
-        setLatest(l)
-        setReceiver(r)
-      } catch {}
-    }, 10000)
-    return () => clearInterval(interval)
+  // Lecturas: el servidor avisa cuando llegan datos nuevos; sin conexion, cada 10 s
+  const liveEvents = useEventsConnected()
+  const refreshLive = useCallback(async () => {
+    try {
+      const [l, r] = await Promise.all([fetchSensorLatest(), fetchReceiverStatus()])
+      setLatest(l)
+      setReceiver(r)
+    } catch {}
   }, [])
+  // Los sensores pueden mandar datos muy seguido: como mucho una recarga cada 2 s
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scheduleRefresh = useCallback(() => {
+    if (refreshTimer.current) return
+    refreshTimer.current = setTimeout(() => { refreshTimer.current = null; refreshLive() }, 2000)
+  }, [refreshLive])
+  useEffect(() => () => { if (refreshTimer.current) clearTimeout(refreshTimer.current) }, [])
+  useEvent('sensors.updated', scheduleRefresh, refreshLive)
+
+  useEffect(() => {
+    if (liveEvents) return
+    const interval = setInterval(refreshLive, 10000)
+    return () => clearInterval(interval)
+  }, [liveEvents, refreshLive])
 
   async function loadChart(deviceId: string, key: string, range: string) {
     const now = new Date()

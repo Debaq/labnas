@@ -599,6 +599,11 @@ pub async fn queue_remove(
 pub async fn current(
     State(state): State<AppState>,
 ) -> Json<MusicState> {
+    Json(snapshot(&state).await)
+}
+
+/// Estado actual con `elapsed` calculado (avanza la cola si mpv termino)
+async fn snapshot(state: &AppState) -> MusicState {
     // Verificar si mpv terminó (solo si hay proceso activo, no si falta el proceso)
     // El monitor loop se encarga del caso sin proceso para evitar race conditions con spawn_player
     let mut player_finished = false;
@@ -613,7 +618,7 @@ pub async fn current(
     }
 
     if player_finished {
-        advance_queue(&state).await;
+        advance_queue(state).await;
     }
 
     let mut ms = state.music.lock().await;
@@ -623,7 +628,28 @@ pub async fn current(
             ms.elapsed = (now_epoch_secs() - started) as u32;
         }
     }
-    Json(ms.clone())
+    ms.clone()
+}
+
+/// Publica "music.state" cuando cambia algo (no por el avance de `elapsed`, que el
+/// frontend cuenta solo). Solo trabaja si hay alguien conectado al bus.
+pub async fn music_events_loop(state: AppState) {
+    let mut last = String::new();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if !state.events.has_interest("music.state") {
+            last.clear();
+            continue;
+        }
+        let ms = snapshot(&state).await;
+        let mut key = ms.clone();
+        key.elapsed = 0;
+        let key = serde_json::to_string(&key).unwrap_or_default();
+        if key != last {
+            last = key;
+            state.events.publish("music.state", &ms, crate::events::Audience::All, Some("music"));
+        }
+    }
 }
 
 /// GET /api/music/history

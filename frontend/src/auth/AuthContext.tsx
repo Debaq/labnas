@@ -20,6 +20,8 @@ interface AuthContextType {
   enabledModules: ModuleInfo[]
   isModuleEnabled: (id: string) => boolean
   refreshModules: () => Promise<void>
+  /** Recarga rol, permisos y modulos desde el servidor */
+  refreshUser: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -162,6 +164,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return mod?.enabled ?? false
   }
 
+  async function refreshUser() {
+    if (!user) return
+    await refreshFromServer(user.token, user).catch(() => {})
+  }
+
   async function refreshModules() {
     if (!user) return
     try {
@@ -178,7 +185,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, can, isAdmin, enabledModules, isModuleEnabled, refreshModules }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, can, isAdmin, enabledModules, isModuleEnabled, refreshModules, refreshUser }}>
       {children}
     </AuthContext.Provider>
   )

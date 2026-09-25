@@ -472,6 +472,17 @@ LabNAS chequea GitHub cada 6h. Cuando hay update:
 - **Rollback manual**: botón "Volver a vX" en Configuración (repetirlo vuelve a la nueva)
 - También permite **reinstalar la versión actual** (archivos corruptos)
 
+## Tiempo real
+
+Cada pestaña mantiene un WebSocket (`/api/live`) con el servidor, que empuja los cambios en vez de que la web consulte cada pocos segundos:
+
+- **Impresoras 3D**: el servidor consulta todas las impresoras en paralelo una sola vez y reparte el estado a todas las pestañas (cada 5 s solo si alguien está mirando esa página; si no, cada 30 s para detectar fin de impresión)
+- **Música**, **sensores** y **respaldos** se actualizan al instante
+- **Notificaciones** en la web y **nativas en el visor de escritorio**: impresión terminada o con error, alerta de sensor, respaldo fallido, usuario pendiente de aprobación, actualización disponible
+- Al aprobar una cuenta pendiente, la sesión del usuario se actualiza sola
+
+Cada conexión recibe solo lo de su rol y de módulos activos. El WebSocket se abre con un ticket de un solo uso (30 s), así el token de sesión nunca viaja en una URL (la terminal web usa el mismo mecanismo). Si la conexión se cae, cada vista vuelve a consultar periódicamente hasta reconectar.
+
 ## Vista previa
 
 Click en un archivo del explorador abre la vista previa: imágenes, video y audio (con adelantar/retroceder), PDF y texto/código (primeros 512 KB). Se sirven con un **link temporal de un solo archivo** (30 min), no con el token de sesión. HTML/XML/JS se muestran como texto y los SVG sin permitir scripts, para que un archivo subido no pueda ejecutar código en LabNAS. Las descargas usan el mismo mecanismo (en streaming, sin cargar el archivo en memoria del navegador).

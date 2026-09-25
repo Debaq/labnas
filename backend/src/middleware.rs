@@ -35,6 +35,9 @@ fn resolve_module_for_path(path: &str) -> Option<&'static str> {
     None
 }
 
+/// WebSockets: se autentican con `?ticket=` (ver events::create_ticket)
+const WS_PATHS: &[&str] = &["/api/terminal", "/api/live"];
+
 /// Rutas sin autenticacion
 fn is_public(path: &str) -> bool {
     matches!(
@@ -78,6 +81,9 @@ pub fn required_access(method: &Method, path: &str) -> Access {
 
         // --- Modulos ---
         ("GET", ["modules"]) => User,
+
+        // --- Eventos en tiempo real ---
+        ("POST", ["live", "ticket"]) | ("GET", ["live"]) => User,
 
         // --- Archivos ---
         ("GET", ["files"]) | ("GET", ["files", "download"]) | ("GET", ["files", "quickaccess"]) => User,
@@ -170,8 +176,8 @@ pub async fn permission_check(
         }
     }
 
-    // Token por header; por query solo para el WebSocket de la terminal
-    // (los navegadores no permiten headers en WebSocket)
+    // Token por header. Los WebSocket (el navegador no permite headers) usan un
+    // ticket de un solo uso: el token de sesion nunca viaja en una URL.
     let token = request
         .headers()
         .get("authorization")
@@ -179,14 +185,14 @@ pub async fn permission_check(
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(|s| s.to_string())
         .or_else(|| {
-            if path != "/api/terminal" {
+            if !WS_PATHS.contains(&path.as_str()) {
                 return None;
             }
-            request.uri().query().and_then(|q| {
-                q.split('&')
-                    .find_map(|p| p.strip_prefix("token="))
-                    .map(|t| t.to_string())
-            })
+            request
+                .uri()
+                .query()
+                .and_then(|q| q.split('&').find_map(|p| p.strip_prefix("ticket=")))
+                .and_then(crate::events::redeem_ticket)
         });
 
     let Some(token) = token else {
@@ -203,9 +209,12 @@ pub async fn permission_check(
         return (StatusCode::UNAUTHORIZED, "Sesion expirada").into_response();
     }
 
-    // Pendiente: solo puede ver su propia cuenta y cerrar sesion
+    request.extensions_mut().insert(crate::events::SessionToken(token.clone()));
+
+    // Pendiente: solo puede ver su propia cuenta, cerrar sesion y escuchar sus
+    // eventos (para enterarse al instante cuando lo aprueban)
     if session.role == UserRole::Pendiente {
-        if matches!(path.as_str(), "/api/auth/me" | "/api/auth/logout") {
+        if matches!(path.as_str(), "/api/auth/me" | "/api/auth/logout" | "/api/live/ticket" | "/api/live") {
             request.extensions_mut().insert(session);
             return next.run(request).await;
         }
@@ -277,5 +286,7 @@ mod tests {
         assert_eq!(acc(Method::POST, "/api/auth/password"), User);
         assert_eq!(acc(Method::POST, "/api/music/play"), User);
         assert_eq!(acc(Method::GET, "/api/terminal"), PermTerminal);
+        assert_eq!(acc(Method::POST, "/api/live/ticket"), User);
+        assert_eq!(acc(Method::GET, "/api/live"), User);
     }
 }

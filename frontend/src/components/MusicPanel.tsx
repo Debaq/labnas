@@ -1,4 +1,5 @@
-import { useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
+import { useEvent, useEventsConnected } from '../events/useEvents'
 import { useNavigate } from 'react-router-dom'
 import {
   Music, Search, Play, Pause, Square, Loader2, X, SkipForward, SkipBack,
@@ -62,24 +63,31 @@ export default function MusicPanel() {
     localStorage.setItem('labnas-music-panel', open ? 'open' : 'closed')
   }, [open])
 
-  // Poll music state (solo actualizar si cambió para no romper inputs en otras paginas)
+  // Estado de musica: en vivo por el bus de eventos; consulta cada 5 s solo sin conexion
+  // (solo actualizar si cambió para no romper inputs en otras paginas)
   const musicStateRef = useRef(JSON.stringify(musicState))
-  useEffect(() => {
-    const update = (ms: MusicState) => {
-      const safe = safeMusicState(ms)
-      const json = JSON.stringify(safe)
-      if (json !== musicStateRef.current) {
-        musicStateRef.current = json
-        setMusicState(safe)
-      }
+  const updateMusic = useCallback((ms: MusicState) => {
+    const safe = safeMusicState(ms)
+    const json = JSON.stringify(safe)
+    if (json !== musicStateRef.current) {
+      musicStateRef.current = json
+      setMusicState(safe)
     }
-    getCurrentMusic().then(update).catch(() => {})
-    fetchPlaylists().then(setPlaylists).catch(() => {})
-    const interval = setInterval(() => {
-      getCurrentMusic().then(update).catch(() => {})
-    }, 5000)
-    return () => clearInterval(interval)
   }, [])
+  const pollMusic = useCallback(() => { getCurrentMusic().then(updateMusic).catch(() => {}) }, [updateMusic])
+  const liveEvents = useEventsConnected()
+  useEvent<MusicState>('music.state', updateMusic, pollMusic)
+
+  useEffect(() => {
+    pollMusic()
+    fetchPlaylists().then(setPlaylists).catch(() => {})
+  }, [pollMusic])
+
+  useEffect(() => {
+    if (liveEvents) return
+    const interval = setInterval(pollMusic, 5000)
+    return () => clearInterval(interval)
+  }, [liveEvents, pollMusic])
 
   // Sincronizar volumen local con el del servidor (solo si no estamos arrastrando)
   useEffect(() => {

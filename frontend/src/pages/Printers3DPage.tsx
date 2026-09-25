@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEvent, useEventsConnected } from '../events/useEvents'
 import { useNavigate } from 'react-router-dom'
 import {
   Box,
@@ -468,27 +469,36 @@ export default function Printers3DPage() {
     loadPrinters()
   }, [loadPrinters])
 
-  // Polling de estados cada 5 segundos
-  useEffect(() => {
+  // Estados: en vivo por el bus (el servidor consulta una vez para todas las pestañas);
+  // consulta directa cada 5 s solo sin conexion
+  const liveEvents = useEventsConnected()
+  const fetchAllStatuses = useCallback(async () => {
     if (printers.length === 0) return
+    const results: Record<string, Printer3DStatus> = {}
+    await Promise.allSettled(
+      printers.map(async (p) => {
+        try {
+          const status = await fetchPrinter3DStatus(p.id)
+          results[p.id] = status
+        } catch { /* skip */ }
+      })
+    )
+    setStatuses((prev) => ({ ...prev, ...results }))
+  }, [printers])
 
-    const fetchAllStatuses = async () => {
-      const results: Record<string, Printer3DStatus> = {}
-      await Promise.allSettled(
-        printers.map(async (p) => {
-          try {
-            const status = await fetchPrinter3DStatus(p.id)
-            results[p.id] = status
-          } catch { /* skip */ }
-        })
-      )
-      setStatuses((prev) => ({ ...prev, ...results }))
-    }
+  useEvent<Record<string, Printer3DStatus>>(
+    'printers3d.status',
+    (map) => setStatuses((prev) => ({ ...prev, ...map })),
+    fetchAllStatuses,
+  )
 
-    fetchAllStatuses()
+  useEffect(() => { fetchAllStatuses() }, [fetchAllStatuses])
+
+  useEffect(() => {
+    if (liveEvents || printers.length === 0) return
     const interval = setInterval(fetchAllStatuses, 5000)
     return () => clearInterval(interval)
-  }, [printers])
+  }, [liveEvents, printers, fetchAllStatuses])
 
   // Feedback temporal
   function showFeedback(printerId: string, message: string) {

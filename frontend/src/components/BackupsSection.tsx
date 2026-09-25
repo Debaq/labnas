@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useEvent, useEventsConnected } from '../events/useEvents'
 import { Archive, Plus, Play, Pencil, Trash2, Loader2, AlertTriangle, CheckCircle2, XCircle, Database, X } from 'lucide-react'
 import { fetchBackups, saveBackup, deleteBackup, runBackup, fetchBackupSnapshots, type BackupJob, type BackupJobInput, type BackupsInfo } from '../api'
 
@@ -41,13 +42,15 @@ export default function BackupsSection() {
 
   useEffect(() => { load() }, [load])
 
-  // Refrescar mientras haya alguno ejecutandose
+  // Estado en vivo por el bus; sin conexion, refrescar mientras haya alguno ejecutandose
+  const liveEvents = useEventsConnected()
+  useEvent('backup.updated', load, load)
   const anyRunning = info?.jobs.some((j) => j.running || j.last_status === 'running') ?? false
   useEffect(() => {
-    if (!anyRunning) return
+    if (!anyRunning || liveEvents) return
     const t = setInterval(load, 3000)
     return () => clearInterval(t)
-  }, [anyRunning, load])
+  }, [anyRunning, liveEvents, load])
 
   async function submit() {
     if (!editing) return

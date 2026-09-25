@@ -1,5 +1,6 @@
 mod config;
 mod db;
+mod events;
 mod handlers;
 mod middleware;
 mod models;
@@ -76,6 +77,7 @@ async fn main() {
         enabled_modules: Arc::new(Mutex::new(enabled_modules_set)),
         login_failures: Arc::new(Mutex::new(std::collections::HashMap::new())),
         restart_requested: restart_requested.clone(),
+        events: events::EventBus::default(),
     };
 
     // Start mDNS if enabled
@@ -95,7 +97,254 @@ async fn main() {
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
         .allow_headers(Any);
 
-    let api = Router::new()
+    let api = api_routes()
+        .layer(axum::extract::DefaultBodyLimit::max(upload_limit_mb as usize * 1024 * 1024))
+        .layer(axum_mw::from_fn_with_state(state.clone(), middleware::permission_check))
+        .layer(cors)
+        .with_state(state.clone());
+
+    // Background tasks: siempre activas (infraestructura)
+    tokio::spawn(handlers::notifications::telegram_bot_loop(state.clone()));
+    tokio::spawn(handlers::notifications::task_reminder_loop(state.clone()));
+    tokio::spawn(handlers::notifications::daily_notification_loop(state.clone()));
+    tokio::spawn(handlers::system::update_check_loop(state.clone()));
+    tokio::spawn(handlers::audit::audit_cleanup_loop(state.clone()));
+    tokio::spawn(handlers::backups::backup_scheduler_loop(state.clone()));
+    tokio::spawn(handlers::trash::trash_cleanup_loop(state.clone()));
+
+    // Background tasks: condicionales por modulo
+    {
+        let mods = state.enabled_modules.lock().await;
+        if mods.contains("email") {
+            tokio::spawn(handlers::email::email_check_loop(state.clone()));
+        }
+        if mods.contains("printers3d") {
+            tokio::spawn(handlers::printers3d::printer_monitor_loop(state.clone()));
+        }
+        if mods.contains("music") {
+            tokio::spawn(handlers::music::ensure_x_access());
+            tokio::spawn(handlers::music::music_monitor_loop(state.clone()));
+            tokio::spawn(handlers::music::music_events_loop(state.clone()));
+        }
+        if mods.contains("sensors") {
+            tokio::spawn(handlers::sensors::serial_listener_loop(state.clone()));
+            tokio::spawn(handlers::sensors::sensor_monitor_loop(state.clone()));
+        }
+        if mods.contains("network") {
+            tokio::spawn(handlers::network::network_scan_loop(state.clone()));
+        }
+    }
+
+    // Static files
+    let exe_dir = updater::install_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+    let static_dir = std::env::var("LABNAS_STATIC")
+        .map(PathBuf::from)
+        .ok()
+        .or_else(|| {
+            let candidates = [
+                exe_dir.join("dist"),
+                exe_dir.join("../frontend/dist"),
+                PathBuf::from("../frontend/dist"),
+                PathBuf::from("frontend/dist"),
+            ];
+            candidates
+                .into_iter()
+                .find(|p| p.join("index.html").exists())
+        });
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], 3001));
+
+    let app = if let Some(static_path) = static_dir {
+        let static_path = std::fs::canonicalize(&static_path).unwrap_or(static_path);
+        println!("Sirviendo frontend desde: {}", static_path.display());
+        let index = static_path.join("index.html");
+        let serve_dir = ServeDir::new(&static_path).not_found_service(ServeFile::new(&index));
+        api.fallback_service(serve_dir)
+    } else {
+        println!("No se encontro directorio de frontend estatico.");
+        println!("  Usa LABNAS_STATIC=/ruta/a/dist o ejecuta en modo desarrollo.");
+        api
+    };
+
+    let local_ip = local_ip_address::local_ip()
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|_| "0.0.0.0".to_string());
+
+    // Check firewall
+    check_firewall().await;
+
+    // Check Tailscale
+    let tailscale_ip = check_tailscale().await;
+
+    println!("LabNAS corriendo en:");
+    println!("  Local:  http://localhost:3001");
+    println!("  Red:    http://{}:3001", local_ip);
+
+    // Try to also listen on port 80 (requires root/sudo)
+    let has_port_80 = match tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], 80))).await {
+        Ok(listener_80) => {
+            let app_80 = app.clone();
+            let shutdown_80 = shutdown.clone();
+            tokio::spawn(async move {
+                axum::serve(listener_80, app_80)
+                    .with_graceful_shutdown(async move { shutdown_80.cancelled().await; })
+                    .await
+                    .ok();
+            });
+            println!("  \x1b[32mWeb:    http://{}\x1b[0m (puerto 80)", local_ip);
+            true
+        }
+        Err(_) => {
+            println!("  \x1b[33m(Puerto 80 no disponible - ejecuta con sudo para habilitarlo)\x1b[0m");
+            false
+        }
+    };
+
+    if mdns_enabled {
+        if has_port_80 {
+            println!("  \x1b[32mLocal:  http://{}.local\x1b[0m", mdns_hostname);
+        } else {
+            println!("  Local:  http://{}.local:3001", mdns_hostname);
+        }
+    }
+    if let Some(ref ts_ip) = tailscale_ip {
+        println!("  \x1b[32mRemoto: http://{}:3001 (Tailscale)\x1b[0m", ts_ip);
+    }
+
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+
+    // Si esta version viene de una actualizacion, confirmarla tras mantenerse viva
+    tokio::spawn(async {
+        tokio::time::sleep(updater::CONFIRM_AFTER).await;
+        updater::confirm_update();
+    });
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            shutdown.cancelled().await;
+            println!("LabNAS apagandose...");
+        })
+        .await
+        .unwrap();
+
+    if restart_requested.load(std::sync::atomic::Ordering::SeqCst) {
+        restart_self();
+    }
+}
+
+/// Re-ejecuta el binario (tras una actualizacion). Los sockets se cierran solos (CLOEXEC).
+fn restart_self() {
+    use std::os::unix::process::CommandExt;
+    let Ok(exe) = updater::exe_path() else {
+        eprintln!("[LabNAS] No se pudo determinar el ejecutable para reiniciar");
+        std::process::exit(1);
+    };
+    println!("[LabNAS] Reiniciando {}...", exe.display());
+    let err = std::process::Command::new(&exe)
+        .args(std::env::args_os().skip(1))
+        .exec();
+    eprintln!("[LabNAS] Error al reiniciar: {}", err);
+
+    // El binario nuevo no se pudo ejecutar: volver al anterior e intentar de nuevo
+    if updater::swap_rollback().is_ok() {
+        let err = std::process::Command::new(&exe)
+            .args(std::env::args_os().skip(1))
+            .exec();
+        eprintln!("[LabNAS] Error al reiniciar la version anterior: {}", err);
+    }
+    std::process::exit(1);
+}
+
+fn warn_if_root() {
+    // SAFETY: geteuid no tiene precondiciones
+    if unsafe { libc::geteuid() } == 0 {
+        println!("\x1b[33m⚠ LabNAS esta corriendo como root.\x1b[0m");
+        println!("  Se recomienda correrlo como un usuario normal (ver README: servicio systemd).");
+        println!("  Como root, cualquier fallo en la app expone el sistema completo.\n");
+    }
+}
+
+async fn check_tailscale() -> Option<String> {
+    let output = tokio::process::Command::new("tailscale")
+        .args(["ip", "-4"])
+        .output()
+        .await
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if ip.is_empty() {
+        println!("\n  \x1b[33mTailscale instalado pero no conectado.\x1b[0m");
+        println!("  \x1b[36mEjecuta: sudo tailscale up\x1b[0m\n");
+        return None;
+    }
+
+    println!("\n  \x1b[32m✓ Tailscale activo: {}\x1b[0m", ip);
+    Some(ip)
+}
+
+async fn check_firewall() {
+    // Check if ufw is active
+    let Ok(output) = tokio::process::Command::new("ufw")
+        .arg("status")
+        .output()
+        .await
+    else {
+        return; // ufw not installed, no problem
+    };
+
+    let text = String::from_utf8_lossy(&output.stdout).to_string();
+    if !text.contains("Status: active") {
+        return; // ufw inactive
+    }
+
+    let needs_3001 = !text.contains("3001");
+    let needs_80 = !text.contains("80/tcp") && !text.contains(" 80 ");
+
+    if !needs_3001 && !needs_80 {
+        return;
+    }
+
+    println!("\n  \x1b[33m⚠ FIREWALL: ufw esta activo, abriendo puertos necesarios...\x1b[0m");
+
+    // Try to open automatically if running as root
+    if std::env::var("USER").unwrap_or_default() == "root"
+        || std::env::var("SUDO_USER").is_ok()
+    {
+        if needs_3001 {
+            let result = tokio::process::Command::new("ufw")
+                .args(["allow", "3001"])
+                .output()
+                .await;
+            match result {
+                Ok(out) if out.status.success() => println!("  \x1b[32m✓ Puerto 3001 abierto\x1b[0m"),
+                _ => println!("  \x1b[31m✗ No se pudo abrir 3001\x1b[0m"),
+            }
+        }
+        if needs_80 {
+            let result = tokio::process::Command::new("ufw")
+                .args(["allow", "80"])
+                .output()
+                .await;
+            match result {
+                Ok(out) if out.status.success() => println!("  \x1b[32m✓ Puerto 80 abierto\x1b[0m"),
+                _ => println!("  \x1b[31m✗ No se pudo abrir 80\x1b[0m"),
+            }
+        }
+        println!();
+        return;
+    }
+
+    println!("  \x1b[36m  Ejecuta: sudo ufw allow 3001 && sudo ufw allow 80\x1b[0m\n");
+}
+
+/// Todas las rutas de la API (sin estado ni capas). `Router::route` hace panic ante
+/// rutas duplicadas; el test `rutas_sin_conflictos` lo detecta en CI.
+fn api_routes() -> Router<AppState> {
+    Router::new()
         // Auth
         .route("/api/auth/has-users", get(handlers::auth::has_users))
         .route("/api/auth/register", post(handlers::auth::register))
@@ -110,6 +359,9 @@ async fn main() {
         .route("/api/auth/users/{username}", delete(handlers::auth::delete_user))
         .route("/api/auth/link-code", post(handlers::auth::generate_link_code))
         .route("/api/notifications/telegram/chat/{chat_id}/link", post(handlers::auth::admin_link_chat))
+        // Eventos en tiempo real
+        .route("/api/live/ticket", post(events::create_ticket))
+        .route("/api/live", get(events::events_ws))
         // Respaldos (admin)
         .route("/api/backups", get(handlers::backups::list_backups))
         .route("/api/backups", post(handlers::backups::create_backup))
@@ -342,244 +594,12 @@ async fn main() {
         .route("/api/sensors/alerts/{id}", delete(handlers::sensors::delete_alert))
         .route("/api/sensors/receiver/config", post(handlers::sensors::configure_receiver))
         .route("/api/sensors/receiver/status", get(handlers::sensors::receiver_status))
-        .layer(axum::extract::DefaultBodyLimit::max(upload_limit_mb as usize * 1024 * 1024))
-        .layer(axum_mw::from_fn_with_state(state.clone(), middleware::permission_check))
-        .layer(cors)
-        .with_state(state.clone());
-
-    // Background tasks: siempre activas (infraestructura)
-    tokio::spawn(handlers::notifications::telegram_bot_loop(state.clone()));
-    tokio::spawn(handlers::notifications::task_reminder_loop(state.clone()));
-    tokio::spawn(handlers::notifications::daily_notification_loop(state.clone()));
-    tokio::spawn(handlers::system::update_check_loop(state.clone()));
-    tokio::spawn(handlers::audit::audit_cleanup_loop(state.clone()));
-    tokio::spawn(handlers::backups::backup_scheduler_loop(state.clone()));
-    tokio::spawn(handlers::trash::trash_cleanup_loop(state.clone()));
-
-    // Background tasks: condicionales por modulo
-    {
-        let mods = state.enabled_modules.lock().await;
-        if mods.contains("email") {
-            tokio::spawn(handlers::email::email_check_loop(state.clone()));
-        }
-        if mods.contains("printers3d") {
-            tokio::spawn(handlers::printers3d::printer_monitor_loop(state.clone()));
-        }
-        if mods.contains("music") {
-            tokio::spawn(handlers::music::ensure_x_access());
-            tokio::spawn(handlers::music::music_monitor_loop(state.clone()));
-        }
-        if mods.contains("sensors") {
-            tokio::spawn(handlers::sensors::serial_listener_loop(state.clone()));
-            tokio::spawn(handlers::sensors::sensor_monitor_loop(state.clone()));
-        }
-        if mods.contains("network") {
-            tokio::spawn(handlers::network::network_scan_loop(state.clone()));
-        }
-    }
-
-    // Static files
-    let exe_dir = updater::install_dir().unwrap_or_else(|_| PathBuf::from("."));
-
-    let static_dir = std::env::var("LABNAS_STATIC")
-        .map(PathBuf::from)
-        .ok()
-        .or_else(|| {
-            let candidates = [
-                exe_dir.join("dist"),
-                exe_dir.join("../frontend/dist"),
-                PathBuf::from("../frontend/dist"),
-                PathBuf::from("frontend/dist"),
-            ];
-            candidates
-                .into_iter()
-                .find(|p| p.join("index.html").exists())
-        });
-
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3001));
-
-    let app = if let Some(static_path) = static_dir {
-        let static_path = std::fs::canonicalize(&static_path).unwrap_or(static_path);
-        println!("Sirviendo frontend desde: {}", static_path.display());
-        let index = static_path.join("index.html");
-        let serve_dir = ServeDir::new(&static_path).not_found_service(ServeFile::new(&index));
-        api.fallback_service(serve_dir)
-    } else {
-        println!("No se encontro directorio de frontend estatico.");
-        println!("  Usa LABNAS_STATIC=/ruta/a/dist o ejecuta en modo desarrollo.");
-        api
-    };
-
-    let local_ip = local_ip_address::local_ip()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|_| "0.0.0.0".to_string());
-
-    // Check firewall
-    check_firewall().await;
-
-    // Check Tailscale
-    let tailscale_ip = check_tailscale().await;
-
-    println!("LabNAS corriendo en:");
-    println!("  Local:  http://localhost:3001");
-    println!("  Red:    http://{}:3001", local_ip);
-
-    // Try to also listen on port 80 (requires root/sudo)
-    let has_port_80 = match tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], 80))).await {
-        Ok(listener_80) => {
-            let app_80 = app.clone();
-            let shutdown_80 = shutdown.clone();
-            tokio::spawn(async move {
-                axum::serve(listener_80, app_80)
-                    .with_graceful_shutdown(async move { shutdown_80.cancelled().await; })
-                    .await
-                    .ok();
-            });
-            println!("  \x1b[32mWeb:    http://{}\x1b[0m (puerto 80)", local_ip);
-            true
-        }
-        Err(_) => {
-            println!("  \x1b[33m(Puerto 80 no disponible - ejecuta con sudo para habilitarlo)\x1b[0m");
-            false
-        }
-    };
-
-    if mdns_enabled {
-        if has_port_80 {
-            println!("  \x1b[32mLocal:  http://{}.local\x1b[0m", mdns_hostname);
-        } else {
-            println!("  Local:  http://{}.local:3001", mdns_hostname);
-        }
-    }
-    if let Some(ref ts_ip) = tailscale_ip {
-        println!("  \x1b[32mRemoto: http://{}:3001 (Tailscale)\x1b[0m", ts_ip);
-    }
-
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-
-    // Si esta version viene de una actualizacion, confirmarla tras mantenerse viva
-    tokio::spawn(async {
-        tokio::time::sleep(updater::CONFIRM_AFTER).await;
-        updater::confirm_update();
-    });
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            shutdown.cancelled().await;
-            println!("LabNAS apagandose...");
-        })
-        .await
-        .unwrap();
-
-    if restart_requested.load(std::sync::atomic::Ordering::SeqCst) {
-        restart_self();
-    }
 }
 
-/// Re-ejecuta el binario (tras una actualizacion). Los sockets se cierran solos (CLOEXEC).
-fn restart_self() {
-    use std::os::unix::process::CommandExt;
-    let Ok(exe) = updater::exe_path() else {
-        eprintln!("[LabNAS] No se pudo determinar el ejecutable para reiniciar");
-        std::process::exit(1);
-    };
-    println!("[LabNAS] Reiniciando {}...", exe.display());
-    let err = std::process::Command::new(&exe)
-        .args(std::env::args_os().skip(1))
-        .exec();
-    eprintln!("[LabNAS] Error al reiniciar: {}", err);
-
-    // El binario nuevo no se pudo ejecutar: volver al anterior e intentar de nuevo
-    if updater::swap_rollback().is_ok() {
-        let err = std::process::Command::new(&exe)
-            .args(std::env::args_os().skip(1))
-            .exec();
-        eprintln!("[LabNAS] Error al reiniciar la version anterior: {}", err);
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn rutas_sin_conflictos() {
+        let _ = super::api_routes();
     }
-    std::process::exit(1);
-}
-
-fn warn_if_root() {
-    // SAFETY: geteuid no tiene precondiciones
-    if unsafe { libc::geteuid() } == 0 {
-        println!("\x1b[33m⚠ LabNAS esta corriendo como root.\x1b[0m");
-        println!("  Se recomienda correrlo como un usuario normal (ver README: servicio systemd).");
-        println!("  Como root, cualquier fallo en la app expone el sistema completo.\n");
-    }
-}
-
-async fn check_tailscale() -> Option<String> {
-    let output = tokio::process::Command::new("tailscale")
-        .args(["ip", "-4"])
-        .output()
-        .await
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if ip.is_empty() {
-        println!("\n  \x1b[33mTailscale instalado pero no conectado.\x1b[0m");
-        println!("  \x1b[36mEjecuta: sudo tailscale up\x1b[0m\n");
-        return None;
-    }
-
-    println!("\n  \x1b[32m✓ Tailscale activo: {}\x1b[0m", ip);
-    Some(ip)
-}
-
-async fn check_firewall() {
-    // Check if ufw is active
-    let Ok(output) = tokio::process::Command::new("ufw")
-        .arg("status")
-        .output()
-        .await
-    else {
-        return; // ufw not installed, no problem
-    };
-
-    let text = String::from_utf8_lossy(&output.stdout).to_string();
-    if !text.contains("Status: active") {
-        return; // ufw inactive
-    }
-
-    let needs_3001 = !text.contains("3001");
-    let needs_80 = !text.contains("80/tcp") && !text.contains(" 80 ");
-
-    if !needs_3001 && !needs_80 {
-        return;
-    }
-
-    println!("\n  \x1b[33m⚠ FIREWALL: ufw esta activo, abriendo puertos necesarios...\x1b[0m");
-
-    // Try to open automatically if running as root
-    if std::env::var("USER").unwrap_or_default() == "root"
-        || std::env::var("SUDO_USER").is_ok()
-    {
-        if needs_3001 {
-            let result = tokio::process::Command::new("ufw")
-                .args(["allow", "3001"])
-                .output()
-                .await;
-            match result {
-                Ok(out) if out.status.success() => println!("  \x1b[32m✓ Puerto 3001 abierto\x1b[0m"),
-                _ => println!("  \x1b[31m✗ No se pudo abrir 3001\x1b[0m"),
-            }
-        }
-        if needs_80 {
-            let result = tokio::process::Command::new("ufw")
-                .args(["allow", "80"])
-                .output()
-                .await;
-            match result {
-                Ok(out) if out.status.success() => println!("  \x1b[32m✓ Puerto 80 abierto\x1b[0m"),
-                _ => println!("  \x1b[31m✗ No se pudo abrir 80\x1b[0m"),
-            }
-        }
-        println!();
-        return;
-    }
-
-    println!("  \x1b[36m  Ejecuta: sudo ufw allow 3001 && sudo ufw allow 80\x1b[0m\n");
 }

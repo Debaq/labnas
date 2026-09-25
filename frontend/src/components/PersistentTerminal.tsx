@@ -5,6 +5,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { RotateCcw } from 'lucide-react'
 import '@xterm/xterm/css/xterm.css'
+import { createWsTicket } from '../api'
 
 export default function PersistentTerminal() {
   const location = useLocation()
@@ -70,56 +71,59 @@ export default function PersistentTerminal() {
     setTimeout(() => fitAddon.fit(), 50)
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    let wsUrl = `${protocol}//${window.location.host}/api/terminal`
-    try {
-      const saved = localStorage.getItem('labnas_auth')
-      if (saved) {
-        const { token } = JSON.parse(saved)
-        if (token) wsUrl += `?token=${encodeURIComponent(token)}`
-      }
-    } catch {}
-    const ws = new WebSocket(wsUrl)
-    ws.binaryType = 'arraybuffer'
-    wsRef.current = ws
+    const baseUrl = `${protocol}//${window.location.host}/api/terminal`
 
-    ws.onopen = () => {
-      setTimeout(() => {
-        fitAddon.fit()
-        ws.send('\x01' + JSON.stringify({ cols: term.cols, rows: term.rows }))
-        if (pendingCmd) {
-          setTimeout(() => ws.send(pendingCmd + '\n'), 300)
-          window.history.replaceState({}, document.title)
+    // Ticket de un solo uso: el token de sesion no va en la URL del WebSocket
+    const connect = (ticket: string) => {
+      const ws = new WebSocket(`${baseUrl}?ticket=${encodeURIComponent(ticket)}`)
+      ws.binaryType = 'arraybuffer'
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        setTimeout(() => {
+          fitAddon.fit()
+          ws.send('\x01' + JSON.stringify({ cols: term.cols, rows: term.rows }))
+          if (pendingCmd) {
+            setTimeout(() => ws.send(pendingCmd + '\n'), 300)
+            window.history.replaceState({}, document.title)
+          }
+        }, 100)
+      }
+
+      ws.onmessage = (event) => {
+        if (event.data instanceof ArrayBuffer) {
+          term.write(new Uint8Array(event.data))
+        } else {
+          term.write(event.data)
         }
-      }, 100)
-    }
+      }
 
-    ws.onmessage = (event) => {
-      if (event.data instanceof ArrayBuffer) {
-        term.write(new Uint8Array(event.data))
-      } else {
-        term.write(event.data)
+      ws.onerror = () => {
+        term.write('\r\n\x1b[1;31m[Error de conexion]\x1b[0m\r\n')
+      }
+
+      ws.onclose = () => {
+        term.write('\r\n\x1b[1;31m[Conexion cerrada]\x1b[0m\r\n')
+        // Permitir reinicializar si se cierra la conexion
+        setInitialized(false)
+        termRef.current = null
+        wsRef.current = null
+        fitRef.current = null
       }
     }
 
-    ws.onerror = () => {
-      term.write('\r\n\x1b[1;31m[Error de conexion]\x1b[0m\r\n')
-    }
-
-    ws.onclose = () => {
-      term.write('\r\n\x1b[1;31m[Conexion cerrada]\x1b[0m\r\n')
-      // Permitir reinicializar si se cierra la conexion
-      setInitialized(false)
-      termRef.current = null
-      wsRef.current = null
-      fitRef.current = null
-    }
+    createWsTicket()
+      .then(connect)
+      .catch(() => term.write('\r\n\x1b[1;31m[No se pudo autenticar la terminal]\x1b[0m\r\n'))
 
     term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(data)
+      const ws = wsRef.current
+      if (ws?.readyState === WebSocket.OPEN) ws.send(data)
     })
 
     term.onBinary((data) => {
-      if (ws.readyState === WebSocket.OPEN) {
+      const ws = wsRef.current
+      if (ws?.readyState === WebSocket.OPEN) {
         const buf = new Uint8Array(data.length)
         for (let i = 0; i < data.length; i++) buf[i] = data.charCodeAt(i) & 255
         ws.send(buf)
@@ -127,7 +131,8 @@ export default function PersistentTerminal() {
     })
 
     term.onResize(({ cols, rows }) => {
-      if (ws.readyState === WebSocket.OPEN) {
+      const ws = wsRef.current
+      if (ws?.readyState === WebSocket.OPEN) {
         ws.send('\x01' + JSON.stringify({ cols, rows }))
       }
     })

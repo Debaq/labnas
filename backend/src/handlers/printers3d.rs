@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use rusqlite::params;
 
-use crate::db::{db_op, db_op_status, get_conn};
+use crate::db::{db_op, db_op_status};
 use crate::models::printers3d::*;
 use crate::state::AppState;
 
@@ -689,14 +689,19 @@ pub async fn printer_status(
     Path(id): Path<String>,
 ) -> Result<Json<Printer3DStatus>, (StatusCode, String)> {
     let printer = find_printer(&state, &id).await?;
-    let client = &state.http_client;
-    let base = printer_base(&printer);
+    fetch_status(&state.http_client, &printer).await
+}
 
+async fn fetch_status(
+    client: &reqwest::Client,
+    printer: &Printer3DConfig,
+) -> Result<Json<Printer3DStatus>, (StatusCode, String)> {
+    let base = printer_base(printer);
     match printer.printer_type {
-        Printer3DType::OctoPrint => fetch_octoprint_status(client, &base, &printer).await,
-        Printer3DType::Moonraker => fetch_moonraker_status(client, &base, &printer).await,
-        Printer3DType::CrealityStock => fetch_creality_status(&printer.ip, &printer).await,
-        Printer3DType::FlashForge => fetch_flashforge_status(&printer.ip, &printer).await,
+        Printer3DType::OctoPrint => fetch_octoprint_status(client, &base, printer).await,
+        Printer3DType::Moonraker => fetch_moonraker_status(client, &base, printer).await,
+        Printer3DType::CrealityStock => fetch_creality_status(&printer.ip, printer).await,
+        Printer3DType::FlashForge => fetch_flashforge_status(&printer.ip, printer).await,
     }
 }
 
@@ -2124,164 +2129,98 @@ struct PrinterMonitorState {
     start_time: Option<std::time::Instant>,
 }
 
+/// Consulta todas las impresoras (en paralelo): cada 5 s si hay alguien conectado al
+/// bus de eventos (publica "printers3d.status"), si no cada 30 s solo para detectar
+/// fin de impresion / error y notificar (UI + Telegram).
 pub async fn printer_monitor_loop(state: AppState) {
+    const LIVE_EVERY: Duration = Duration::from_secs(5);
+    const IDLE_EVERY: Duration = Duration::from_secs(30);
+
     let mut printer_states: std::collections::HashMap<String, PrinterMonitorState> =
         std::collections::HashMap::new();
+    let mut last_poll: Option<std::time::Instant> = None;
 
     loop {
-        tokio::time::sleep(Duration::from_secs(30)).await;
+        tokio::time::sleep(LIVE_EVERY).await;
 
-        let conn = match get_conn(&state.db) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
+        let live = state.events.has_interest("printers3d.status");
+        if !live && last_poll.is_some_and(|t| t.elapsed() < IDLE_EVERY) {
+            continue;
+        }
+        last_poll = Some(std::time::Instant::now());
 
-        // Read printers from DB
-        let printers: Vec<Printer3DConfig> = match (|| -> Result<Vec<Printer3DConfig>, rusqlite::Error> {
-            let mut stmt = conn.prepare(
-                "SELECT id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d"
-            )?;
-            let rows = stmt.query_map([], row_to_printer)?;
+        let printers: Vec<Printer3DConfig> = match db_op(&state.db, |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt.query_map([], row_to_printer).map_err(|e| e.to_string())?;
             Ok(rows.filter_map(|r| r.ok()).collect())
-        })() {
+        })
+        .await
+        {
             Ok(p) => p,
             Err(_) => continue,
         };
-
-        // Read notification config from DB
-        let token: Option<String> = conn.query_row(
-            "SELECT bot_token FROM notification_config WHERE id = 1",
-            [],
-            |row| row.get(0),
-        ).ok().flatten();
-
-        let Some(token) = token else {
-            continue;
-        };
-
-        let chats: Vec<crate::models::notifications::TelegramChat> = match (|| -> Result<Vec<crate::models::notifications::TelegramChat>, rusqlite::Error> {
-            let mut stmt = conn.prepare("SELECT chat_id, name, username, role FROM telegram_chats")?;
-            let rows = stmt.query_map([], |row| {
-                let role_str: String = row.get(3)?;
-                let role = match role_str.as_str() {
-                    "admin" => crate::models::notifications::UserRole::Admin,
-                    "operador" => crate::models::notifications::UserRole::Operador,
-                    "observador" => crate::models::notifications::UserRole::Observador,
-                    _ => crate::models::notifications::UserRole::Pendiente,
-                };
-                Ok(crate::models::notifications::TelegramChat {
-                    chat_id: row.get(0)?,
-                    name: row.get(1)?,
-                    username: row.get(2)?,
-                    role,
-                    permissions: Default::default(),
-                    linked_web_user: None,
-                    daily_enabled: false,
-                    daily_hour: 8,
-                    daily_minute: 0,
-                })
-            })?;
-            Ok(rows.filter_map(|r| r.ok()).collect())
-        })() {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-
-        drop(conn);
-
-        if chats.is_empty() || printers.is_empty() {
+        if printers.is_empty() {
             continue;
         }
 
-        for printer in &printers {
-            let client = &state.http_client;
-            let base = printer_base(printer);
+        let client = &state.http_client;
+        let results: Vec<Option<Printer3DStatus>> = futures_util::future::join_all(
+            printers.iter().map(|p| async move { fetch_status(client, p).await.ok().map(|Json(s)| s) }),
+        )
+        .await;
 
-            // Obtener estado actual
-            let status = match printer.printer_type {
-                Printer3DType::OctoPrint => {
-                    fetch_octoprint_status(client, &base, printer).await
-                }
-                Printer3DType::Moonraker => {
-                    fetch_moonraker_status(client, &base, printer).await
-                }
-                Printer3DType::CrealityStock => {
-                    fetch_creality_status(&printer.ip, printer).await
-                }
-                Printer3DType::FlashForge => {
-                    fetch_flashforge_status(&printer.ip, printer).await
-                }
-            };
+        if live {
+            let map: std::collections::HashMap<&str, &Printer3DStatus> = printers
+                .iter()
+                .zip(results.iter())
+                .filter_map(|(p, s)| s.as_ref().map(|s| (p.id.as_str(), s)))
+                .collect();
+            state.events.publish("printers3d.status", &map, crate::events::Audience::All, Some("printers3d"));
+        }
 
-            let Ok(Json(status)) = status else {
-                continue;
-            };
-
+        for (printer, status) in printers.iter().zip(results.into_iter()) {
+            let Some(status) = status else { continue };
             if !status.online {
                 continue;
             }
 
-            let is_printing = status
-                .current_job
-                .as_ref()
-                .map(|j| {
-                    let s = j.state.to_lowercase();
-                    s.contains("printing") || s == "printing"
-                })
-                .unwrap_or(false);
-
-            let file_name = status
-                .current_job
-                .as_ref()
-                .map(|j| j.file_name.clone())
-                .unwrap_or_default();
-
-            let has_error = status
-                .current_job
-                .as_ref()
-                .map(|j| {
-                    let s = j.state.to_lowercase();
-                    s.contains("error")
-                })
-                .unwrap_or(false);
+            let job_state = status.current_job.as_ref().map(|j| j.state.to_lowercase()).unwrap_or_default();
+            let is_printing = job_state.contains("printing");
+            let has_error = job_state.contains("error");
+            let file_name = status.current_job.as_ref().map(|j| j.file_name.clone()).unwrap_or_default();
 
             let prev = printer_states.get(&printer.id);
             let was_printing = prev.map(|p| p.was_printing).unwrap_or(false);
 
-            // Detectar transición: imprimiendo -> idle/terminado
+            // Transicion: imprimiendo -> terminado
             if was_printing && !is_printing && !has_error {
-                let prev_file = prev.map(|p| p.file_name.as_str()).unwrap_or("?");
+                let prev_file = prev.map(|p| p.file_name.clone()).unwrap_or_else(|| "?".to_string());
                 let elapsed = prev
                     .and_then(|p| p.start_time)
                     .map(|t| {
                         let secs = t.elapsed().as_secs();
-                        let h = secs / 3600;
-                        let m = (secs % 3600) / 60;
-                        if h > 0 {
-                            format!("{}h {}m", h, m)
-                        } else {
-                            format!("{}m", m)
-                        }
+                        let (h, m) = (secs / 3600, (secs % 3600) / 60);
+                        if h > 0 { format!("{}h {}m", h, m) } else { format!("{}m", m) }
                     })
                     .unwrap_or_else(|| "?".to_string());
 
-                let msg = format!(
-                    "Impresion terminada en *{}*\nArchivo: `{}`\nTiempo: {}",
-                    printer.name, prev_file, elapsed
+                crate::handlers::notifications::notify_active_chats(
+                    &state,
+                    &format!("Impresion terminada en *{}*\nArchivo: `{}`\nTiempo: {}", printer.name, prev_file, elapsed),
+                )
+                .await;
+                crate::events::notify(
+                    &state,
+                    crate::events::Audience::All,
+                    Some("printers3d"),
+                    crate::events::Level::Success,
+                    &format!("Impresion terminada en {}", printer.name),
+                    &format!("{} ({})", prev_file, elapsed),
                 );
-
-                for chat in &chats {
-                    if chat.role != crate::models::notifications::UserRole::Pendiente {
-                        let _ = crate::handlers::notifications::send_tg_public(
-                            &state.http_client,
-                            &token,
-                            chat.chat_id,
-                            &msg,
-                        )
-                        .await;
-                    }
-                }
-
                 state
                     .log_activity(
                         "Impresoras 3D",
@@ -2291,33 +2230,24 @@ pub async fn printer_monitor_loop(state: AppState) {
                     .await;
             }
 
-            // Detectar error
+            // Error durante una impresion
             if has_error && was_printing {
-                let error_state = status
-                    .current_job
-                    .as_ref()
-                    .map(|j| j.state.as_str())
-                    .unwrap_or("Error");
-
-                let msg = format!(
-                    "Error en impresora *{}*\nEstado: {}",
-                    printer.name, error_state
+                let error_state = status.current_job.as_ref().map(|j| j.state.clone()).unwrap_or_else(|| "Error".to_string());
+                crate::handlers::notifications::notify_active_chats(
+                    &state,
+                    &format!("Error en impresora *{}*\nEstado: {}", printer.name, error_state),
+                )
+                .await;
+                crate::events::notify(
+                    &state,
+                    crate::events::Audience::All,
+                    Some("printers3d"),
+                    crate::events::Level::Error,
+                    &format!("Error en {}", printer.name),
+                    &error_state,
                 );
-
-                for chat in &chats {
-                    if chat.role != crate::models::notifications::UserRole::Pendiente {
-                        let _ = crate::handlers::notifications::send_tg_public(
-                            &state.http_client,
-                            &token,
-                            chat.chat_id,
-                            &msg,
-                        )
-                        .await;
-                    }
-                }
             }
 
-            // Actualizar estado
             printer_states.insert(
                 printer.id.clone(),
                 PrinterMonitorState {

@@ -221,6 +221,26 @@ pub async fn register(
     let detail = if role == UserRole::Pendiente { format!("{} (pendiente de aprobacion)", username) } else { username.clone() };
     state.log_activity("Registro", &detail, &username).await;
 
+    if role == UserRole::Pendiente {
+        crate::events::notify(
+            &state,
+            crate::events::Audience::Admins,
+            None,
+            crate::events::Level::Info,
+            "Usuario pendiente de aprobacion",
+            &format!("{} creo una cuenta. Apruebala en Configuracion > Usuarios.", username),
+        );
+        let state_bg = state.clone();
+        let name = username.clone();
+        tokio::spawn(async move {
+            crate::handlers::notifications::notify_admins(
+                &state_bg,
+                &format!("*Usuario pendiente*\n\n`{}` creo una cuenta en la web. Apruebala en Configuracion > Usuarios.", name),
+            )
+            .await;
+        });
+    }
+
     let modules = crate::db::db_op(&state.db, |conn| Ok(crate::db::get_modules(conn))).await
         .unwrap_or_default();
 
@@ -536,13 +556,17 @@ pub async fn set_user_role(
 
     let _ = linked_tg; // used inside closure
 
-    let mut sessions = state.sessions.lock().await;
-    for session in sessions.values_mut() {
-        if session.username == username {
-            session.role = new_role.clone();
-            session.permissions = new_perms.clone();
+    {
+        let mut sessions = state.sessions.lock().await;
+        for session in sessions.values_mut() {
+            if session.username == username {
+                session.role = new_role.clone();
+                session.permissions = new_perms.clone();
+            }
         }
     }
+    // La UI del usuario recarga su rol/permisos al instante (p.ej. al ser aprobado)
+    state.events.publish("auth.changed", (), crate::events::Audience::User(username.clone()), None);
 
     Ok(StatusCode::OK)
 }

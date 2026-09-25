@@ -322,6 +322,7 @@ async fn run_job(state: AppState, job: BackupJob) {
             .map_err(|e| e.to_string())
     })
     .await;
+    state.events.publish("backup.updated", &job.id, crate::events::Audience::Admins, None);
 
     let pool = state.db.clone();
     let (source, dest, keep, include_db) = (
@@ -354,6 +355,17 @@ async fn run_job(state: AppState, job: BackupJob) {
         .log_activity(&format!("Respaldo {}", status), &format!("{}: {}", job.name, message), "sistema")
         .await;
 
+    if let Ok(mut running) = RUNNING.lock() {
+        running.remove(&job.id);
+    }
+    state.events.publish("backup.updated", &job.id, crate::events::Audience::Admins, None);
+    let level = match status {
+        "ok" => crate::events::Level::Success,
+        "warning" => crate::events::Level::Warning,
+        _ => crate::events::Level::Error,
+    };
+    crate::events::notify(&state, crate::events::Audience::Admins, None, level, &format!("Respaldo {}", job.name), &message);
+
     if status != "ok" {
         let icon = if status == "error" { "Fallo" } else { "Advertencia en" };
         crate::handlers::notifications::notify_admins(
@@ -361,10 +373,6 @@ async fn run_job(state: AppState, job: BackupJob) {
             &format!("*{} respaldo* `{}`\n\n{}", icon, job.name, message),
         )
         .await;
-    }
-
-    if let Ok(mut running) = RUNNING.lock() {
-        running.remove(&job.id);
     }
 }
 

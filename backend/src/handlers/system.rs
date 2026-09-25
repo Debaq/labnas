@@ -407,6 +407,14 @@ pub async fn update_check_loop(state: AppState) {
                 current, latest
             );
             crate::handlers::notifications::notify_admins(&state, &msg).await;
+            crate::events::notify(
+                &state,
+                crate::events::Audience::Admins,
+                None,
+                crate::events::Level::Info,
+                "Actualizacion disponible",
+                &format!("LabNAS {} disponible (actual {})", latest, current),
+            );
         }
     }
 }

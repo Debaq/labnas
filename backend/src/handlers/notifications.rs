@@ -426,17 +426,25 @@ async fn call_telegram<T: serde::de::DeserializeOwned>(
     }
 }
 
+/// Envia un mensaje (Markdown) a todos los chats de Telegram aprobados (no pendientes).
+pub async fn notify_active_chats(state: &AppState, text: &str) {
+    notify_chats_where(state, "role != 'pendiente'", text).await;
+}
+
 /// Envia un mensaje (Markdown) a todos los chats de Telegram con rol admin.
-/// No hace nada si el bot no esta configurado.
 pub async fn notify_admins(state: &AppState, text: &str) {
-    let tg_data = crate::db::db_op(&state.db, |conn| {
+    notify_chats_where(state, "role = 'admin'", text).await;
+}
+
+async fn notify_chats_where(state: &AppState, where_sql: &'static str, text: &str) {
+    let tg_data = crate::db::db_op(&state.db, move |conn| {
         let token: Option<String> = conn
             .query_row("SELECT bot_token FROM notification_config WHERE id = 1", [], |row| row.get(0))
             .ok()
             .flatten();
         let Some(token) = token.filter(|t| !t.is_empty()) else { return Ok(None) };
         let mut stmt = conn
-            .prepare("SELECT chat_id FROM telegram_chats WHERE role = 'admin'")
+            .prepare(&format!("SELECT chat_id FROM telegram_chats WHERE {}", where_sql))
             .map_err(|e| e.to_string())?;
         let chats: Vec<i64> = stmt
             .query_map([], |row| row.get(0))

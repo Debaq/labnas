@@ -72,6 +72,8 @@ pub struct AppState {
     pub login_failures: Arc<Mutex<HashMap<String, LoginFailures>>>,
     /// Tras actualizar: al terminar el apagado ordenado, el proceso se re-ejecuta
     pub restart_requested: Arc<AtomicBool>,
+    /// Bus de eventos en tiempo real (WebSocket /api/live)
+    pub events: crate::events::EventBus,
 }
 
 #[derive(Debug, Clone, Default)]

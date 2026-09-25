@@ -85,10 +85,25 @@ fn open_external(url: &str) {
     }
 }
 
-fn notify(body: &str) {
+fn notify(icon: &str, title: &str, body: &str) {
     let _ = Command::new("notify-send")
-        .args(["-a", "LabNAS", "-i", "folder-download", "LabNAS", body])
+        .args(["-a", "LabNAS", "-i", icon, title, body])
         .spawn();
+}
+
+/// Mensajes que manda la web UI por `window.ipc.postMessage`
+fn handle_ipc(body: &str, proxy: &tao::event_loop::EventLoopProxy<UserEvent>) {
+    if body == "quit" {
+        let _ = proxy.send_event(UserEvent::Quit);
+        return;
+    }
+    // Notificaciones del bus de eventos (impresion terminada, respaldo fallido...)
+    let Ok(msg) = serde_json::from_str::<serde_json::Value>(body) else { return };
+    if msg["type"] == "notify" {
+        let title = msg["title"].as_str().unwrap_or("LabNAS");
+        let text = msg["body"].as_str().unwrap_or("");
+        notify("dialog-information", title, text);
+    }
 }
 
 // Atajos: F5 recarga, Ctrl+Q cierra.
@@ -126,11 +141,7 @@ fn main() -> wry::Result<()> {
         .with_html(loading_page(&url))
         .with_initialization_script(INIT_SCRIPT)
         .with_devtools(cfg!(debug_assertions))
-        .with_ipc_handler(move |req| {
-            if req.body() == "quit" {
-                let _ = ipc_proxy.send_event(UserEvent::Quit);
-            }
-        })
+        .with_ipc_handler(move |req| handle_ipc(req.body(), &ipc_proxy))
         .with_new_window_req_handler(|target, _features| {
             open_external(&target);
             NewWindowResponse::Deny
@@ -151,11 +162,11 @@ fn main() -> wry::Result<()> {
         // wry ya propone ~/Descargas/<nombre> sin sobrescribir; aceptamos tal cual
         .with_download_started_handler(|_uri, _dest| true)
         .with_download_completed_handler(|_uri, path, ok| match (ok, path) {
-            (true, Some(p)) => notify(&format!(
+            (true, Some(p)) => notify("folder-download", "LabNAS", &format!(
                 "Descargado: {}",
                 p.file_name().map(|f| f.to_string_lossy()).unwrap_or_default()
             )),
-            _ => notify("La descarga falló"),
+            _ => notify("dialog-error", "LabNAS", "La descarga falló"),
         });
 
     let vbox = window.default_vbox().expect("ventana sin gtk::Box");

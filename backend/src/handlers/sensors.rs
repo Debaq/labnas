@@ -162,6 +162,16 @@ pub async fn ingest_data(
     process_sensor_data(&state, payload).await
 }
 
+/// Avisa a la UI que hay lecturas nuevas (recarga lo que muestra)
+fn publish_sensor_update(state: &AppState, device_id: &str) {
+    state.events.publish(
+        "sensors.updated",
+        serde_json::json!({ "device_id": device_id }),
+        crate::events::Audience::All,
+        Some("sensors"),
+    );
+}
+
 pub async fn process_sensor_data(
     state: &AppState,
     payload: SensorDataPayload,
@@ -247,6 +257,7 @@ pub async fn process_sensor_data(
         check_alerts(state, &device_id, &payload.readings).await;
     }
 
+    publish_sensor_update(state, &device_id);
     Ok(StatusCode::OK)
 }
 
@@ -332,52 +343,20 @@ async fn check_alerts(state: &AppState, device_id: &str, readings: &[SensorReadi
             display_name, alert.key, reading.val, unit, cond_text, alert.threshold, unit
         );
 
-        // Enviar por Telegram
-        send_sensor_alert(state, &msg).await;
+        crate::handlers::notifications::notify_active_chats(state, &msg).await;
+        crate::events::notify(
+            state,
+            crate::events::Audience::All,
+            Some("sensors"),
+            crate::events::Level::Warning,
+            &format!("Alerta sensor: {}", display_name),
+            &format!("{}: {:.1}{} ({} umbral {:.1}{})", alert.key, reading.val, unit, cond_text, alert.threshold, unit),
+        );
 
         state.log_activity(
             "Sensores",
             &format!("Alerta: {} {} {:.1} (umbral {:.1})", alert.key, alert.condition, reading.val, alert.threshold),
             &display_name,
-        ).await;
-    }
-}
-
-async fn send_sensor_alert(state: &AppState, msg: &str) {
-    let conn = match crate::db::get_conn(&state.db) {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-
-    let token: Option<String> = conn.query_row(
-        "SELECT bot_token FROM notification_config WHERE id = 1",
-        [],
-        |row| row.get::<_, Option<String>>(0),
-    ).ok().flatten();
-
-    let Some(ref token) = token else { return };
-
-    let chats: Vec<i64> = (|| -> Result<Vec<i64>, rusqlite::Error> {
-        let mut stmt = conn.prepare("SELECT chat_id, role FROM telegram_chats")?;
-        let rows = stmt.query_map([], |row: &rusqlite::Row| {
-            let role: String = row.get(1)?;
-            if role != "pendiente" {
-                Ok(Some(row.get::<_, i64>(0)?))
-            } else {
-                Ok(None)
-            }
-        })?;
-        Ok(rows.filter_map(|r: Result<Option<i64>, _>| r.ok().flatten()).collect())
-    })().unwrap_or_default();
-
-    drop(conn);
-
-    for chat_id in chats {
-        let _ = crate::handlers::notifications::send_tg_public(
-            &state.http_client,
-            token,
-            chat_id,
-            msg,
         ).await;
     }
 }
