@@ -8,6 +8,7 @@ import {
   File as FileIcon,
   Download,
   Trash2,
+  Eye,
   Upload,
   FolderPlus,
   ChevronRight,
@@ -33,6 +34,8 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import TrashPanel from '../components/TrashPanel'
+import PreviewModal from '../components/PreviewModal'
+import { previewKind } from '../lib/preview'
 import { fetchFiles, uploadFile, downloadFile, deleteFile, createDirectory, fetchQuickAccess, fetchCupsPrinters, fetchPrinterOptions, printFilePath, createShare, downloadFromUrl } from '../api'
 import type { FileEntry, QuickAccess, CupsPrinter, PrinterOption } from '../types'
 
@@ -94,6 +97,7 @@ export default function FilesPage() {
   const [files, setFiles] = useState<FileEntry[]>([])
   const { can, isAdmin } = useAuth()
   const [showTrash, setShowTrash] = useState(false)
+  const [preview, setPreview] = useState<FileEntry | null>(null)
   const [currentPath, setCurrentPath] = useState('/')
   const [pathInput, setPathInput] = useState('/')
   const [loading, setLoading] = useState(true)
@@ -344,6 +348,7 @@ export default function FilesPage() {
 
   return (
     <div className="space-y-6">
+      {preview && <PreviewModal path={preview.path} name={preview.name} onClose={() => setPreview(null)} />}
       {showTrash && <TrashPanel isAdmin={isAdmin} onClose={() => setShowTrash(false)} onRestored={loadFiles} />}
       {/* Path input bar */}
       <div className="flex items-center gap-2">
@@ -648,7 +653,10 @@ export default function FilesPage() {
                   key={entry.path}
                   className="transition-all duration-200 hover:opacity-90 cursor-pointer"
                   style={{ borderBottom: '1px solid var(--border)' }}
-                  onClick={() => entry.is_dir && handleFolderClick(entry)}
+                  onClick={() => {
+                    if (entry.is_dir) handleFolderClick(entry)
+                    else if (previewKind(entry.name)) setPreview(entry)
+                  }}
                 >
                   <td className="px-6 py-3">
                     <div className="flex items-center gap-3">
@@ -670,6 +678,16 @@ export default function FilesPage() {
                   </td>
                   <td className="px-6 py-3">
                     <div className="flex items-center justify-end gap-2">
+                      {!entry.is_dir && previewKind(entry.name) && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setPreview(entry) }}
+                          className="p-1.5 rounded-lg transition-all duration-200 hover:opacity-80"
+                          style={{ color: 'var(--text-secondary)' }}
+                          title="Vista previa"
+                        >
+                          <Eye size={16} />
+                        </button>
+                      )}
                       {!entry.is_dir && (
                         <button
                           onClick={(e) => { e.stopPropagation(); downloadFile(entry.path) }}

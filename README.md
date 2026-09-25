@@ -472,6 +472,10 @@ LabNAS chequea GitHub cada 6h. Cuando hay update:
 - **Rollback manual**: botón "Volver a vX" en Configuración (repetirlo vuelve a la nueva)
 - También permite **reinstalar la versión actual** (archivos corruptos)
 
+## Vista previa
+
+Click en un archivo del explorador abre la vista previa: imágenes, video y audio (con adelantar/retroceder), PDF y texto/código (primeros 512 KB). Se sirven con un **link temporal de un solo archivo** (30 min), no con el token de sesión. HTML/XML/JS se muestran como texto y los SVG sin permitir scripts, para que un archivo subido no pueda ejecutar código en LabNAS. Las descargas usan el mismo mecanismo (en streaming, sin cargar el archivo en memoria del navegador).
+
 ## Papelera
 
 Borrar desde el explorador **mueve a la papelera** (`.labnas-trash/`, oculta, en el mismo disco que el archivo: mover es instantáneo). Desde **Archivos > Papelera** se restaura a la ruta original (con sufijo si ya existe algo con ese nombre) o se borra definitivamente; un admin puede vaciarla entera. Lo que lleva más de 30 días se borra solo (setting `trash_retention_days`). La papelera no se incluye en los respaldos.

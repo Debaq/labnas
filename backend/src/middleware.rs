@@ -10,7 +10,7 @@ use crate::state::{AppState, SessionInfo};
 
 /// Mapeo modulo -> prefijos de ruta API
 const MODULE_ROUTE_PREFIXES: &[(&str, &[&str])] = &[
-    ("files",      &["/api/files", "/api/shares", "/api/share/", "/api/download-url", "/api/trash"]),
+    ("files",      &["/api/files", "/api/shares", "/api/share/", "/api/download-url", "/api/trash", "/api/preview/"]),
     ("network",    &["/api/network"]),
     ("printing",   &["/api/printing"]),
     ("printers3d", &["/api/printers3d"]),
@@ -46,6 +46,8 @@ fn is_public(path: &str) -> bool {
             | "/api/system/branding"
             | "/api/sensors/data"
     ) || path.starts_with("/api/share/")
+        // validada por un token de un solo archivo (handlers::files::serve_preview)
+        || path.starts_with("/api/preview/")
 }
 
 /// Lo que exige una ruta
@@ -79,7 +81,7 @@ pub fn required_access(method: &Method, path: &str) -> Access {
 
         // --- Archivos ---
         ("GET", ["files"]) | ("GET", ["files", "download"]) | ("GET", ["files", "quickaccess"]) => User,
-        ("GET", ["files", "roots"]) => User,
+        ("GET", ["files", "roots"]) | ("POST", ["files", "preview-token"]) => User,
         ("POST", ["files", "upload"]) | ("POST", ["files", "directory"]) | ("DELETE", ["files"]) => PermFileWrite,
         ("POST", ["download-url"]) => PermFileWrite,
         ("GET", ["trash"]) | ("POST", ["trash", _, "restore"]) | ("DELETE", ["trash", _]) => PermFileWrite,

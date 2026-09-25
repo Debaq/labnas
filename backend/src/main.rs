@@ -132,6 +132,8 @@ async fn main() {
         .route("/api/files/download", get(handlers::files::download_file))
         .route("/api/files/directory", post(handlers::files::create_directory))
         .route("/api/files/quickaccess", get(handlers::files::quick_access))
+        .route("/api/files/preview-token", post(handlers::files::create_preview_token))
+        .route("/api/preview/{token}/{name}", get(handlers::files::serve_preview))
         .route("/api/files/roots", get(handlers::files::get_roots))
         .route("/api/files/roots", put(handlers::files::set_roots))
         // Papelera

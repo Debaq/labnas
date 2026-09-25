@@ -256,6 +256,131 @@ pub async fn create_directory(
     Ok(StatusCode::CREATED)
 }
 
+// --- Vista previa y descarga por token ---
+//
+// <img>/<video>/<a download> no pueden mandar el header Authorization. En vez de
+// aceptar el token de sesion en la URL, se emite un token de un solo archivo que
+// dura PREVIEW_TTL y se sirve en /api/preview/{token}/{nombre} (ruta publica).
+
+const PREVIEW_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+static PREVIEW_TOKENS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, (PathBuf, std::time::Instant)>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Tipos que el navegador ejecutaria como documento en el origen de LabNAS: se
+/// sirven como texto plano para que un archivo subido no pueda robar sesiones.
+const ACTIVE_CONTENT_EXT: &[&str] = &[
+    "html", "htm", "xhtml", "xht", "shtml", "xml", "xsl", "xslt", "mht", "mhtml", "js", "mjs",
+];
+
+#[derive(serde::Deserialize)]
+pub struct PreviewTokenRequest {
+    pub path: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct PreviewTokenResponse {
+    /// Para mostrar en linea (img, video, iframe)
+    pub url: String,
+    /// Misma URL forzando descarga
+    pub download_url: String,
+}
+
+pub async fn create_preview_token(
+    State(state): State<AppState>,
+    Json(req): Json<PreviewTokenRequest>,
+) -> Result<Json<PreviewTokenResponse>, ApiError> {
+    let roots = storage::load_roots(&state.db).await?;
+    let path = storage::resolve_existing(&roots, &req.path)?;
+    if path.is_dir() {
+        return Err((StatusCode::BAD_REQUEST, "No es un archivo".to_string()));
+    }
+
+    let token = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "archivo".to_string());
+    {
+        let mut tokens = PREVIEW_TOKENS.lock().map_err(internal)?;
+        tokens.retain(|_, (_, created)| created.elapsed() < PREVIEW_TTL);
+        tokens.insert(token.clone(), (path, std::time::Instant::now()));
+    }
+
+    let url = format!("/api/preview/{}/{}", token, urlencoding::encode(&name));
+    Ok(Json(PreviewTokenResponse {
+        download_url: format!("{}?download=1", url),
+        url,
+    }))
+}
+
+#[derive(serde::Deserialize)]
+pub struct PreviewQuery {
+    pub download: Option<u8>,
+}
+
+/// GET /api/preview/{token}/{nombre} — publico, validado por el token
+pub async fn serve_preview(
+    axum::extract::Path((token, _name)): axum::extract::Path<(String, String)>,
+    Query(q): Query<PreviewQuery>,
+    request: axum::extract::Request,
+) -> Result<axum::response::Response, ApiError> {
+    use tower::ServiceExt;
+
+    let path = {
+        let tokens = PREVIEW_TOKENS.lock().map_err(internal)?;
+        match tokens.get(&token) {
+            Some((p, created)) if created.elapsed() < PREVIEW_TTL => p.clone(),
+            _ => return Err((StatusCode::GONE, "Link de vista previa expirado".to_string())),
+        }
+    };
+
+    // ServeFile resuelve tipo MIME, Range (video/audio) y cabeceras condicionales
+    let mut resp = tower_http::services::ServeFile::new(&path)
+        .oneshot(request)
+        .await
+        .map_err(internal)?
+        .map(Body::new);
+
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    let headers = resp.headers_mut();
+    let disposition = if q.download == Some(1) { "attachment" } else { "inline" };
+    let ascii_name: String = name.chars().map(|c| if c.is_ascii() && c != '"' { c } else { '_' }).collect();
+    if let Ok(v) = format!(
+        "{}; filename=\"{}\"; filename*=UTF-8''{}",
+        disposition,
+        ascii_name,
+        urlencoding::encode(&name)
+    )
+    .parse()
+    {
+        headers.insert(header::CONTENT_DISPOSITION, v);
+    }
+    headers.insert(header::X_CONTENT_TYPE_OPTIONS, header::HeaderValue::from_static("nosniff"));
+    headers.insert(header::REFERRER_POLICY, header::HeaderValue::from_static("no-referrer"));
+    if ACTIVE_CONTENT_EXT.contains(&ext.as_str()) {
+        headers.insert(header::CONTENT_TYPE, header::HeaderValue::from_static("text/plain; charset=utf-8"));
+    }
+    if ext == "svg" {
+        // Se ve como imagen, pero abierto directo no puede ejecutar scripts
+        headers.insert(
+            header::CONTENT_SECURITY_POLICY,
+            header::HeaderValue::from_static("script-src 'none'; object-src 'none'"),
+        );
+    }
+
+    Ok(resp)
+}
+
 // --- Raices de almacenamiento ---
 
 #[derive(serde::Serialize)]

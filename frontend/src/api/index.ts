@@ -219,17 +219,31 @@ export async function uploadFile(file: File, path: string): Promise<void> {
   if (!res.ok) throw new Error((await res.text()) || 'Error al subir archivo')
 }
 
+export interface PreviewLinks {
+  url: string
+  download_url: string
+}
+
+/** Link temporal (30 min) a un solo archivo, usable en <img>, <video> o descargas */
+export async function createPreviewToken(path: string): Promise<PreviewLinks> {
+  const res = await api('/api/files/preview-token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al preparar el archivo')
+  return res.json()
+}
+
+/** Descarga via link temporal: el navegador la maneja en streaming (sin cargarla en memoria) */
 export async function downloadFile(path: string): Promise<void> {
-  const res = await api(`/api/files/download?path=${encodeURIComponent(path)}`)
-  if (!res.ok) throw new Error('Error al descargar archivo')
-  const blob = await res.blob()
-  const filename = path.split('/').pop() || 'archivo'
-  const url = URL.createObjectURL(blob)
+  const { download_url } = await createPreviewToken(path)
   const a = document.createElement('a')
-  a.href = url
-  a.download = filename
+  a.href = download_url
+  a.download = path.split('/').pop() || 'archivo'
+  document.body.appendChild(a)
   a.click()
-  URL.revokeObjectURL(url)
+  a.remove()
 }
 
 export async function deleteFile(path: string): Promise<void> {
