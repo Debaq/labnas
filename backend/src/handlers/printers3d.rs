@@ -338,7 +338,7 @@ async fn find_printer(
     db_op_status(&state.db, move |conn| {
         use rusqlite::OptionalExtension;
         conn.query_row(
-            "SELECT id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d WHERE id = ?1",
+            "SELECT id, name, ip, port, printer_type, labnas_decrypt(api_key), camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d WHERE id = ?1",
             params![id],
             row_to_printer,
         )
@@ -375,7 +375,7 @@ fn octoprint_request(
 pub async fn list_printers(State(state): State<AppState>) -> Result<Json<Vec<Printer3DConfig>>, (StatusCode, String)> {
     let printers = db_op(&state.db, |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d ORDER BY \"order\""
+            "SELECT id, name, ip, port, printer_type, labnas_decrypt(api_key), camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d ORDER BY \"order\""
         ).map_err(|e| format!("DB: {}", e))?;
         let rows = stmt.query_map([], row_to_printer)
             .map_err(|e| format!("DB: {}", e))?;
@@ -410,7 +410,7 @@ pub async fn add_printer(
     let pt = printer_type_str(&p.printer_type).to_string();
     db_op(&state.db, move |conn| {
         conn.execute(
-            "INSERT INTO printers3d (id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\") VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO printers3d (id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\") VALUES (?1, ?2, ?3, ?4, ?5, labnas_encrypt(?6), ?7, ?8, ?9, ?10, ?11)",
             params![p.id, p.name, p.ip, p.port, pt, p.api_key, p.camera_url, p.power_watts, p.electricity_cost_kwh, p.section_id, p.order],
         ).map_err(|e| format!("DB: {}", e))?;
         Ok(())
@@ -432,7 +432,7 @@ pub async fn update_printer(
         use rusqlite::OptionalExtension;
         // Fetch current
         let mut printer: Printer3DConfig = conn.query_row(
-            "SELECT id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d WHERE id = ?1",
+            "SELECT id, name, ip, port, printer_type, labnas_decrypt(api_key), camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d WHERE id = ?1",
             params![id],
             row_to_printer,
         ).optional()
@@ -451,7 +451,7 @@ pub async fn update_printer(
 
         let pt = printer_type_str(&printer.printer_type).to_string();
         conn.execute(
-            "UPDATE printers3d SET name=?1, ip=?2, port=?3, printer_type=?4, api_key=?5, camera_url=?6, power_watts=?7, electricity_cost_kwh=?8, section_id=?9, \"order\"=?10 WHERE id=?11",
+            "UPDATE printers3d SET name=?1, ip=?2, port=?3, printer_type=?4, api_key=labnas_encrypt(?5), camera_url=?6, power_watts=?7, electricity_cost_kwh=?8, section_id=?9, \"order\"=?10 WHERE id=?11",
             params![printer.name, printer.ip, printer.port, pt, printer.api_key, printer.camera_url, printer.power_watts, printer.electricity_cost_kwh, printer.section_id, printer.order, printer.id],
         ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
 
@@ -596,7 +596,7 @@ pub async fn reorder_printer(
             return Err((StatusCode::NOT_FOUND, "Impresora no encontrada".to_string()));
         }
         conn.query_row(
-            "SELECT id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d WHERE id = ?1",
+            "SELECT id, name, ip, port, printer_type, labnas_decrypt(api_key), camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d WHERE id = ?1",
             params![&id],
             row_to_printer,
         ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))
@@ -2152,7 +2152,7 @@ pub async fn printer_monitor_loop(state: AppState) {
         let printers: Vec<Printer3DConfig> = match db_op(&state.db, |conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d",
+                    "SELECT id, name, ip, port, printer_type, labnas_decrypt(api_key), camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d",
                 )
                 .map_err(|e| e.to_string())?;
             let rows = stmt.query_map([], row_to_printer).map_err(|e| e.to_string())?;

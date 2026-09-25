@@ -6,4 +6,5 @@ mod harness;
 mod backups;
 mod events;
 mod files;
+mod secrets;
 mod security;

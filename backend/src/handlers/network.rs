@@ -119,7 +119,7 @@ pub async fn scan_network(
         // Read bot_token and chats from DB
         let tg_data = crate::db::db_op(&state.db, |conn| {
             let token: Option<String> = conn.query_row(
-                "SELECT bot_token FROM notification_config WHERE id = 1",
+                "SELECT labnas_decrypt(bot_token) FROM notification_config WHERE id = 1",
                 [],
                 |row| row.get(0),
             ).ok();

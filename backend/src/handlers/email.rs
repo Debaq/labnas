@@ -107,7 +107,7 @@ pub async fn configure_account(
     db_op(&state.db, move |conn| {
         conn.execute(
             "INSERT OR REPLACE INTO email_accounts (username, host, port, protocol, email, password, filters)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+             VALUES (?1, ?2, ?3, ?4, ?5, labnas_encrypt(?6), ?7)",
             params![
                 acct.username,
                 acct.host,
@@ -197,7 +197,7 @@ pub async fn check_now(
     let uname = username.clone();
     let (account, groq_key) = db_op(&state.db, move |conn| {
         let acct = conn.query_row(
-            "SELECT username, host, port, protocol, email, password, filters FROM email_accounts WHERE username = ?1",
+            "SELECT username, host, port, protocol, email, labnas_decrypt(password), filters FROM email_accounts WHERE username = ?1",
             params![&uname],
             |row| {
                 let proto_str: String = row.get(3)?;
@@ -216,7 +216,7 @@ pub async fn check_now(
                 })
             },
         ).optional().map_err(|e| e.to_string())?;
-        let gk = crate::db::get_setting(conn, "groq_api_key");
+        let gk = crate::db::get_secret_setting(conn, "groq_api_key");
         Ok((acct, gk))
     }).await?;
 
@@ -293,7 +293,7 @@ pub async fn classify_email(
     drop(sessions);
 
     let groq_key = db_op(&state.db, |conn| {
-        Ok(crate::db::get_setting(conn, "groq_api_key"))
+        Ok(crate::db::get_secret_setting(conn, "groq_api_key"))
     }).await?
     .ok_or((StatusCode::BAD_REQUEST, "Groq API key no configurada".to_string()))?;
 
@@ -431,7 +431,7 @@ pub async fn set_groq_key(
 
     let k = key.clone();
     db_op(&state.db, move |conn| {
-        crate::db::set_setting(conn, "groq_api_key", &k)
+        crate::db::set_secret_setting(conn, "groq_api_key", &k)
     }).await?;
 
     state
@@ -1057,7 +1057,7 @@ pub async fn email_check_loop(state: AppState) {
 
             // Leer cuentas de email
             let accounts: Vec<EmailAccount> = match conn.prepare(
-                "SELECT username, host, port, protocol, email, password, filters FROM email_accounts"
+                "SELECT username, host, port, protocol, email, labnas_decrypt(password), filters FROM email_accounts"
             ) {
                 Ok(mut stmt) => {
                     stmt.query_map([], |row| {
@@ -1083,11 +1083,11 @@ pub async fn email_check_loop(state: AppState) {
                 }
             };
 
-            let groq_key = crate::db::get_setting(&conn, "groq_api_key");
+            let groq_key = crate::db::get_secret_setting(&conn, "groq_api_key");
 
             // Leer bot_token de notification_config
             let token: Option<String> = conn.query_row(
-                "SELECT bot_token FROM notification_config WHERE id = 1",
+                "SELECT labnas_decrypt(bot_token) FROM notification_config WHERE id = 1",
                 [],
                 |row| row.get(0),
             ).ok().flatten();

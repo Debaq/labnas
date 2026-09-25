@@ -16,14 +16,21 @@ pub fn init_db() -> DbPool {
     }
     println!("[LabNAS] Database: {}", db_path.display());
 
-    // foreign_keys y busy_timeout son por conexion: aplicarlos a todas las del pool
+    // La clave de cifrado de secretos debe estar lista antes de abrir conexiones
+    if let Some(dir) = db_path.parent() {
+        crate::secrets::init(dir).expect("Error inicializando la clave de cifrado");
+    }
+
+    // foreign_keys, busy_timeout y las funciones de cifrado son por conexion:
+    // aplicarlos a todas las del pool
     let manager = SqliteConnectionManager::file(&db_path).with_init(|c| {
         c.execute_batch(
             "PRAGMA journal_mode=WAL;
              PRAGMA busy_timeout=5000;
              PRAGMA synchronous=NORMAL;
              PRAGMA foreign_keys=ON;",
-        )
+        )?;
+        crate::secrets::register_sql_functions(c)
     });
     let pool = Pool::builder()
         .max_size(8)
@@ -103,6 +110,11 @@ const MIGRATIONS: &[&str] = &[
         deleted_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_trash_deleted_at ON trash_items(deleted_at);",
+    // 5: cifrar secretos guardados en texto plano (labnas_encrypt no cifra dos veces)
+    "UPDATE notification_config SET bot_token = labnas_encrypt(bot_token) WHERE bot_token IS NOT NULL AND bot_token != '';
+    UPDATE printers3d SET api_key = labnas_encrypt(api_key) WHERE api_key IS NOT NULL AND api_key != '';
+    UPDATE email_accounts SET password = labnas_encrypt(password) WHERE password != '';
+    UPDATE settings SET value = labnas_encrypt(value) WHERE key IN ('groq_api_key', 'lastfm_api_key') AND value != '';",
 ];
 
 fn run_migrations(conn: &Connection) {
@@ -284,7 +296,7 @@ fn do_migration(conn: &Connection, config: &crate::config::LabNasConfig) -> Resu
     let nc = &config.notifications;
     conn.execute(
         "INSERT OR REPLACE INTO notification_config (id, bot_token, bot_username, daily_enabled, daily_hour, daily_minute)
-         VALUES (1, ?1, ?2, ?3, ?4, ?5)",
+         VALUES (1, labnas_encrypt(?1), ?2, ?3, ?4, ?5)",
         params![nc.bot_token, nc.bot_username, nc.daily_enabled, nc.daily_hour, nc.daily_minute],
     ).map_err(|e| format!("notification_config: {}", e))?;
 
@@ -340,7 +352,7 @@ fn do_migration(conn: &Connection, config: &crate::config::LabNasConfig) -> Resu
             .unwrap_or_else(|| "Moonraker".to_string());
         conn.execute(
             "INSERT INTO printers3d (id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\")
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             VALUES (?1, ?2, ?3, ?4, ?5, labnas_encrypt(?6), ?7, ?8, ?9, ?10, ?11)",
             params![
                 p.id, p.name, p.ip, p.port, pt, p.api_key, p.camera_url,
                 p.power_watts, p.electricity_cost_kwh, p.section_id, p.order,
@@ -385,7 +397,7 @@ fn do_migration(conn: &Connection, config: &crate::config::LabNasConfig) -> Resu
     // Email
     if let Some(ref key) = config.email.groq_api_key {
         conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES ('groq_api_key', ?1)",
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('groq_api_key', labnas_encrypt(?1))",
             params![key],
         )
         .map_err(|e| format!("groq_key: {}", e))?;
@@ -397,7 +409,7 @@ fn do_migration(conn: &Connection, config: &crate::config::LabNasConfig) -> Resu
             .unwrap_or_else(|| "imap".to_string());
         conn.execute(
             "INSERT INTO email_accounts (username, host, port, protocol, email, password, filters)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+             VALUES (?1, ?2, ?3, ?4, ?5, labnas_encrypt(?6), ?7)",
             params![
                 acc.username, acc.host, acc.port, proto, acc.email, acc.password,
                 serde_json::to_string(&acc.filters).unwrap_or_default(),
@@ -649,6 +661,27 @@ pub fn get_setting(conn: &Connection, key: &str) -> Option<String> {
     .optional()
     .ok()
     .flatten()
+}
+
+/// Setting cifrado en la base (API keys)
+pub fn get_secret_setting(conn: &Connection, key: &str) -> Option<String> {
+    conn.query_row(
+        "SELECT labnas_decrypt(value) FROM settings WHERE key = ?1",
+        params![key],
+        |row| row.get(0),
+    )
+    .optional()
+    .ok()
+    .flatten()
+}
+
+pub fn set_secret_setting(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, labnas_encrypt(?2))",
+        params![key, value],
+    )
+    .map_err(|e| format!("Error guardando setting {}: {}", key, e))?;
+    Ok(())
 }
 
 pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), String> {

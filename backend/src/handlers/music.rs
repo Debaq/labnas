@@ -1224,7 +1224,7 @@ pub async fn set_lastfm_key(
 
     let key = req.key.trim().to_string();
     crate::db::db_op(&state.db, move |conn| {
-        crate::db::set_setting(conn, "lastfm_api_key", &key)
+        crate::db::set_secret_setting(conn, "lastfm_api_key", &key)
     }).await?;
 
     Ok((StatusCode::OK, "API key de Last.fm guardada".to_string()))
@@ -1240,7 +1240,7 @@ pub async fn radio(
 
     // 1. Obtener API key
     let api_key = crate::db::db_op(&state.db, |conn| {
-        crate::db::get_setting(conn, "lastfm_api_key")
+        crate::db::get_secret_setting(conn, "lastfm_api_key")
             .ok_or("API key de Last.fm no configurada. Configurala en Ajustes.".to_string())
     }).await.map_err(|(_status, msg)| (StatusCode::BAD_REQUEST, msg))?;
 
@@ -1393,7 +1393,7 @@ pub async fn lucky(
     use std::time::Duration;
 
     let api_key = crate::db::db_op(&state.db, |conn| {
-        crate::db::get_setting(conn, "lastfm_api_key")
+        crate::db::get_secret_setting(conn, "lastfm_api_key")
             .ok_or("API key de Last.fm no configurada. Configurala en Ajustes.".to_string())
     }).await.map_err(|(_status, msg)| (StatusCode::BAD_REQUEST, msg))?;
 

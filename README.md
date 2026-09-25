@@ -503,6 +503,8 @@ Borrar desde el explorador **mueve a la papelera** (`.labnas-trash/`, oculta, en
 
 Requiere `rsync` en el servidor.
 
+> **Importante:** los secretos de la base van cifrados con `~/.labnas/secret.key`, que **no** se incluye en los respaldos (así una copia de la base sola no expone contraseñas ni tokens). Guarda ese archivo aparte: para restaurar la base en otra máquina hay que copiar también `secret.key` a `~/.labnas/`.
+
 ## Auditoría
 
 Todas las acciones registradas (subidas, borrados, cambios de rol, actualizaciones, rollbacks...) se guardan en SQLite y se consultan en **Configuración > Administración > Auditoría**, con filtro por usuario y texto. Se conservan 180 días (setting `audit_retention_days`). El bot de Telegram las muestra con `/actividad`.
@@ -517,6 +519,7 @@ Todas las acciones registradas (subidas, borrados, cambios de rol, actualizacion
 - Passwords con bcrypt (cost 10, mínimo 8 caracteres); bloqueo de 5 min tras 5 intentos fallidos
 - Sesiones de 24h persistidas en SQLite (sobreviven reinicios); cambiar la contraseña cierra las demás
 - `labnas.db` con permisos 600
+- Secretos cifrados en la base (token del bot, API keys de impresoras/Groq/Last.fm, contraseñas de correo) con XChaCha20-Poly1305; la clave está en `~/.labnas/secret.key` (600)
 - Token del bot jamás expuesto en la API
 - Comandos CUPS sanitizados contra inyección
 - Terminal web y `/cmd` de Telegram nunca corren como root

@@ -124,7 +124,7 @@ async fn notify_task_assigned(state: &AppState, task: &Task) {
     let (token, chats) = match crate::db::db_op(&pool, |conn| {
         let token: Option<String> = conn
             .query_row(
-                "SELECT bot_token FROM notification_config WHERE id = 1",
+                "SELECT labnas_decrypt(bot_token) FROM notification_config WHERE id = 1",
                 [],
                 |row| row.get(0),
             )
@@ -209,7 +209,7 @@ async fn notify_task_completed(state: &AppState, task: &Task, completed_by: &str
     let (token, chats) = match crate::db::db_op(&pool, |conn| {
         let token: Option<String> = conn
             .query_row(
-                "SELECT bot_token FROM notification_config WHERE id = 1",
+                "SELECT labnas_decrypt(bot_token) FROM notification_config WHERE id = 1",
                 [],
                 |row| row.get(0),
             )

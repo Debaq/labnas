@@ -73,7 +73,7 @@ type NotifConfigRow = (Option<String>, Option<String>, bool, u8, u8);
 
 fn read_notif_config(conn: &rusqlite::Connection) -> Result<NotifConfigRow, String> {
     conn.query_row(
-        "SELECT bot_token, bot_username, daily_enabled, daily_hour, daily_minute FROM notification_config WHERE id = 1",
+        "SELECT labnas_decrypt(bot_token), bot_username, daily_enabled, daily_hour, daily_minute FROM notification_config WHERE id = 1",
         [],
         |row| {
             Ok((
@@ -92,7 +92,7 @@ fn read_notif_config(conn: &rusqlite::Connection) -> Result<NotifConfigRow, Stri
 
 fn read_bot_token(conn: &rusqlite::Connection) -> Result<Option<String>, String> {
     conn.query_row(
-        "SELECT bot_token FROM notification_config WHERE id = 1",
+        "SELECT labnas_decrypt(bot_token) FROM notification_config WHERE id = 1",
         [],
         |row| row.get::<_, Option<String>>(0),
     )
@@ -203,7 +203,7 @@ pub async fn set_bot_token(
     let token_clone = token.clone();
     let resp = crate::db::db_op(&state.db, move |conn| {
         conn.execute(
-            "UPDATE notification_config SET bot_token = ?1, bot_username = ?2 WHERE id = 1",
+            "UPDATE notification_config SET bot_token = labnas_encrypt(?1), bot_username = ?2 WHERE id = 1",
             params![token_clone, bot_username],
         )
         .map_err(|e| format!("DB: {}", e))?;
@@ -442,7 +442,7 @@ pub async fn notify_admins(state: &AppState, text: &str) {
 async fn notify_chats_where(state: &AppState, where_sql: &'static str, text: &str) {
     let tg_data = crate::db::db_op(&state.db, move |conn| {
         let token: Option<String> = conn
-            .query_row("SELECT bot_token FROM notification_config WHERE id = 1", [], |row| row.get(0))
+            .query_row("SELECT labnas_decrypt(bot_token) FROM notification_config WHERE id = 1", [], |row| row.get(0))
             .ok()
             .flatten();
         let Some(token) = token.filter(|t| !t.is_empty()) else { return Ok(None) };
@@ -2206,7 +2206,7 @@ fn progress_bar_temp(actual: f64, target: f64) -> String {
 /// Read printers from DB (for use in notification handlers)
 fn read_printers(conn: &rusqlite::Connection) -> Result<Vec<crate::models::printers3d::Printer3DConfig>, String> {
     let mut stmt = conn
-        .prepare("SELECT id, name, ip, port, printer_type, api_key, camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d ORDER BY \"order\"")
+        .prepare("SELECT id, name, ip, port, printer_type, labnas_decrypt(api_key), camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d ORDER BY \"order\"")
         .map_err(|e| format!("DB: {}", e))?;
     let rows = stmt
         .query_map([], |row| {
