@@ -557,6 +557,11 @@ Todas las acciones registradas (subidas, borrados, cambios de rol, actualizacion
 - Comandos CUPS sanitizados contra inyección
 - Terminal web y `/cmd` de Telegram nunca corren como root
 
+## Cambios y revisión
+
+- [`CHANGELOG.md`](CHANGELOG.md): cambios desde v2.8.2 (incluye lo que afecta a la instalación)
+- [`docs/REVISION_MANUAL.md`](docs/REVISION_MANUAL.md): lista de verificación manual antes de publicar un release
+
 ## Licencia
 
 MIT
