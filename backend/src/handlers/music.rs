@@ -272,6 +272,10 @@ fn detect_x_user() -> Option<String> {
 
 /// Asegura que root tenga acceso al display X del usuario
 pub async fn ensure_x_access() {
+    // Solo hace falta si root abre ventanas en el display de otro usuario
+    if !crate::config::is_root() {
+        return;
+    }
     if let Some(user) = detect_x_user() {
         // Ejecutar xhost +local:root como el usuario dueño de X
         let _ = Command::new("su")

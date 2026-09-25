@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine, Pencil, Music, HelpCircle, X, RefreshCw, Shield, LayoutDashboard, FolderOpen, Network, Printer, Box, ClipboardList, FileText, Mail, Package, GraduationCap, Thermometer, ChevronUp, ChevronDown, AlertTriangle, Bell, Server, SlidersHorizontal } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
+import StorageRootsSection from '../components/StorageRootsSection'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, getThemeNames, type ThemeName } from '../themes/themes'
 import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, forceCheckUpdate, doUpdate, doReinstall, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, updateService, setLastfmKey, fetchHealth, getMpvArgs, setMpvArgs as saveMpvArgs, fetchModules, toggleModule, reorderModules, type LabBranding, type LabService } from '../api'
@@ -1641,6 +1642,8 @@ export default function SettingsPage() {
           </div>
         </div>
       </section>}
+
+      {activeTab === 'system' && isAdmin && <StorageRootsSection />}
 
       {/* Administracion: modulos (admin only) */}
       {activeTab === 'admin' && isAdmin && (

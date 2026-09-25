@@ -33,6 +33,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.25"
 serialport = "4"
+tokio-util = { version = "0.7.19", features = ["io"] }
 
 [features]
 default = []

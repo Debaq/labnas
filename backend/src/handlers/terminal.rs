@@ -13,26 +13,21 @@ struct ResizeMessage {
     rows: u16,
 }
 
-/// Detecta el usuario con sesión activa (no root)
-fn detect_session_user() -> Option<String> {
-    let output = std::process::Command::new("who").output().ok()?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
-        if line.contains("(:0)") || line.contains("tty") {
-            let user = line.split_whitespace().next()?;
-            if user != "root" {
-                return Some(user.to_string());
-            }
-        }
-    }
-    None
-}
-
 pub async fn terminal_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
     ws.on_upgrade(handle_terminal_socket)
 }
 
-async fn handle_terminal_socket(socket: WebSocket) {
+async fn handle_terminal_socket(mut socket: WebSocket) {
+    // Nunca abrir un shell de root
+    if crate::config::is_root() && crate::config::detect_session_user().is_none() {
+        let _ = socket
+            .send(Message::Text(
+                "\r\nTerminal deshabilitada: LabNAS corre como root y no hay un usuario de sesion al cual bajar.\r\n".into(),
+            ))
+            .await;
+        return;
+    }
+
     let pty_system = native_pty_system();
 
     let pty_pair = match pty_system.openpty(PtySize {
@@ -48,8 +43,13 @@ async fn handle_terminal_socket(socket: WebSocket) {
         }
     };
 
-    // Detectar el usuario real de la sesión (no root)
-    let real_user = detect_session_user();
+    // Como root se baja al usuario de la sesion con `su`; si el servicio ya corre como
+    // usuario normal se abre su propio shell (su pediria contraseña)
+    let real_user = if crate::config::is_root() {
+        crate::config::detect_session_user()
+    } else {
+        None
+    };
     let (user_name, user_home, user_shell) = if let Some(ref user) = real_user {
         let home = format!("/home/{}", user);
         // Leer shell del usuario desde /etc/passwd

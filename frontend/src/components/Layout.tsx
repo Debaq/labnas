@@ -144,6 +144,7 @@ export default function Layout() {
     { to: '/settings', label: 'Configuracion', icon: Settings, show: true },
   ]
 
+  const isPending = user?.role === 'pendiente'
   const roleLabel = user?.role === 'admin' ? 'Admin' : user?.role === 'operador' ? 'Operador' : user?.role === 'observador' ? 'Observador' : 'Pendiente'
 
   return (
@@ -326,15 +327,29 @@ export default function Layout() {
 
         {/* Content */}
         <main className="flex-1 overflow-auto relative" style={{ backgroundColor: 'var(--bg-primary)' }}>
-          <div className={location.pathname === '/terminal' ? 'hidden' : 'p-8 h-full overflow-auto'}>
-            <Outlet />
-          </div>
-          {isModuleEnabled('terminal') && can('terminal') && <PersistentTerminal />}
+          {isPending ? (
+            <div className="p-8 h-full flex items-center justify-center">
+              <div className="max-w-md text-center rounded-xl p-8" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                <h2 className="text-xl font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Cuenta pendiente de aprobacion</h2>
+                <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                  Tu cuenta fue creada, pero un administrador debe aprobarla antes de que puedas usar LabNAS.
+                  Esta pagina se actualiza sola cuando te aprueben.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className={location.pathname === '/terminal' ? 'hidden' : 'p-8 h-full overflow-auto'}>
+                <Outlet />
+              </div>
+              {isModuleEnabled('terminal') && can('terminal') && <PersistentTerminal />}
+            </>
+          )}
         </main>
       </div>
 
       {/* Music Panel */}
-      {isModuleEnabled('music') && <MusicPanel />}
+      {!isPending && isModuleEnabled('music') && <MusicPanel />}
     </div>
   )
 }

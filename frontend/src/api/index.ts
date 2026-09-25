@@ -51,6 +51,27 @@ async function api(url: string, opts?: RequestInit): Promise<Response> {
 
 // --- Files ---
 
+export interface StorageRoots {
+  roots: string[]
+  defaults: string[]
+}
+
+export async function fetchStorageRoots(): Promise<StorageRoots> {
+  const res = await api('/api/files/roots')
+  if (!res.ok) throw new Error('Error al obtener raices')
+  return res.json()
+}
+
+export async function saveStorageRoots(roots: string[]): Promise<StorageRoots> {
+  const res = await api('/api/files/roots', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ roots }),
+  })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al guardar raices')
+  return res.json()
+}
+
 export async function fetchFiles(path?: string): Promise<FileEntry[]> {
   const params = path ? `?path=${encodeURIComponent(path)}` : ''
   const res = await api(`/api/files${params}`)
@@ -58,15 +79,16 @@ export async function fetchFiles(path?: string): Promise<FileEntry[]> {
   return res.json()
 }
 
-export async function uploadFile(file: File, path?: string): Promise<void> {
+export async function uploadFile(file: File, path: string): Promise<void> {
   const formData = new FormData()
+  // "path" primero: el backend escribe el archivo en streaming y necesita el destino antes
+  formData.append('path', path)
   formData.append('file', file)
-  if (path) formData.append('path', path)
   const res = await api('/api/files/upload', {
     method: 'POST',
     body: formData,
   })
-  if (!res.ok) throw new Error('Error al subir archivo')
+  if (!res.ok) throw new Error((await res.text()) || 'Error al subir archivo')
 }
 
 export async function downloadFile(path: string): Promise<void> {

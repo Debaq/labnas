@@ -31,9 +31,20 @@ pub async fn shutdown_handler(State(state): State<AppState>) -> &'static str {
     let shutdown = state.shutdown.clone();
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        shutdown.notify_one();
+        shutdown.cancel();
     });
     "Apagando LabNAS..."
+}
+
+/// Apagado ordenado seguido de re-ejecucion del binario (ya actualizado).
+/// No depende de systemd ni de root: main() hace exec() al terminar.
+fn request_restart(state: &AppState) {
+    state.restart_requested.store(true, std::sync::atomic::Ordering::SeqCst);
+    let shutdown = state.shutdown.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        shutdown.cancel();
+    });
 }
 
 pub async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
@@ -144,6 +155,21 @@ pub async fn system_info_handler() -> Result<Json<SystemInfoResponse>, (StatusCo
 
 const SERVICE_PATH: &str = "/etc/systemd/system/labnas.service";
 
+/// Nombre del usuario dueño de un archivo (via /etc/passwd)
+fn owner_name(path: &std::path::Path) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let uid = std::fs::metadata(path).ok()?.uid();
+    let passwd = std::fs::read_to_string("/etc/passwd").ok()?;
+    passwd.lines().find_map(|l| {
+        let mut f = l.split(':');
+        let name = f.next()?;
+        let _pw = f.next()?;
+        (f.next()?.parse::<u32>().ok()? == uid).then(|| name.to_string())
+    })
+}
+
+/// Unidad systemd: corre como el dueño de la instalacion (no root), con capacidades
+/// solo para ping ICMP (escaner de red) y puerto 80.
 fn build_autostart_commands() -> (String, String) {
     let exe_path = std::env::current_exe()
         .ok()
@@ -152,7 +178,12 @@ fn build_autostart_commands() -> (String, String) {
     let work_dir = exe_path
         .parent()
         .unwrap_or(std::path::Path::new("/"))
-        .to_string_lossy();
+        .to_string_lossy()
+        .to_string();
+    let user = owner_name(&exe_path)
+        .filter(|u| u != "root")
+        .or_else(crate::config::detect_session_user)
+        .unwrap_or_else(|| "CAMBIAR_USUARIO".to_string());
 
     let install_cmd = format!(
         "cat > /tmp/labnas.service << 'EOF'\n\
@@ -163,18 +194,20 @@ fn build_autostart_commands() -> (String, String) {
          \n\
          [Service]\n\
          Type=simple\n\
-         ExecStart={}\n\
-         WorkingDirectory={}\n\
+         User={user}\n\
+         ExecStart={exe}\n\
+         WorkingDirectory={dir}\n\
          Restart=on-failure\n\
          RestartSec=5\n\
-         AmbientCapabilities=CAP_NET_RAW\n\
+         AmbientCapabilities=CAP_NET_RAW CAP_NET_BIND_SERVICE\n\
          \n\
          [Install]\n\
          WantedBy=multi-user.target\n\
          EOF\n\
-         sudo cp /tmp/labnas.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable labnas && echo 'LabNAS configurado para iniciar con el sistema'",
-        exe_path.display(),
-        work_dir
+         sudo chown -R {user}: {dir} && sudo cp /tmp/labnas.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable labnas && echo 'LabNAS configurado para iniciar con el sistema (usuario {user})'",
+        user = user,
+        exe = exe_path.display(),
+        dir = work_dir,
     );
 
     let uninstall_cmd =
@@ -350,10 +383,7 @@ pub async fn do_update(
 
     state.log_activity("Actualizacion", &format!("Actualizado a {}", latest), "sistema").await;
 
-    // Try to restart via systemd
-    let _ = Command::new("systemctl")
-        .args(["restart", "labnas"])
-        .output().await;
+    request_restart(&state);
 
     Ok((StatusCode::OK, format!("Actualizado a {}. Reiniciando...", latest)))
 }
@@ -414,9 +444,7 @@ pub async fn reinstall(
 
     state.log_activity("Reinstalacion", &format!("Reinstalado v{}", CURRENT_VERSION), "sistema").await;
 
-    let _ = Command::new("systemctl")
-        .args(["restart", "labnas"])
-        .output().await;
+    request_restart(&state);
 
     Ok((StatusCode::OK, format!("Reinstalado v{}. Reiniciando...", CURRENT_VERSION)))
 }

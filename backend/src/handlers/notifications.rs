@@ -862,9 +862,26 @@ async fn handle_cmd(state: &AppState, chat_id: i64, user: &str, text: &str) -> S
 
     state.log_activity("Terminal TG", cmd, user).await;
 
+    // Nunca como root: si el servicio corre como root, bajar al usuario de la sesion
+    // (igual que la terminal web)
+    let mut command = match (crate::config::is_root(), crate::config::detect_session_user()) {
+        (true, Some(session_user)) => {
+            let mut c = TokioCmd::new("su");
+            c.args(["-", &session_user, "-c", cmd]);
+            c
+        }
+        (true, None) => {
+            return "Terminal deshabilitada: LabNAS corre como root y no hay un usuario de sesion al cual bajar.".to_string();
+        }
+        (false, _) => {
+            let mut c = TokioCmd::new("bash");
+            c.args(["-c", cmd]);
+            c
+        }
+    };
+
     // Spawn process with piped I/O
-    let child_result = TokioCmd::new("bash")
-        .args(["-c", cmd])
+    let child_result = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

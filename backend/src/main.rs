@@ -4,6 +4,7 @@ mod handlers;
 mod middleware;
 mod models;
 mod state;
+mod storage;
 
 use axum::{
     http::Method,
@@ -12,7 +13,7 @@ use axum::{
     Router,
 };
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Instant};
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -20,10 +21,12 @@ use state::AppState;
 
 #[tokio::main]
 async fn main() {
+    warn_if_root();
+
     let pool = db::init_db();
 
     // Read startup settings from DB
-    let (mdns_enabled, mdns_hostname, upload_limit_mb, enabled_modules_set) = {
+    let (mdns_enabled, mdns_hostname, upload_limit_mb, enabled_modules_set, sessions) = {
         let conn = pool.get().expect("DB pool error at startup");
         let mdns_enabled = db::get_setting_bool(&conn, "mdns_enabled");
         let mdns_hostname = db::get_setting(&conn, "mdns_hostname")
@@ -32,10 +35,13 @@ async fn main() {
         let upload_limit_mb = db::get_setting_u32(&conn, "upload_limit_mb", 50);
         let enabled_modules: std::collections::HashSet<String> =
             db::get_enabled_module_ids(&conn).into_iter().collect();
-        (mdns_enabled, mdns_hostname, upload_limit_mb, enabled_modules)
+        let sessions = handlers::auth::load_sessions(&conn);
+        println!("[LabNAS] Sesiones restauradas: {}", sessions.len());
+        (mdns_enabled, mdns_hostname, upload_limit_mb, enabled_modules, sessions)
     };
 
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let restart_requested = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     let state = AppState {
         scanned_hosts: Arc::new(Mutex::new(Vec::new())),
@@ -44,7 +50,7 @@ async fn main() {
         http_client: reqwest::Client::new(),
         shutdown: shutdown.clone(),
         activity_log: Arc::new(Mutex::new(Vec::new())),
-        sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        sessions: Arc::new(Mutex::new(sessions)),
         link_codes: Arc::new(Mutex::new(std::collections::HashMap::new())),
         share_links: Arc::new(Mutex::new(std::collections::HashMap::new())),
         tg_terminals: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -55,6 +61,8 @@ async fn main() {
         update_cache: Arc::new(Mutex::new(state::UpdateCache::default())),
         sensors: Arc::new(Mutex::new(state::SensorState::default())),
         enabled_modules: Arc::new(Mutex::new(enabled_modules_set)),
+        login_failures: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        restart_requested: restart_requested.clone(),
     };
 
     // Start mDNS if enabled
@@ -102,6 +110,8 @@ async fn main() {
         .route("/api/files/download", get(handlers::files::download_file))
         .route("/api/files/directory", post(handlers::files::create_directory))
         .route("/api/files/quickaccess", get(handlers::files::quick_access))
+        .route("/api/files/roots", get(handlers::files::get_roots))
+        .route("/api/files/roots", put(handlers::files::set_roots))
         // Storage & System
         .route("/api/storage", get(handlers::system::storage_info))
         .route("/api/system/disks", get(handlers::system::system_disks))
@@ -390,7 +400,7 @@ async fn main() {
             let shutdown_80 = shutdown.clone();
             tokio::spawn(async move {
                 axum::serve(listener_80, app_80)
-                    .with_graceful_shutdown(async move { shutdown_80.notified().await; })
+                    .with_graceful_shutdown(async move { shutdown_80.cancelled().await; })
                     .await
                     .ok();
             });
@@ -417,11 +427,39 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {
-            shutdown.notified().await;
+            shutdown.cancelled().await;
             println!("LabNAS apagandose...");
         })
         .await
         .unwrap();
+
+    if restart_requested.load(std::sync::atomic::Ordering::SeqCst) {
+        restart_self();
+    }
+}
+
+/// Re-ejecuta el binario (tras una actualizacion). Los sockets se cierran solos (CLOEXEC).
+fn restart_self() {
+    use std::os::unix::process::CommandExt;
+    let Ok(exe) = std::env::current_exe() else {
+        eprintln!("[LabNAS] No se pudo determinar el ejecutable para reiniciar");
+        std::process::exit(1);
+    };
+    println!("[LabNAS] Reiniciando {}...", exe.display());
+    let err = std::process::Command::new(&exe)
+        .args(std::env::args_os().skip(1))
+        .exec();
+    eprintln!("[LabNAS] Error al reiniciar: {}", err);
+    std::process::exit(1);
+}
+
+fn warn_if_root() {
+    // SAFETY: geteuid no tiene precondiciones
+    if unsafe { libc::geteuid() } == 0 {
+        println!("\x1b[33m⚠ LabNAS esta corriendo como root.\x1b[0m");
+        println!("  Se recomienda correrlo como un usuario normal (ver README: servicio systemd).");
+        println!("  Como root, cualquier fallo en la app expone el sistema completo.\n");
+    }
 }
 
 async fn check_tailscale() -> Option<String> {

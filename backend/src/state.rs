@@ -7,9 +7,10 @@ use crate::models::sensors::SensorLatest;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::Mutex;
 
 const MAX_ACTIVITY_LOG: usize = 200;
 
@@ -21,12 +22,33 @@ pub struct ActivityEvent {
     pub user: String,
 }
 
+/// Duracion de una sesion web
+pub const SESSION_TTL_SECS: i64 = 24 * 60 * 60;
+
 #[derive(Debug, Clone)]
 pub struct SessionInfo {
     pub username: String,
     pub role: UserRole,
     pub permissions: UserPermissions,
-    pub created_at: Instant,
+    /// Unix epoch (segundos); persistido en la tabla `sessions`
+    pub created_at: i64,
+}
+
+impl SessionInfo {
+    pub fn is_expired(&self) -> bool {
+        now_unix() - self.created_at > SESSION_TTL_SECS
+    }
+}
+
+pub fn now_unix() -> i64 {
+    chrono::Utc::now().timestamp()
+}
+
+/// Intentos fallidos de login por usuario (anti fuerza bruta)
+#[derive(Debug, Clone)]
+pub struct LoginFailures {
+    pub count: u32,
+    pub last: Instant,
 }
 
 #[derive(Clone)]
@@ -35,7 +57,8 @@ pub struct AppState {
     pub start_time: Instant,
     pub db: DbPool,
     pub http_client: reqwest::Client,
-    pub shutdown: Arc<Notify>,
+    /// Apagado ordenado: al cancelarse se detienen ambos listeners (3001 y 80)
+    pub shutdown: tokio_util::sync::CancellationToken,
     pub activity_log: Arc<Mutex<Vec<ActivityEvent>>>,
     pub sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
     pub link_codes: Arc<Mutex<HashMap<String, LinkCode>>>,
@@ -48,6 +71,9 @@ pub struct AppState {
     pub update_cache: Arc<Mutex<UpdateCache>>,
     pub sensors: Arc<Mutex<SensorState>>,
     pub enabled_modules: Arc<Mutex<HashSet<String>>>,
+    pub login_failures: Arc<Mutex<HashMap<String, LoginFailures>>>,
+    /// Tras actualizar: al terminar el apagado ordenado, el proceso se re-ejecuta
+    pub restart_requested: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone, Default)]

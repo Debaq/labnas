@@ -92,7 +92,7 @@ build_all() {
     echo -e "  ${CYAN}Binario:${NC} $bin_dir/labnas-backend"
     echo -e "  ${CYAN}Frontend:${NC} $bin_dir/dist/"
     echo -e "\n  ${YELLOW}Para ejecutar:${NC}"
-    echo -e "  sudo $bin_dir/labnas-backend"
+    echo -e "  $bin_dir/labnas-backend   (como usuario normal, sin sudo)"
     echo ""
 }
 
@@ -125,7 +125,7 @@ run_production() {
     echo -e "  ${CYAN}LabNAS corriendo en: ${BOLD}http://localhost:3001${NC}"
     echo -e "  ${YELLOW}(Ctrl+C para detener)${NC}\n"
 
-    sudo "$bin"
+    "$bin"
 }
 
 dev_backend_only() {

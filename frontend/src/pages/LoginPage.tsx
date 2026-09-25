@@ -46,6 +46,10 @@ export default function LoginPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!username.trim() || !password) return
+    if (mode !== 'login' && password.length < 8) {
+      setError('La contrasena debe tener al menos 8 caracteres')
+      return
+    }
     setLoading(true)
     setError(null)
     try {

@@ -16,7 +16,15 @@ pub fn init_db() -> DbPool {
     }
     println!("[LabNAS] Database: {}", db_path.display());
 
-    let manager = SqliteConnectionManager::file(&db_path);
+    // foreign_keys y busy_timeout son por conexion: aplicarlos a todas las del pool
+    let manager = SqliteConnectionManager::file(&db_path).with_init(|c| {
+        c.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             PRAGMA busy_timeout=5000;
+             PRAGMA synchronous=NORMAL;
+             PRAGMA foreign_keys=ON;",
+        )
+    });
     let pool = Pool::builder()
         .max_size(8)
         .build(manager)
@@ -24,19 +32,56 @@ pub fn init_db() -> DbPool {
 
     {
         let conn = pool.get().expect("Error obteniendo conexion de DB");
-        conn.execute_batch(
-            "PRAGMA journal_mode=WAL;
-             PRAGMA busy_timeout=5000;
-             PRAGMA synchronous=NORMAL;
-             PRAGMA foreign_keys=ON;",
-        )
-        .expect("Error configurando pragmas SQLite");
-
         create_schema(&conn);
+        run_migrations(&conn);
         migrate_from_json(&conn);
     }
 
+    // La DB guarda hashes y secretos: solo legible por el dueño
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Some(dir) = db_path.parent() {
+            let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+        }
+        let _ = std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o600));
+    }
+
     pool
+}
+
+/// Directorio de datos de LabNAS (DB, config). Nunca accesible desde el explorador.
+pub fn data_dir() -> PathBuf {
+    db_path().parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Migraciones versionadas con PRAGMA user_version.
+/// Agregar siempre al final; nunca modificar una ya publicada.
+const MIGRATIONS: &[&str] = &[
+    // 1: sesiones persistentes
+    "CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        username TEXT NOT NULL REFERENCES web_users(username) ON DELETE CASCADE ON UPDATE CASCADE,
+        created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_username ON sessions(username);",
+];
+
+fn run_migrations(conn: &Connection) {
+    let current: usize = conn
+        .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+        .unwrap_or(0) as usize;
+
+    for (i, sql) in MIGRATIONS.iter().enumerate().skip(current) {
+        let version = i + 1;
+        let tx = conn.unchecked_transaction().expect("Error iniciando migracion");
+        tx.execute_batch(sql)
+            .unwrap_or_else(|e| panic!("Error en migracion {}: {}", version, e));
+        tx.pragma_update(None, "user_version", version as i64)
+            .expect("Error actualizando user_version");
+        tx.commit().expect("Error confirmando migracion");
+        println!("[LabNAS] Migracion {} aplicada", version);
+    }
 }
 
 fn db_path() -> PathBuf {

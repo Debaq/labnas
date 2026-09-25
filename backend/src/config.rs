@@ -119,6 +119,27 @@ impl Default for LabBranding {
     }
 }
 
+/// ¿El proceso corre como root?
+pub fn is_root() -> bool {
+    // SAFETY: geteuid no tiene precondiciones
+    unsafe { libc::geteuid() == 0 }
+}
+
+/// Usuario con sesion grafica/tty activa (distinto de root), segun `who`
+pub fn detect_session_user() -> Option<String> {
+    let output = std::process::Command::new("who").output().ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if line.contains("(:0)") || line.contains("tty") {
+            let user = line.split_whitespace().next()?;
+            if user != "root" {
+                return Some(user.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Resuelve el home real del usuario dueño de la instalación.
 /// Deriva desde la ubicación del binario para ser consistente
 /// sin importar si se ejecuta con sudo, systemd o directamente.

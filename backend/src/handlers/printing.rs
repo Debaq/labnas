@@ -319,18 +319,14 @@ pub async fn print_upload(
 }
 
 pub async fn print_file_path(
+    State(state): State<AppState>,
     Json(req): Json<PrintFileRequest>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
-    let path = std::path::PathBuf::from(&req.path);
+    let roots = crate::storage::load_roots(&state.db).await?;
+    let path = crate::storage::resolve_existing(&roots, &req.path)?;
+    let path_str = path.to_string_lossy().to_string();
 
-    if !path.is_absolute() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "La ruta debe ser absoluta".to_string(),
-        ));
-    }
-
-    if !path.exists() || path.is_dir() {
+    if path.is_dir() {
         return Err((
             StatusCode::NOT_FOUND,
             "Archivo no encontrado".to_string(),
@@ -354,7 +350,7 @@ pub async fn print_file_path(
 
     run_lp_command(
         &req.printer,
-        &req.path,
+        &path_str,
         req.copies.map(|c| c.to_string()),
         req.pages.clone(),
         &req.options,

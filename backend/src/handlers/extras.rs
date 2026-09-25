@@ -57,8 +57,9 @@ pub async fn create_share(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let path = std::path::PathBuf::from(&req.path);
-    if !path.exists() || path.is_dir() {
+    let roots = crate::storage::load_roots(&state.db).await?;
+    let path = crate::storage::resolve_existing(&roots, &req.path)?;
+    if path.is_dir() {
         return Err((StatusCode::NOT_FOUND, "Archivo no encontrado".to_string()));
     }
 
@@ -75,7 +76,7 @@ pub async fn create_share(
     shares.insert(
         token.clone(),
         crate::state::ShareLink {
-            file_path: req.path.clone(),
+            file_path: path.to_string_lossy().to_string(),
             file_name: file_name.clone(),
             created_at: Instant::now(),
             expires_secs: (hours as u64) * 3600,
@@ -187,18 +188,22 @@ pub async fn download_url(
         .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
     drop(sessions);
 
-    let dest = std::path::PathBuf::from(&req.destination);
-    if !dest.is_absolute() {
-        return Err((StatusCode::BAD_REQUEST, "Ruta destino debe ser absoluta".to_string()));
+    let roots = crate::storage::load_roots(&state.db).await?;
+    let dest = crate::storage::resolve(&roots, &req.destination)?;
+
+    let lower = req.url.to_ascii_lowercase();
+    if !lower.starts_with("http://") && !lower.starts_with("https://") {
+        return Err((StatusCode::BAD_REQUEST, "Solo se permiten URLs http(s)".to_string()));
     }
 
     // Extract filename from URL
-    let url_parsed = req.url.split('?').next().unwrap_or(&req.url);
+    let url_parsed = req.url.split(['?', '#']).next().unwrap_or(&req.url);
     let file_name = url_parsed
-        .split('/')
-        .last()
-        .filter(|s| !s.is_empty())
-        .unwrap_or("descarga");
+        .rsplit('/')
+        .next()
+        .and_then(crate::storage::sanitize_filename)
+        .unwrap_or_else(|| "descarga".to_string());
+    let file_name = file_name.as_str();
 
     let file_path = dest.join(file_name);
 

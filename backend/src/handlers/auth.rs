@@ -7,7 +7,108 @@ use rusqlite::{params, OptionalExtension};
 
 use crate::models::auth::*;
 use crate::models::notifications::{UserPermissions, UserRole};
-use crate::state::{AppState, SessionInfo};
+use crate::state::{now_unix, AppState, LoginFailures, SessionInfo, SESSION_TTL_SECS};
+
+/// Intentos fallidos antes de bloquear el login de un usuario
+const MAX_LOGIN_FAILURES: u32 = 5;
+/// Duracion del bloqueo tras superar el maximo de intentos
+const LOGIN_LOCK_SECS: u64 = 5 * 60;
+
+// --- Sesiones persistentes ---
+
+/// Crea una sesion (memoria + tabla `sessions`) y devuelve el token.
+pub async fn create_session(
+    state: &AppState,
+    username: &str,
+    role: UserRole,
+    permissions: UserPermissions,
+) -> Result<String, (StatusCode, String)> {
+    let token = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+    let created_at = now_unix();
+
+    let (t, u) = (token.clone(), username.to_string());
+    crate::db::db_op(&state.db, move |conn| {
+        conn.execute(
+            "INSERT INTO sessions (token, username, created_at) VALUES (?1, ?2, ?3)",
+            params![t, u, created_at],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }).await?;
+
+    state.sessions.lock().await.insert(token.clone(), SessionInfo {
+        username: username.to_string(),
+        role,
+        permissions,
+        created_at,
+    });
+    Ok(token)
+}
+
+pub async fn remove_session(state: &AppState, token: &str) {
+    state.sessions.lock().await.remove(token);
+    let t = token.to_string();
+    let _ = crate::db::db_op(&state.db, move |conn| {
+        conn.execute("DELETE FROM sessions WHERE token = ?1", params![t])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }).await;
+}
+
+/// Carga las sesiones vigentes al arrancar (rol y permisos frescos desde web_users).
+pub fn load_sessions(conn: &rusqlite::Connection) -> std::collections::HashMap<String, SessionInfo> {
+    let cutoff = now_unix() - SESSION_TTL_SECS;
+    let _ = conn.execute("DELETE FROM sessions WHERE created_at < ?1", params![cutoff]);
+
+    let mut map = std::collections::HashMap::new();
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT s.token, s.username, s.created_at, u.role, u.perm_terminal, u.perm_impresion, u.perm_archivos_escritura
+         FROM sessions s JOIN web_users u ON u.username = s.username",
+    ) else {
+        return map;
+    };
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            SessionInfo {
+                username: row.get(1)?,
+                created_at: row.get(2)?,
+                role: role_from_str(&row.get::<_, String>(3)?),
+                permissions: UserPermissions {
+                    terminal: row.get(4)?,
+                    impresion: row.get(5)?,
+                    archivos_escritura: row.get(6)?,
+                },
+            },
+        ))
+    });
+    if let Ok(rows) = rows {
+        for (token, session) in rows.flatten() {
+            map.insert(token, session);
+        }
+    }
+    map
+}
+
+/// Hash real (mismo costo) para verificar cuando el usuario no existe
+fn dummy_hash() -> String {
+    static DUMMY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    DUMMY
+        .get_or_init(|| bcrypt::hash("labnas-dummy-password", 10).unwrap_or_default())
+        .clone()
+}
+
+async fn bcrypt_verify(password: String, hash: String) -> bool {
+    tokio::task::spawn_blocking(move || bcrypt::verify(&password, &hash).unwrap_or(false))
+        .await
+        .unwrap_or(false)
+}
+
+async fn bcrypt_hash(password: String) -> Result<String, (StatusCode, String)> {
+    tokio::task::spawn_blocking(move || bcrypt::hash(&password, 10))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Error hasheando contrasena".to_string()))
+}
 
 fn extract_token(headers: &HeaderMap) -> Option<String> {
     headers
@@ -17,7 +118,7 @@ fn extract_token(headers: &HeaderMap) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn role_from_str(s: &str) -> UserRole {
+pub fn role_from_str(s: &str) -> UserRole {
     match s {
         "admin" => UserRole::Admin,
         "operador" => UserRole::Operador,
@@ -58,18 +159,22 @@ pub async fn register(
     if username.len() < 2 || username.len() > 32 {
         return Err((StatusCode::BAD_REQUEST, "Usuario debe tener entre 2 y 32 caracteres".to_string()));
     }
-    if req.password.len() < 4 {
-        return Err((StatusCode::BAD_REQUEST, "Contrasena debe tener al menos 4 caracteres".to_string()));
+    if req.password.len() < 8 {
+        return Err((StatusCode::BAD_REQUEST, "Contrasena debe tener al menos 8 caracteres".to_string()));
     }
     if !username.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.') {
         return Err((StatusCode::BAD_REQUEST, "Usuario solo puede contener letras, numeros, _ y .".to_string()));
     }
 
-    let password_hash = bcrypt::hash(&req.password, 8)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Error hasheando contrasena".to_string()))?;
+    let password_hash = bcrypt_hash(req.password.clone()).await?;
 
     let username_clone = username.clone();
     let (role, permissions) = crate::db::db_op_status(&state.db, move |conn| {
+        // IMMEDIATE: dos registros simultaneos no pueden crear dos admins
+        let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let conn = &*tx;
+
         // Check if user already exists
         let exists: bool = conn.query_row(
             "SELECT COUNT(*) FROM web_users WHERE username = ?1",
@@ -82,7 +187,7 @@ pub async fn register(
             return Err((StatusCode::CONFLICT, "Usuario ya existe".to_string()));
         }
 
-        // First user = admin, rest = observador
+        // Primer usuario = admin; el resto queda pendiente hasta que un admin lo apruebe
         let user_count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM web_users", [], |row| row.get(0),
         ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -95,11 +200,7 @@ pub async fn register(
                 archivos_escritura: true,
             })
         } else {
-            (UserRole::Observador, UserPermissions {
-                terminal: false,
-                impresion: true,
-                archivos_escritura: false,
-            })
+            (UserRole::Pendiente, UserPermissions::default())
         };
 
         conn.execute(
@@ -111,20 +212,14 @@ pub async fn register(
             ],
         ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+        tx.commit().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         Ok((role, permissions))
     }).await?;
 
-    // Create session
-    let token = uuid::Uuid::new_v4().to_string();
-    let mut sessions = state.sessions.lock().await;
-    sessions.insert(token.clone(), SessionInfo {
-        username: username.clone(),
-        role: role.clone(),
-        permissions: permissions.clone(),
-        created_at: std::time::Instant::now(),
-    });
+    let token = create_session(&state, &username, role.clone(), permissions.clone()).await?;
 
-    state.log_activity("Registro", &username, &username).await;
+    let detail = if role == UserRole::Pendiente { format!("{} (pendiente de aprobacion)", username) } else { username.clone() };
+    state.log_activity("Registro", &detail, &username).await;
 
     let modules = crate::db::db_op(&state.db, |conn| Ok(crate::db::get_modules(conn))).await
         .unwrap_or_default();
@@ -146,6 +241,24 @@ pub async fn login(
 ) -> Result<Json<AuthResponse>, (StatusCode, String)> {
     let username = req.username.trim().to_lowercase();
 
+    // Bloqueo temporal tras demasiados intentos fallidos
+    {
+        let mut failures = state.login_failures.lock().await;
+        if let Some(f) = failures.get(&username) {
+            let elapsed = f.last.elapsed().as_secs();
+            if f.count >= MAX_LOGIN_FAILURES && elapsed < LOGIN_LOCK_SECS {
+                let mins = (LOGIN_LOCK_SECS - elapsed).div_ceil(60);
+                return Err((
+                    StatusCode::TOO_MANY_REQUESTS,
+                    format!("Demasiados intentos fallidos. Espera {} min", mins),
+                ));
+            }
+            if elapsed >= LOGIN_LOCK_SECS {
+                failures.remove(&username);
+            }
+        }
+    }
+
     let username_clone = username.clone();
     let user_opt = crate::db::db_op(&state.db, move |conn| {
         conn.query_row(
@@ -164,20 +277,28 @@ pub async fn login(
         ).optional().map_err(|e| e.to_string())
     }).await?;
 
-    let Some((password_hash, role_str, perm_terminal, perm_impresion, perm_archivos)) = user_opt else {
-        // Rate limiting: frenar fuerza bruta (mismo delay que password incorrecto)
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        return Err((StatusCode::UNAUTHORIZED, "Usuario o contrasena incorrectos".to_string()));
+    // Usuario inexistente: igual se verifica contra un hash para no revelar si existe
+    let (password_hash, role_str, perm_terminal, perm_impresion, perm_archivos, exists) = match user_opt {
+        Some((h, r, t, i, a)) => (h, r, t, i, a, true),
+        None => (dummy_hash(), String::new(), false, false, false, false),
     };
 
-    let valid = bcrypt::verify(&req.password, &password_hash)
-        .unwrap_or(false);
+    let valid = bcrypt_verify(req.password.clone(), password_hash).await && exists;
 
     if !valid {
-        // Rate limiting: frenar fuerza bruta
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        {
+            let mut failures = state.login_failures.lock().await;
+            let entry = failures.entry(username.clone()).or_insert(LoginFailures {
+                count: 0,
+                last: std::time::Instant::now(),
+            });
+            entry.count += 1;
+            entry.last = std::time::Instant::now();
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         return Err((StatusCode::UNAUTHORIZED, "Usuario o contrasena incorrectos".to_string()));
     }
+    state.login_failures.lock().await.remove(&username);
 
     let role = role_from_str(&role_str);
     let permissions = UserPermissions {
@@ -186,14 +307,7 @@ pub async fn login(
         archivos_escritura: perm_archivos,
     };
 
-    let token = uuid::Uuid::new_v4().to_string();
-    let mut sessions = state.sessions.lock().await;
-    sessions.insert(token.clone(), SessionInfo {
-        username: username.clone(),
-        role: role.clone(),
-        permissions: permissions.clone(),
-        created_at: std::time::Instant::now(),
-    });
+    let token = create_session(&state, &username, role.clone(), permissions.clone()).await?;
 
     let modules = crate::db::db_op(&state.db, |conn| Ok(crate::db::get_modules(conn))).await
         .unwrap_or_default();
@@ -250,8 +364,7 @@ pub async fn logout(
     headers: HeaderMap,
 ) -> StatusCode {
     if let Some(token) = extract_token(&headers) {
-        let mut sessions = state.sessions.lock().await;
-        sessions.remove(&token);
+        remove_session(&state, &token).await;
     }
     StatusCode::OK
 }
@@ -277,8 +390,8 @@ pub async fn change_password(
     let username = session.username.clone();
     drop(sessions);
 
-    if req.new_password.len() < 4 {
-        return Err((StatusCode::BAD_REQUEST, "La nueva contrasena debe tener al menos 4 caracteres".to_string()));
+    if req.new_password.len() < 8 {
+        return Err((StatusCode::BAD_REQUEST, "La nueva contrasena debe tener al menos 8 caracteres".to_string()));
     }
 
     // Get current hash
@@ -293,22 +406,26 @@ pub async fn change_password(
         .ok_or((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()))
     }).await?;
 
-    let valid = bcrypt::verify(&req.current_password, &current_hash).unwrap_or(false);
-    if !valid {
+    if !bcrypt_verify(req.current_password.clone(), current_hash).await {
         return Err((StatusCode::UNAUTHORIZED, "Contrasena actual incorrecta".to_string()));
     }
 
-    let new_hash = bcrypt::hash(&req.new_password, 8)
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Error hasheando".to_string()))?;
+    let new_hash = bcrypt_hash(req.new_password.clone()).await?;
 
-    let username_clone2 = username.clone();
+    // Cambiar la contrasena cierra las demas sesiones del usuario
+    let (username_clone2, token_clone) = (username.clone(), token.clone());
     crate::db::db_op(&state.db, move |conn| {
         conn.execute(
             "UPDATE web_users SET password_hash = ?1 WHERE username = ?2",
             params![&new_hash, &username_clone2],
         ).map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM sessions WHERE username = ?1 AND token != ?2",
+            params![&username_clone2, &token_clone],
+        ).map_err(|e| e.to_string())?;
         Ok(())
     }).await?;
+    state.sessions.lock().await.retain(|t, s| s.username != username || *t == token);
 
     Ok(StatusCode::OK)
 }
@@ -514,6 +631,12 @@ pub async fn rename_user(
             "INSERT INTO web_users (username, password_hash, role, perm_terminal, perm_impresion, perm_archivos_escritura, linked_telegram)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![&new_clone, &password_hash, &role_str, perm_t, perm_i, perm_a, linked_tg],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        // Mover sesiones a la fila nueva antes de borrar la vieja (FK ON DELETE CASCADE)
+        conn.execute(
+            "UPDATE sessions SET username = ?1 WHERE username = ?2",
+            params![&new_clone, &old_clone],
         ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
         // Delete old row

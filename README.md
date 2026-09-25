@@ -35,12 +35,12 @@ Se distribuye como **binario estático** (musl) con la web UI embebida. Sin Dock
 TAG=$(curl -s https://api.github.com/repos/Debaq/labnas/releases/latest | grep tag_name | cut -d'"' -f4)
 curl -sL "https://github.com/Debaq/labnas/releases/download/${TAG}/labnas-${TAG}-linux-x86_64.tar.gz" | tar xz
 
-# Ejecutar
+# Ejecutar (como usuario normal, NO con sudo)
 cd labnas
-sudo ./labnas-backend
+./labnas-backend
 ```
 
-Abre `http://localhost:3001` — la primera cuenta creada se convierte en admin.
+Abre `http://localhost:3001` — la primera cuenta creada se convierte en admin. Las siguientes quedan **pendientes** hasta que un admin las apruebe.
 
 ## Sistema de módulos activables
 
@@ -273,23 +273,31 @@ TAG=$(curl -s https://api.github.com/repos/Debaq/labnas/releases/latest | grep t
 curl -sL "https://github.com/Debaq/labnas/releases/download/${TAG}/labnas-${TAG}-linux-x86_64.tar.gz" | tar xz
 
 sudo mv labnas /opt/labnas
-sudo /opt/labnas/labnas-backend
+sudo chown -R "$USER": /opt/labnas   # el servicio corre como tu usuario y se auto-actualiza
+/opt/labnas/labnas-backend
 ```
 
 ### Servicio systemd (producción)
 
+LabNAS **no debe correr como root**. El servicio corre como un usuario normal (el del escritorio del laboratorio, para que música, terminal y archivos del home funcionen) y solo recibe dos capacidades: `CAP_NET_RAW` (ping del escáner de red) y `CAP_NET_BIND_SERVICE` (puerto 80).
+
+**Configuración > Sistema > Inicio automático** muestra el comando listo para copiar. O a mano (reemplaza `TU_USUARIO`):
+
 ```bash
 sudo tee /etc/systemd/system/labnas.service > /dev/null << 'EOF'
 [Unit]
-Description=LabNAS Server
-After=network.target
+Description=LabNAS - NAS de Laboratorio
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
+User=TU_USUARIO
 ExecStart=/opt/labnas/labnas-backend
 WorkingDirectory=/opt/labnas
-Restart=always
+Restart=on-failure
 RestartSec=5
+AmbientCapabilities=CAP_NET_RAW CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target
@@ -298,6 +306,12 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now labnas
 ```
+
+La actualización desde la web reemplaza el binario y se re-ejecuta sola (no necesita `systemctl` ni root).
+
+### Carpetas accesibles (raíces de almacenamiento)
+
+El explorador, compartir, descargar URL e imprimir archivo solo acceden a las **raíces de almacenamiento**. Por defecto: el home del usuario del servicio, `/media`, `/mnt` y `/run/media`. Un admin las cambia en **Configuración > Archivos**. El directorio de datos (`~/.labnas`, con la base de datos) nunca es accesible.
 
 ### mDNS
 
@@ -457,14 +471,17 @@ LabNAS chequea GitHub cada 6h. Cuando hay update:
 
 ## Seguridad
 
-- Todas las rutas API requieren auth (excepto login/registro)
-- Passwords con bcrypt (cost 12)
-- Tokens de sesión: UUID v4, expiran en 24h
-- Middleware por rol bloquea llamadas no autorizadas
+- El servicio corre como usuario normal (no root), con solo `CAP_NET_RAW` y `CAP_NET_BIND_SERVICE`
+- Todas las rutas API requieren auth (excepto login/registro/branding/health, ingesta de sensores y links compartidos)
+- Permisos **denegados por defecto**: toda ruta no declarada en `middleware.rs` es solo admin (con tests)
+- Registro abierto, pero las cuentas nuevas quedan **pendientes** hasta que un admin las apruebe
+- Acceso a archivos limitado a las raíces de almacenamiento (canonicalizadas: sin `..` ni symlinks que escapen); `~/.labnas` bloqueado
+- Passwords con bcrypt (cost 10, mínimo 8 caracteres); bloqueo de 5 min tras 5 intentos fallidos
+- Sesiones de 24h persistidas en SQLite (sobreviven reinicios); cambiar la contraseña cierra las demás
+- `labnas.db` con permisos 600
 - Token del bot jamás expuesto en la API
 - Comandos CUPS sanitizados contra inyección
-- Rutas del sistema protegidas contra borrado
-- Terminal corre como usuario desktop, no root
+- Terminal web y `/cmd` de Telegram nunca corren como root
 
 ## Licencia
 
