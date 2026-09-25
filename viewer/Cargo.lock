@@ -1101,7 +1101,7 @@ dependencies = [
 
 [[package]]
 name = "labnas-viewer"
-version = "2.8.2"
+version = "3.0.0"
 dependencies = [
  "dirs",
  "mdns-sd",

@@ -1,6 +1,12 @@
 # Changelog
 
-## [Sin publicar] — desde v2.8.2
+## [3.0.0] — 2026-09-25
+
+Desde v2.8.2. Instalación:
+
+```bash
+curl -fsSL https://github.com/Debaq/labnas/releases/latest/download/install.sh | sudo bash
+```
 
 Cambios grandes pensados para una instalación nueva. Leer **Cambios que afectan la instalación** antes de desplegar.
 
