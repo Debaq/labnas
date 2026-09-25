@@ -123,6 +123,22 @@ const MIGRATIONS: &[&str] = &[
         readers TEXT NOT NULL DEFAULT '[\"*\"]',
         writers TEXT NOT NULL DEFAULT '[\"perm:write\"]'
     );",
+    // 8: cola compartida de impresion 3D
+    "CREATE TABLE IF NOT EXISTS print_queue (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        file_name TEXT NOT NULL DEFAULT '',
+        printer_id TEXT REFERENCES printers3d(id) ON DELETE SET NULL,
+        requested_by TEXT NOT NULL,
+        notes TEXT NOT NULL DEFAULT '',
+        grams REAL,
+        seconds INTEGER,
+        status TEXT NOT NULL DEFAULT 'pendiente',
+        position INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_print_queue_status ON print_queue(status, position);",
 ];
 
 fn run_migrations(conn: &Connection) {

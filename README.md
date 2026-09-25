@@ -112,6 +112,8 @@ Módulos disponibles:
 - Drag & drop de `.gcode`
 - Auto-monitor: notificación Telegram al finalizar o al error
 - Autodetección de impresoras en red (los 4 protocolos)
+- **Calculadora de costos** que lee peso y tiempo del gcode (PrusaSlicer, Cura, OrcaSlicer, Bambu Studio) sin subirlo
+- **Cola compartida**: cualquiera pide una impresión (con estimación desde el gcode); operadores/admins ordenan, asignan impresora y marcan estados; el solicitante recibe aviso al empezar/terminar
 - Secciones/agrupaciones de impresoras por área del lab
 
 ### Impresión de documentos

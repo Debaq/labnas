@@ -191,3 +191,59 @@ export async function reorderPrinter3DSections(order: string[]): Promise<void> {
   })
   if (!res.ok) throw new Error('Error al reordenar secciones')
 }
+
+// --- Cola compartida ---
+
+export interface QueueItem {
+  id: string
+  title: string
+  file_name: string
+  printer_id: string | null
+  requested_by: string
+  notes: string
+  grams: number | null
+  seconds: number | null
+  status: 'pendiente' | 'imprimiendo' | 'terminado' | 'cancelado'
+  position: number
+  created_at: string
+  updated_at: string
+}
+
+export type QueueInput = Pick<QueueItem, 'title' | 'file_name' | 'notes'> & {
+  printer_id?: string | null
+  grams?: number | null
+  seconds?: number | null
+}
+
+async function queueJson<T>(res: Response, fallback: string): Promise<T> {
+  if (!res.ok) throw new Error((await res.text()) || fallback)
+  return res.json()
+}
+
+export async function fetchPrintQueue(): Promise<QueueItem[]> {
+  return queueJson(await api('/api/printers3d/queue'), 'Error al obtener la cola')
+}
+
+export async function addToPrintQueue(item: QueueInput): Promise<QueueItem> {
+  return queueJson(await api('/api/printers3d/queue', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item),
+  }), 'Error al pedir la impresion')
+}
+
+export async function updatePrintQueueItem(id: string, patch: Partial<QueueInput> & { status?: QueueItem['status'] }): Promise<QueueItem> {
+  return queueJson(await api(`/api/printers3d/queue/${id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
+  }), 'Error al actualizar el pedido')
+}
+
+export async function deletePrintQueueItem(id: string): Promise<void> {
+  const res = await api(`/api/printers3d/queue/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al borrar el pedido')
+}
+
+export async function reorderPrintQueue(ids: string[]): Promise<void> {
+  const res = await api('/api/printers3d/queue/reorder', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
+  })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al ordenar la cola')
+}

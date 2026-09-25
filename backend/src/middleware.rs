@@ -112,6 +112,8 @@ pub fn required_access(method: &Method, path: &str) -> Access {
 
         // --- Impresoras 3D ---
         ("GET", ["printers3d", ..]) => User,
+        // Cola compartida: cualquiera pide; el handler limita editar/borrar a lo propio
+        ("POST", ["printers3d", "queue"]) | ("PUT", ["printers3d", "queue", _]) | ("DELETE", ["printers3d", "queue", _]) => User,
         (_, ["printers3d", ..]) => Operator,
 
         // --- Impresion CUPS ---
@@ -282,6 +284,8 @@ mod tests {
         assert_eq!(acc(Method::POST, "/api/printing/printers/hp/enable"), Admin);
         assert_eq!(acc(Method::PUT, "/api/printers3d/abc"), Operator);
         assert_eq!(acc(Method::GET, "/api/printers3d/abc/status"), User);
+        assert_eq!(acc(Method::POST, "/api/printers3d/queue"), User);
+        assert_eq!(acc(Method::POST, "/api/printers3d/queue/reorder"), Operator);
     }
 
     #[test]

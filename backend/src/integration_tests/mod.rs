@@ -8,6 +8,7 @@ mod events;
 mod files;
 mod folders;
 mod network;
+mod printers;
 mod secrets;
 mod security;
 mod sensors;

@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useEvent, useEventsConnected } from '../events/useEvents'
 import { useNavigate } from 'react-router-dom'
-import { Box, ArrowLeft, Plus, Trash2, Upload, Loader2, Thermometer, Search, Wifi, WifiOff, X, Play, Pause, Square, Home, Send, Camera, RefreshCw, FileText, Printer, ChevronDown, ChevronUp, Move, Flame, ArrowUp, ArrowDown, ArrowRight, ExternalLink, Calculator, Pencil, FolderPlus, ChevronRight, Check } from 'lucide-react'
+import { Box, ArrowLeft, Plus, Trash2, Upload, Loader2, Thermometer, Search, Wifi, WifiOff, X, Play, Pause, Square, Home, Send, Camera, RefreshCw, FileText, Printer, ChevronDown, ChevronUp, Move, Flame, ArrowUp, ArrowDown, ArrowRight, ExternalLink, Calculator, Pencil, FolderPlus, ChevronRight, Check, ListOrdered } from 'lucide-react'
 import {
   fetchPrinters3D,
   addPrinter3D,
@@ -35,6 +35,7 @@ import type {
   Printer3DSection,
 } from '../types'
 import CostCalculatorModal from '../components/printers3d/CostCalculatorModal'
+import PrintQueueModal from '../components/printers3d/PrintQueueModal'
 
 function formatTime(seconds: number | null | undefined): string {
   if (!seconds) return '--'
@@ -99,6 +100,7 @@ export default function Printers3DPage() {
   const [formElectricityCost, setFormElectricityCost] = useState<number | string>('')
   const [editingPrinterId, setEditingPrinterId] = useState<string | null>(null)
   const [showCostCalc, setShowCostCalc] = useState(false)
+  const [showQueue, setShowQueue] = useState(false)
 
   const loadPrinters = useCallback(async () => {
     try {
@@ -543,6 +545,13 @@ export default function Printers3DPage() {
             style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
           >
             <Calculator size={12} /> Calculadora de costos
+          </button>
+          <button
+            onClick={() => setShowQueue(true)}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+            style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+          >
+            <ListOrdered size={12} /> Cola de impresion
           </button>
         </div>
 
@@ -1516,6 +1525,7 @@ export default function Printers3DPage() {
       )}
 
       {showCostCalc && <CostCalculatorModal printers={printers} onClose={() => setShowCostCalc(false)} />}
+      {showQueue && <PrintQueueModal printers={printers} onClose={() => setShowQueue(false)} />}
     </>
   )
 }
