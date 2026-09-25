@@ -31,6 +31,8 @@ import {
   Link,
   type LucideIcon,
 } from 'lucide-react'
+import { useAuth } from '../auth/AuthContext'
+import TrashPanel from '../components/TrashPanel'
 import { fetchFiles, uploadFile, downloadFile, deleteFile, createDirectory, fetchQuickAccess, fetchCupsPrinters, fetchPrinterOptions, printFilePath, createShare, downloadFromUrl } from '../api'
 import type { FileEntry, QuickAccess, CupsPrinter, PrinterOption } from '../types'
 
@@ -90,6 +92,8 @@ function formatDate(dateStr: string): string {
 
 export default function FilesPage() {
   const [files, setFiles] = useState<FileEntry[]>([])
+  const { can, isAdmin } = useAuth()
+  const [showTrash, setShowTrash] = useState(false)
   const [currentPath, setCurrentPath] = useState('/')
   const [pathInput, setPathInput] = useState('/')
   const [loading, setLoading] = useState(true)
@@ -177,12 +181,13 @@ export default function FilesPage() {
   }
 
   async function handleDelete(path: string) {
-    if (!confirm('Estas seguro de eliminar este archivo?')) return
+    if (!confirm('Mover a la papelera? Se puede restaurar durante 30 dias.')) return
     try {
       await deleteFile(path)
       await loadFiles()
     } catch (err) {
       console.error('Error eliminando:', err)
+      alert(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -339,6 +344,7 @@ export default function FilesPage() {
 
   return (
     <div className="space-y-6">
+      {showTrash && <TrashPanel isAdmin={isAdmin} onClose={() => setShowTrash(false)} onRestored={loadFiles} />}
       {/* Path input bar */}
       <div className="flex items-center gap-2">
         <input
@@ -442,6 +448,20 @@ export default function FilesPage() {
             <Link size={16} />
             Descargar URL
           </button>
+          {can('archivos_escritura') && (
+            <button
+              onClick={() => setShowTrash(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90"
+              style={{
+                backgroundColor: 'var(--card-bg)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              <Trash2 size={16} />
+              Papelera
+            </button>
+          )}
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}

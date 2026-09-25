@@ -10,7 +10,7 @@ use crate::state::{AppState, SessionInfo};
 
 /// Mapeo modulo -> prefijos de ruta API
 const MODULE_ROUTE_PREFIXES: &[(&str, &[&str])] = &[
-    ("files",      &["/api/files", "/api/shares", "/api/share/", "/api/download-url"]),
+    ("files",      &["/api/files", "/api/shares", "/api/share/", "/api/download-url", "/api/trash"]),
     ("network",    &["/api/network"]),
     ("printing",   &["/api/printing"]),
     ("printers3d", &["/api/printers3d"]),
@@ -82,6 +82,7 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         ("GET", ["files", "roots"]) => User,
         ("POST", ["files", "upload"]) | ("POST", ["files", "directory"]) | ("DELETE", ["files"]) => PermFileWrite,
         ("POST", ["download-url"]) => PermFileWrite,
+        ("GET", ["trash"]) | ("POST", ["trash", _, "restore"]) | ("DELETE", ["trash", _]) => PermFileWrite,
         ("GET", ["shares"]) | ("POST", ["shares"]) | ("DELETE", ["shares", _]) => User,
 
         // --- Sistema (lectura) ---
@@ -253,6 +254,10 @@ mod tests {
         assert_eq!(acc(Method::POST, "/api/files/upload"), PermFileWrite);
         assert_eq!(acc(Method::DELETE, "/api/files"), PermFileWrite);
         assert_eq!(acc(Method::GET, "/api/files/download"), User);
+        assert_eq!(acc(Method::GET, "/api/trash"), PermFileWrite);
+        assert_eq!(acc(Method::POST, "/api/trash/abc/restore"), PermFileWrite);
+        assert_eq!(acc(Method::DELETE, "/api/trash/abc"), PermFileWrite);
+        assert_eq!(acc(Method::DELETE, "/api/trash"), Admin);
     }
 
     #[test]

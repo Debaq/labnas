@@ -60,6 +60,42 @@ export async function setUploadLimit(limitMb: number): Promise<void> {
   if (!res.ok) throw new Error((await res.text()) || 'Error al guardar limite')
 }
 
+// --- Papelera ---
+
+export interface TrashItem {
+  id: string
+  name: string
+  original_path: string
+  is_dir: boolean
+  size: number
+  deleted_by: string
+  deleted_at: string
+}
+
+export async function fetchTrash(): Promise<TrashItem[]> {
+  const res = await api('/api/trash')
+  if (!res.ok) throw new Error((await res.text()) || 'Error al obtener la papelera')
+  return res.json()
+}
+
+/** Devuelve la ruta donde quedo restaurado */
+export async function restoreTrashItem(id: string): Promise<string> {
+  const res = await api(`/api/trash/${id}/restore`, { method: 'POST' })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al restaurar')
+  return res.json()
+}
+
+export async function deleteTrashItem(id: string): Promise<void> {
+  const res = await api(`/api/trash/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al borrar')
+}
+
+export async function emptyTrash(): Promise<number> {
+  const res = await api('/api/trash', { method: 'DELETE' })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al vaciar la papelera')
+  return res.json()
+}
+
 // --- Respaldos (admin) ---
 
 export interface BackupJob {

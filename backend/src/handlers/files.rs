@@ -226,16 +226,15 @@ pub async fn delete_file(
         ));
     }
 
-    let shown = target.display().to_string();
-    if target.is_dir() {
-        tokio::fs::remove_dir_all(&target).await.map_err(internal)?;
-        state
-            .log_activity("Eliminado", &format!("Carpeta: {}", shown), &session.username)
-            .await;
-    } else {
-        tokio::fs::remove_file(&target).await.map_err(internal)?;
-        state.log_activity("Eliminado", &shown, &session.username).await;
+    // No se puede borrar algo que ya esta en una papelera desde el explorador
+    if target.components().any(|c| c.as_os_str() == crate::handlers::trash::TRASH_DIR) {
+        return Err((StatusCode::BAD_REQUEST, "Usa la papelera para gestionar este elemento".to_string()));
     }
+
+    crate::handlers::trash::move_to_trash(&state, &roots, &target, &session.username).await?;
+    state
+        .log_activity("A la papelera", &target.display().to_string(), &session.username)
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }

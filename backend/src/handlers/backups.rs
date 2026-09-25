@@ -428,6 +428,8 @@ fn snapshot(source: &Path, dest: &Path, keep: usize, db: Option<&DbPool>) -> Res
 
     let mut cmd = std::process::Command::new("rsync");
     cmd.args(["-a", "--delete", "--numeric-ids"]);
+    // La papelera no se respalda
+    cmd.arg(format!("--exclude={}/", crate::handlers::trash::TRASH_DIR));
     if let Ok(prev) = std::fs::canonicalize(&latest) {
         if prev.is_dir() {
             cmd.arg(format!("--link-dest={}", prev.display()));

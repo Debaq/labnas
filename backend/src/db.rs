@@ -91,6 +91,18 @@ const MIGRATIONS: &[&str] = &[
         last_message TEXT,
         created_at TEXT NOT NULL
     );",
+    // 4: papelera
+    "CREATE TABLE IF NOT EXISTS trash_items (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        original_path TEXT NOT NULL,
+        trash_path TEXT NOT NULL,
+        is_dir INTEGER NOT NULL,
+        size INTEGER NOT NULL DEFAULT 0,
+        deleted_by TEXT NOT NULL,
+        deleted_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_trash_deleted_at ON trash_items(deleted_at);",
 ];
 
 fn run_migrations(conn: &Connection) {

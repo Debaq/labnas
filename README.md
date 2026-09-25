@@ -472,6 +472,10 @@ LabNAS chequea GitHub cada 6h. Cuando hay update:
 - **Rollback manual**: botón "Volver a vX" en Configuración (repetirlo vuelve a la nueva)
 - También permite **reinstalar la versión actual** (archivos corruptos)
 
+## Papelera
+
+Borrar desde el explorador **mueve a la papelera** (`.labnas-trash/`, oculta, en el mismo disco que el archivo: mover es instantáneo). Desde **Archivos > Papelera** se restaura a la ruta original (con sufijo si ya existe algo con ese nombre) o se borra definitivamente; un admin puede vaciarla entera. Lo que lleva más de 30 días se borra solo (setting `trash_retention_days`). La papelera no se incluye en los respaldos.
+
 ## Respaldos
 
 **Configuración > Respaldos** (admin). Cada tarea copia una carpeta (dentro de las carpetas accesibles) a un destino local —un disco externo o una carpeta de red montada (NFS/SMB)— todos los días a la hora elegida.

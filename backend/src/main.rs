@@ -134,6 +134,11 @@ async fn main() {
         .route("/api/files/quickaccess", get(handlers::files::quick_access))
         .route("/api/files/roots", get(handlers::files::get_roots))
         .route("/api/files/roots", put(handlers::files::set_roots))
+        // Papelera
+        .route("/api/trash", get(handlers::trash::list_trash))
+        .route("/api/trash", delete(handlers::trash::empty_trash))
+        .route("/api/trash/{id}", delete(handlers::trash::delete_item))
+        .route("/api/trash/{id}/restore", post(handlers::trash::restore_item))
         // Storage & System
         .route("/api/storage", get(handlers::system::storage_info))
         .route("/api/system/disks", get(handlers::system::system_disks))
@@ -347,6 +352,7 @@ async fn main() {
     tokio::spawn(handlers::system::update_check_loop(state.clone()));
     tokio::spawn(handlers::audit::audit_cleanup_loop(state.clone()));
     tokio::spawn(handlers::backups::backup_scheduler_loop(state.clone()));
+    tokio::spawn(handlers::trash::trash_cleanup_loop(state.clone()));
 
     // Background tasks: condicionales por modulo
     {

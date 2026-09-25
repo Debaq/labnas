@@ -1,3 +1,4 @@
+pub mod trash;
 pub mod backups;
 pub mod audit;
 pub mod auth;
