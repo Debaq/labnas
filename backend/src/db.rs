@@ -123,6 +123,10 @@ fn run_migrations(conn: &Connection) {
 }
 
 fn db_path() -> PathBuf {
+    #[cfg(test)]
+    if let Some(h) = crate::config::TEST_HOME.read().ok().and_then(|h| h.clone()) {
+        return PathBuf::from(h).join(".labnas").join("labnas.db");
+    }
     if let Ok(p) = std::env::var("LABNAS_DB") {
         return PathBuf::from(p);
     }

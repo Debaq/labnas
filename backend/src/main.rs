@@ -40,45 +40,21 @@ async fn main() {
 
     let pool = db::init_db();
 
-    // Read startup settings from DB
-    let (mdns_enabled, mdns_hostname, upload_limit_mb, enabled_modules_set, sessions) = {
+    // Ajustes de arranque
+    let (mdns_enabled, mdns_hostname, upload_limit_mb) = {
         let conn = pool.get().expect("DB pool error at startup");
         let mdns_enabled = db::get_setting_bool(&conn, "mdns_enabled");
         let mdns_hostname = db::get_setting(&conn, "mdns_hostname")
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "labnas".to_string());
         let upload_limit_mb = db::get_setting_u32(&conn, "upload_limit_mb", 50);
-        let enabled_modules: std::collections::HashSet<String> =
-            db::get_enabled_module_ids(&conn).into_iter().collect();
-        let sessions = handlers::auth::load_sessions(&conn);
-        println!("[LabNAS] Sesiones restauradas: {}", sessions.len());
-        (mdns_enabled, mdns_hostname, upload_limit_mb, enabled_modules, sessions)
+        (mdns_enabled, mdns_hostname, upload_limit_mb)
     };
 
-    let shutdown = tokio_util::sync::CancellationToken::new();
-    let restart_requested = Arc::new(std::sync::atomic::AtomicBool::new(false));
-
-    let state = AppState {
-        scanned_hosts: Arc::new(Mutex::new(Vec::new())),
-        start_time: Instant::now(),
-        db: pool,
-        http_client: reqwest::Client::new(),
-        shutdown: shutdown.clone(),
-        sessions: Arc::new(Mutex::new(sessions)),
-        link_codes: Arc::new(Mutex::new(std::collections::HashMap::new())),
-        share_links: Arc::new(Mutex::new(std::collections::HashMap::new())),
-        tg_terminals: Arc::new(Mutex::new(std::collections::HashMap::new())),
-        email_inbox: Arc::new(Mutex::new(std::collections::HashMap::new())),
-        mdns_service: Arc::new(Mutex::new(None)),
-        music: Arc::new(Mutex::new(handlers::music::MusicState::default())),
-        music_process: Arc::new(Mutex::new(None)),
-        update_cache: Arc::new(Mutex::new(state::UpdateCache::default())),
-        sensors: Arc::new(Mutex::new(state::SensorState::default())),
-        enabled_modules: Arc::new(Mutex::new(enabled_modules_set)),
-        login_failures: Arc::new(Mutex::new(std::collections::HashMap::new())),
-        restart_requested: restart_requested.clone(),
-        events: events::EventBus::default(),
-    };
+    let state = new_state(pool);
+    let shutdown = state.shutdown.clone();
+    let restart_requested = state.restart_requested.clone();
+    println!("[LabNAS] Sesiones restauradas: {}", state.sessions.lock().await.len());
 
     // Start mDNS if enabled
     if mdns_enabled {
@@ -92,16 +68,7 @@ async fn main() {
         }
     }
 
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
-        .allow_headers(Any);
-
-    let api = api_routes()
-        .layer(axum::extract::DefaultBodyLimit::max(upload_limit_mb as usize * 1024 * 1024))
-        .layer(axum_mw::from_fn_with_state(state.clone(), middleware::permission_check))
-        .layer(cors)
-        .with_state(state.clone());
+    let api = build_api(&state, upload_limit_mb);
 
     // Background tasks: siempre activas (infraestructura)
     tokio::spawn(handlers::notifications::telegram_bot_loop(state.clone()));
@@ -339,6 +306,52 @@ async fn check_firewall() {
     }
 
     println!("  \x1b[36m  Ejecuta: sudo ufw allow 3001 && sudo ufw allow 80\x1b[0m\n");
+}
+
+/// Estado de la app a partir de la DB (modulos activos y sesiones vigentes)
+fn new_state(pool: db::DbPool) -> AppState {
+    let (enabled_modules, sessions) = {
+        let conn = pool.get().expect("DB pool error at startup");
+        let enabled: std::collections::HashSet<String> =
+            db::get_enabled_module_ids(&conn).into_iter().collect();
+        (enabled, handlers::auth::load_sessions(&conn))
+    };
+
+    AppState {
+        scanned_hosts: Arc::new(Mutex::new(Vec::new())),
+        start_time: Instant::now(),
+        db: pool,
+        http_client: reqwest::Client::new(),
+        shutdown: tokio_util::sync::CancellationToken::new(),
+        sessions: Arc::new(Mutex::new(sessions)),
+        link_codes: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        share_links: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        tg_terminals: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        email_inbox: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        mdns_service: Arc::new(Mutex::new(None)),
+        music: Arc::new(Mutex::new(handlers::music::MusicState::default())),
+        music_process: Arc::new(Mutex::new(None)),
+        update_cache: Arc::new(Mutex::new(state::UpdateCache::default())),
+        sensors: Arc::new(Mutex::new(state::SensorState::default())),
+        enabled_modules: Arc::new(Mutex::new(enabled_modules)),
+        login_failures: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        restart_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        events: events::EventBus::default(),
+    }
+}
+
+/// API completa: rutas + limite de subida + permisos + CORS
+fn build_api(state: &AppState, upload_limit_mb: u32) -> Router {
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+        .allow_headers(Any);
+
+    api_routes()
+        .layer(axum::extract::DefaultBodyLimit::max(upload_limit_mb as usize * 1024 * 1024))
+        .layer(axum_mw::from_fn_with_state(state.clone(), middleware::permission_check))
+        .layer(cors)
+        .with_state(state.clone())
 }
 
 /// Todas las rutas de la API (sin estado ni capas). `Router::route` hace panic ante
@@ -603,3 +616,6 @@ mod tests {
         let _ = super::api_routes();
     }
 }
+
+#[cfg(test)]
+mod integration_tests;

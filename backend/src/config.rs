@@ -143,7 +143,16 @@ pub fn detect_session_user() -> Option<String> {
 /// Resuelve el home real del usuario dueño de la instalación.
 /// Deriva desde la ubicación del binario para ser consistente
 /// sin importar si se ejecuta con sudo, systemd o directamente.
+/// Home fijado por los tests de integracion (cada servidor de prueba usa el suyo)
+#[cfg(test)]
+pub static TEST_HOME: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
+
 pub fn resolve_home() -> String {
+    #[cfg(test)]
+    if let Some(h) = TEST_HOME.read().ok().and_then(|h| h.clone()) {
+        return h;
+    }
+
     // 1. Env var explícita
     if let Ok(h) = std::env::var("LABNAS_HOME") {
         return h;
