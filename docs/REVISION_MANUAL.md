@@ -1,6 +1,6 @@
 # Revisión manual antes del release
 
-Lo automatizado (68 tests de Rust, tests del frontend, clippy, ESLint, build) ya pasa en CI. Esta lista cubre lo que **no se ha visto en pantalla**: UI, navegador real, visor y hardware. Marcar cada punto; si algo falla, anotar qué se esperaba y qué pasó.
+Lo automatizado (74 tests de Rust, tests del frontend, clippy, ESLint, build) ya pasa en CI. Esta lista cubre lo que **no se ha visto en pantalla**: UI, navegador real, visor y hardware. Marcar cada punto; si algo falla, anotar qué se esperaba y qué pasó.
 
 ## Preparación
 
@@ -13,7 +13,7 @@ Base limpia: `LABNAS_HOME=/tmp/labnas-prueba ./labnas-backend` (no toca `~/.labn
 
 ## 1. Cuentas y sesión
 - [ ] Primer registro → queda admin y entra directo; aparece el **asistente inicial**
-- [ ] Asistente: recorrer los 6 pasos (carpetas, mDNS, HTTPS, Telegram, clave); "Terminar" solo se habilita al marcar el respaldo de la clave; al recargar no vuelve a salir
+- [ ] Asistente: recorrer los 7 pasos (carpetas, mDNS, HTTPS, Telegram, doble factor, clave); "Terminar" solo se habilita al marcar el respaldo de la clave; al recargar no vuelve a salir
 - [ ] "Omitir" también lo cierra para siempre; Configuración > Administración > "Abrir asistente inicial" lo reabre
 - [ ] Un usuario no admin nunca ve el asistente
 - [ ] Segundo registro (otro navegador) → ve "Cuenta pendiente de aprobación"
@@ -21,6 +21,10 @@ Base limpia: `LABNAS_HOME=/tmp/labnas-prueba ./labnas-backend` (no toca `~/.labn
 - [ ] Contraseña de 7 caracteres → rechazada con mensaje
 - [ ] 5 logins fallidos → el 6.º dice "Demasiados intentos… espera N min"
 - [ ] Reiniciar el backend → la sesión sigue abierta
+- [ ] Doble factor (Configuración > General): escanear el QR con Aegis/Google Authenticator → se activa y muestra 10 códigos (copiar/descargar)
+- [ ] Cerrar sesión y entrar: tras la contraseña pide el código; uno errado es rechazado; un código de recuperación entra una sola vez
+- [ ] WebDAV con 2FA: la contraseña normal ya no monta; "Contraseña para WebDAV" sí
+- [ ] Admin: en Usuarios aparece la etiqueta 2FA; la "x" la quita y el usuario entra solo con contraseña
 
 ## 2. Archivos
 - [ ] El explorador abre en el home; "/" muestra solo las carpetas accesibles

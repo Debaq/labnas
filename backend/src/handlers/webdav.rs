@@ -32,6 +32,13 @@ const CRED_TTL: Duration = Duration::from_secs(5 * 60);
 static CREDENTIALS: LazyLock<Mutex<HashMap<String, (SessionInfo, Instant)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Olvida las credenciales en cache de un usuario (cambio de contrasena o de 2FA)
+pub fn forget_credentials(username: &str) {
+    if let Ok(mut cache) = CREDENTIALS.lock() {
+        cache.retain(|_, (s, _)| s.username != username);
+    }
+}
+
 fn plain(status: StatusCode, msg: &str) -> Response {
     (status, msg.to_string()).into_response()
 }
@@ -78,10 +85,13 @@ async fn authenticate(state: &AppState, user: &str, pass: &str) -> Result<Sessio
     let u = user.to_string();
     let row = crate::db::db_op(&state.db, move |conn| {
         use rusqlite::OptionalExtension;
+        // Con doble factor solo vale la contrasena de aplicacion (WebDAV no admite un segundo factor)
         conn.query_row(
-            "SELECT password_hash, role, perm_terminal, perm_impresion, perm_archivos_escritura FROM web_users WHERE username = ?1",
+            "SELECT CASE WHEN totp_secret IS NULL THEN password_hash ELSE app_password_hash END,
+                    role, perm_terminal, perm_impresion, perm_archivos_escritura
+             FROM web_users WHERE username = ?1",
             [&u],
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, bool>(2)?, r.get::<_, bool>(3)?, r.get::<_, bool>(4)?)),
+            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?, r.get::<_, bool>(2)?, r.get::<_, bool>(3)?, r.get::<_, bool>(4)?)),
         )
         .optional()
         .map_err(|e| e.to_string())
@@ -90,11 +100,11 @@ async fn authenticate(state: &AppState, user: &str, pass: &str) -> Result<Sessio
     .map_err(|(s, e)| Box::new(plain(s, &e)))?;
 
     let ok = match &row {
-        Some((hash, ..)) => {
+        Some((Some(hash), ..)) => {
             let (p, h) = (pass.to_string(), hash.clone());
             tokio::task::spawn_blocking(move || bcrypt::verify(&p, &h).unwrap_or(false)).await.unwrap_or(false)
         }
-        None => false,
+        _ => false,
     };
     let Some((_, role, t, i, a)) = row.filter(|_| ok) else {
         let mut failures = state.login_failures.lock().await;

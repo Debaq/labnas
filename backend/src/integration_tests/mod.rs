@@ -14,6 +14,7 @@ mod secrets;
 mod security;
 mod sensors;
 mod setup;
+mod twofa;
 mod smart;
 mod timelapse;
 mod webdav;

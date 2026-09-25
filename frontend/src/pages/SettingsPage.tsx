@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine, Pencil, Music, HelpCircle, X, RefreshCw, Shield, LayoutDashboard, FolderOpen, Network, Printer, Box, ClipboardList, FileText, Mail, Package, GraduationCap, Thermometer, ChevronUp, ChevronDown, AlertTriangle, Bell, Server, SlidersHorizontal, RotateCcw, Archive } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import SetupWizard from '../components/SetupWizard'
+import TwoFactorSection from '../components/TwoFactorSection'
 import StorageRootsSection from '../components/StorageRootsSection'
 import SmartSection from '../components/SmartSection'
 import HttpsSection from '../components/HttpsSection'
@@ -10,7 +11,7 @@ import AuditLogSection from '../components/AuditLogSection'
 import BackupsSection from '../components/BackupsSection'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, getThemeNames, type ThemeName } from '../themes/themes'
-import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, forceCheckUpdate, doUpdate, doReinstall, fetchRollbackStatus, doRollback, type RollbackStatus, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, updateService, setLastfmKey, fetchHealth, getMpvArgs, setMpvArgs as saveMpvArgs, setUploadLimit, fetchModules, toggleModule, reorderModules, fetchSetup, type SetupStatus, type LabBranding, type LabService } from '../api'
+import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, forceCheckUpdate, doUpdate, doReinstall, fetchRollbackStatus, doRollback, type RollbackStatus, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, updateService, setLastfmKey, fetchHealth, getMpvArgs, setMpvArgs as saveMpvArgs, setUploadLimit, fetchModules, toggleModule, reorderModules, fetchSetup, resetUserTwoFactor, type SetupStatus, type LabBranding, type LabService } from '../api'
 import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig, UserRole, UserPermissions, ModuleInfo } from '../types'
 import { errorMessage } from '../lib/errors'
 import type { IconComponent } from '../lib/icons'
@@ -116,7 +117,7 @@ export default function SettingsPage() {
   const [needsRestart, setNeedsRestart] = useState(false)
   const [disks, setDisks] = useState<DiskInfo[]>([])
   const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null)
-  const [webUsers, setWebUsers] = useState<{ username: string; role: UserRole; permissions: UserPermissions }[]>([])
+  const [webUsers, setWebUsers] = useState<{ username: string; role: UserRole; permissions: UserPermissions; totp_enabled?: boolean }[]>([])
   const [linkCode, setLinkCode] = useState<string | null>(null)
   const [updateInfo, setUpdateInfo] = useState<{ current_version: string; latest_version: string | null; update_available: boolean } | null>(null)
   const [updating, setUpdating] = useState(false)
@@ -706,6 +707,8 @@ export default function SettingsPage() {
         </div>
       </section>}
 
+      {activeTab === 'general' && <TwoFactorSection />}
+
       {/* Usuarios y Telegram (admin only) */}
       {activeTab === 'users' && isAdmin && <section>
         <div className="flex items-center gap-3 mb-4">
@@ -736,6 +739,17 @@ export default function SettingsPage() {
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: roleColor + '20', color: roleColor }}>
                           {u.role === 'admin' ? 'Admin' : u.role === 'operador' ? 'Operador' : u.role === 'observador' ? 'Observador' : 'Pendiente'}
                         </span>
+                        {u.totp_enabled && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium flex items-center gap-1" style={{ backgroundColor: 'var(--success)' + '20', color: 'var(--success)' }}>
+                            2FA
+                            {u.username !== authUser?.username && (
+                              <button onClick={async () => {
+                                if (!confirm(`Quitar el doble factor de ${u.username}? Usalo solo si perdio el telefono y los codigos de recuperacion.`)) return
+                                try { await resetUserTwoFactor(u.username); setWebUsers(await fetchWebUsers()) } catch (e) { alert(errorMessage(e)) }
+                              }} title="Quitar doble factor" className="hover:opacity-70"><X size={10} /></button>
+                            )}
+                          </span>
+                        )}
                       </div>
                       {linkedChat && (
                         <div className="flex items-center gap-1 mt-0.5">

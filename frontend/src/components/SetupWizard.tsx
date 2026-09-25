@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Sparkles, FolderOpen, Wifi, Lock, Send, KeyRound, Loader2, Check, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Sparkles, FolderOpen, Wifi, Lock, Send, ShieldCheck, KeyRound, Loader2, Check, ChevronLeft, ChevronRight } from 'lucide-react'
 import StorageRootsSection from './StorageRootsSection'
 import HttpsSection from './HttpsSection'
+import TwoFactorSection from './TwoFactorSection'
 import { finishSetup, getMdnsStatus, setMdns, fetchNotificationConfig, setBotToken, type SetupStatus } from '../api'
 import { errorMessage } from '../lib/errors'
 
@@ -136,6 +137,7 @@ export default function SetupWizard({ status, onClose }: { status: SetupStatus; 
             <li>Nombre del NAS en la red</li>
             <li>HTTPS</li>
             <li>Avisos por Telegram (opcional)</li>
+            <li>Doble factor para tu cuenta</li>
             <li>Respaldo de la clave de cifrado</li>
           </ul>
           <Hint>Las cuentas nuevas quedan pendientes hasta que las apruebes en Configuración &gt; Usuarios.</Hint>
@@ -146,6 +148,7 @@ export default function SetupWizard({ status, onClose }: { status: SetupStatus; 
     { title: 'Nombre en la red', icon: Wifi, body: <MdnsStep suggested={status.hostname} /> },
     { title: 'Conexión segura', icon: Lock, body: <HttpsSection /> },
     { title: 'Avisos por Telegram', icon: Send, body: <TelegramStep /> },
+    { title: 'Doble factor', icon: ShieldCheck, body: <TwoFactorSection /> },
     { title: 'Clave de cifrado', icon: KeyRound, body: <SecretKeyStep path={status.secret_key_path} confirmed={keySaved} onConfirm={setKeySaved} /> },
   ]
   const last = step === steps.length - 1

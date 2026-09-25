@@ -50,6 +50,13 @@ async fn migracion_cifra_secretos_en_claro() {
         conn.execute("UPDATE notification_config SET bot_token = '123:token-en-claro' WHERE id = 1", []).unwrap();
         // lo que agregan las migraciones posteriores a la 5
         conn.execute("ALTER TABLE sensor_devices DROP COLUMN token_hash", []).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE web_users DROP COLUMN totp_secret;
+             ALTER TABLE web_users DROP COLUMN totp_last_step;
+             ALTER TABLE web_users DROP COLUMN app_password_hash;
+             DROP TABLE totp_recovery;",
+        )
+        .unwrap();
         conn.pragma_update(None, "user_version", 4).unwrap();
     }
 

@@ -139,6 +139,16 @@ const MIGRATIONS: &[&str] = &[
         updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_print_queue_status ON print_queue(status, position);",
+    // 9: doble factor (TOTP). Secreto cifrado; codigos de recuperacion y la
+    // contrasena de aplicacion (WebDAV) guardados como hash
+    "ALTER TABLE web_users ADD COLUMN totp_secret TEXT;
+    ALTER TABLE web_users ADD COLUMN totp_last_step INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE web_users ADD COLUMN app_password_hash TEXT;
+    CREATE TABLE IF NOT EXISTS totp_recovery (
+        username TEXT NOT NULL REFERENCES web_users(username) ON DELETE CASCADE ON UPDATE CASCADE,
+        code_hash TEXT NOT NULL,
+        PRIMARY KEY (username, code_hash)
+    );",
 ];
 
 fn run_migrations(conn: &Connection) {

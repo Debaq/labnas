@@ -8,6 +8,7 @@ mod state;
 mod secrets;
 mod storage;
 mod tls;
+mod totp;
 mod updater;
 
 use axum::{
@@ -471,6 +472,13 @@ fn api_routes() -> Router<AppState> {
         .route("/api/auth/users/{username}/role", post(handlers::auth::set_user_role))
         .route("/api/auth/users/{username}", delete(handlers::auth::delete_user))
         .route("/api/auth/link-code", post(handlers::auth::generate_link_code))
+        .route("/api/auth/2fa", get(handlers::twofa::status))
+        .route("/api/auth/2fa/setup", post(handlers::twofa::setup))
+        .route("/api/auth/2fa/enable", post(handlers::twofa::enable))
+        .route("/api/auth/2fa/disable", post(handlers::twofa::disable))
+        .route("/api/auth/2fa/recovery", post(handlers::twofa::regenerate_recovery))
+        .route("/api/auth/2fa/app-password", post(handlers::twofa::app_password))
+        .route("/api/auth/users/{username}/2fa", delete(handlers::twofa::admin_reset))
         .route("/api/notifications/telegram/chat/{chat_id}/link", post(handlers::auth::admin_link_chat))
         // Eventos en tiempo real
         .route("/api/live/ticket", post(events::create_ticket))

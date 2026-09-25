@@ -19,6 +19,9 @@ pub struct WebUser {
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
+    /// Codigo TOTP o de recuperacion (cuentas con doble factor)
+    #[serde(default)]
+    pub code: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,6 +46,8 @@ pub struct MeResponse {
     pub permissions: UserPermissions,
     pub linked_telegram: Option<i64>,
     pub enabled_modules: Vec<ModuleInfo>,
+    /// Doble factor activo
+    pub totp_enabled: bool,
 }
 
 #[derive(Debug, Deserialize)]

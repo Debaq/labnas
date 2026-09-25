@@ -79,6 +79,7 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         (_, ["auth", "me"]) | (_, ["auth", "logout"]) => User,
         ("POST", ["auth", "password"]) | ("POST", ["auth", "rename"]) | ("POST", ["auth", "link-code"]) => User,
         ("GET", ["auth", "usernames"]) => User,
+        ("GET", ["auth", "2fa"]) | ("POST", ["auth", "2fa", _]) => User,
 
         // --- Modulos ---
         ("GET", ["modules"]) => User,

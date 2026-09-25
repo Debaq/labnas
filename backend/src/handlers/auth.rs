@@ -1,6 +1,7 @@
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
     Json,
 };
 use rusqlite::{params, OptionalExtension};
@@ -10,9 +11,9 @@ use crate::models::notifications::{UserPermissions, UserRole};
 use crate::state::{now_unix, AppState, LoginFailures, SessionInfo, SESSION_TTL_SECS};
 
 /// Intentos fallidos antes de bloquear el login de un usuario
-const MAX_LOGIN_FAILURES: u32 = 5;
+pub(crate) const MAX_LOGIN_FAILURES: u32 = 5;
 /// Duracion del bloqueo tras superar el maximo de intentos
-const LOGIN_LOCK_SECS: u64 = 5 * 60;
+pub(crate) const LOGIN_LOCK_SECS: u64 = 5 * 60;
 
 // --- Sesiones persistentes ---
 
@@ -97,13 +98,13 @@ fn dummy_hash() -> String {
         .clone()
 }
 
-async fn bcrypt_verify(password: String, hash: String) -> bool {
+pub(crate) async fn bcrypt_verify(password: String, hash: String) -> bool {
     tokio::task::spawn_blocking(move || bcrypt::verify(&password, &hash).unwrap_or(false))
         .await
         .unwrap_or(false)
 }
 
-async fn bcrypt_hash(password: String) -> Result<String, (StatusCode, String)> {
+pub(crate) async fn bcrypt_hash(password: String) -> Result<String, (StatusCode, String)> {
     tokio::task::spawn_blocking(move || bcrypt::hash(&password, 10))
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
@@ -258,7 +259,7 @@ pub async fn register(
 pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
-) -> Result<Json<AuthResponse>, (StatusCode, String)> {
+) -> Result<Response, (StatusCode, String)> {
     let username = req.username.trim().to_lowercase();
 
     // Bloqueo temporal tras demasiados intentos fallidos
@@ -282,7 +283,8 @@ pub async fn login(
     let username_clone = username.clone();
     let user_opt = crate::db::db_op(&state.db, move |conn| {
         conn.query_row(
-            "SELECT password_hash, role, perm_terminal, perm_impresion, perm_archivos_escritura
+            "SELECT password_hash, role, perm_terminal, perm_impresion, perm_archivos_escritura,
+                    totp_secret IS NOT NULL
              FROM web_users WHERE username = ?1",
             params![&username_clone],
             |row| {
@@ -292,31 +294,37 @@ pub async fn login(
                     row.get::<_, bool>(2)?,
                     row.get::<_, bool>(3)?,
                     row.get::<_, bool>(4)?,
+                    row.get::<_, bool>(5)?,
                 ))
             },
         ).optional().map_err(|e| e.to_string())
     }).await?;
 
     // Usuario inexistente: igual se verifica contra un hash para no revelar si existe
-    let (password_hash, role_str, perm_terminal, perm_impresion, perm_archivos, exists) = match user_opt {
-        Some((h, r, t, i, a)) => (h, r, t, i, a, true),
-        None => (dummy_hash(), String::new(), false, false, false, false),
+    let (password_hash, role_str, perm_terminal, perm_impresion, perm_archivos, has_totp, exists) = match user_opt {
+        Some((h, r, t, i, a, totp)) => (h, r, t, i, a, totp, true),
+        None => (dummy_hash(), String::new(), false, false, false, false, false),
     };
 
     let valid = bcrypt_verify(req.password.clone(), password_hash).await && exists;
 
     if !valid {
-        {
-            let mut failures = state.login_failures.lock().await;
-            let entry = failures.entry(username.clone()).or_insert(LoginFailures {
-                count: 0,
-                last: std::time::Instant::now(),
-            });
-            entry.count += 1;
-            entry.last = std::time::Instant::now();
-        }
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        login_failed(&state, &username).await;
         return Err((StatusCode::UNAUTHORIZED, "Usuario o contrasena incorrectos".to_string()));
+    }
+
+    // Doble factor: con la contrasena correcta se pide el codigo en un segundo paso
+    if has_totp {
+        let code = req.code.as_deref().map(str::trim).unwrap_or_default().to_string();
+        if code.is_empty() {
+            return Ok(Json(serde_json::json!({ "totp_required": true })).into_response());
+        }
+        let u = username.clone();
+        let ok = crate::db::db_op(&state.db, move |conn| super::twofa::verify_second_factor(conn, &u, &code)).await?;
+        if !ok {
+            login_failed(&state, &username).await;
+            return Err((StatusCode::UNAUTHORIZED, "Codigo de verificacion incorrecto".to_string()));
+        }
     }
     state.login_failures.lock().await.remove(&username);
 
@@ -338,7 +346,22 @@ pub async fn login(
         role,
         permissions,
         enabled_modules: modules,
-    }))
+    })
+    .into_response())
+}
+
+/// Cuenta un intento fallido (bloquea tras MAX_LOGIN_FAILURES) y demora la respuesta
+pub(crate) async fn login_failed(state: &AppState, username: &str) {
+    {
+        let mut failures = state.login_failures.lock().await;
+        let entry = failures.entry(username.to_string()).or_insert(LoginFailures {
+            count: 0,
+            last: std::time::Instant::now(),
+        });
+        entry.count += 1;
+        entry.last = std::time::Instant::now();
+    }
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 }
 
 // --- Me ---
@@ -357,13 +380,13 @@ pub async fn me(
 
     // Get linked telegram from DB
     let username_clone = username.clone();
-    let linked = crate::db::db_op(&state.db, move |conn| {
+    let (linked, totp_enabled) = crate::db::db_op(&state.db, move |conn| {
         conn.query_row(
-            "SELECT linked_telegram FROM web_users WHERE username = ?1",
+            "SELECT linked_telegram, totp_secret IS NOT NULL FROM web_users WHERE username = ?1",
             params![&username_clone],
-            |row| row.get::<_, Option<i64>>(0),
+            |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, bool>(1)?)),
         ).optional().map_err(|e| e.to_string())
-    }).await.ok().flatten().flatten();
+    }).await.ok().flatten().unwrap_or((None, false));
 
     let modules = crate::db::db_op(&state.db, |conn| Ok(crate::db::get_modules(conn))).await
         .unwrap_or_default();
@@ -374,6 +397,7 @@ pub async fn me(
         permissions,
         linked_telegram: linked,
         enabled_modules: modules,
+        totp_enabled,
     }))
 }
 
@@ -446,6 +470,7 @@ pub async fn change_password(
         Ok(())
     }).await?;
     state.sessions.lock().await.retain(|t, s| s.username != username || *t == token);
+    crate::handlers::webdav::forget_credentials(&username);
 
     Ok(StatusCode::OK)
 }
@@ -457,7 +482,8 @@ pub async fn list_users(
 ) -> Result<Json<Vec<MeResponse>>, (StatusCode, String)> {
     let users = crate::db::db_op(&state.db, |conn| {
         let mut stmt = conn.prepare(
-            "SELECT username, role, perm_terminal, perm_impresion, perm_archivos_escritura, linked_telegram
+            "SELECT username, role, perm_terminal, perm_impresion, perm_archivos_escritura, linked_telegram,
+                    totp_secret IS NOT NULL
              FROM web_users"
         ).map_err(|e| e.to_string())?;
 
@@ -472,6 +498,7 @@ pub async fn list_users(
                 },
                 linked_telegram: row.get(5)?,
                 enabled_modules: vec![],
+                totp_enabled: row.get(6)?,
             })
         }).map_err(|e| e.to_string())?;
 

@@ -36,7 +36,7 @@ curl -fsSL https://github.com/Debaq/labnas/releases/latest/download/install.sh |
 
 Instala en `/opt/labnas` como servicio systemd que corre con **tu usuario** (no root) y muestra la dirección al terminar. Ver [Instalación](#instalación) para opciones.
 
-Abre `http://localhost:3001` — la primera cuenta creada se convierte en admin y ve un **asistente de primer arranque** (carpetas compartidas, nombre en la red, HTTPS, bot de Telegram y respaldo de la clave de cifrado; se puede omitir y reabrir en Configuración > Administración). Las siguientes cuentas quedan **pendientes** hasta que un admin las apruebe.
+Abre `http://localhost:3001` — la primera cuenta creada se convierte en admin y ve un **asistente de primer arranque** (carpetas compartidas, nombre en la red, HTTPS, bot de Telegram, doble factor y respaldo de la clave de cifrado; se puede omitir y reabrir en Configuración > Administración). Las siguientes cuentas quedan **pendientes** hasta que un admin las apruebe.
 
 ## Sistema de módulos activables
 
@@ -539,6 +539,7 @@ Desactivado por defecto; se activa en **Configuración > Sistema > Carpetas acce
 - Cada carpeta accesible que el usuario puede leer aparece como `/dav/<nombre>/`; se aplican los **mismos permisos por carpeta** (leer / escribir)
 - Borrar desde el explorador del sistema envía a la **papelera** de LabNAS
 - Rutas canonicalizadas (sin `..` ni symlinks que escapen) y `~/.labnas` bloqueado; mismo bloqueo por intentos fallidos que el login
+- Cuentas con **doble factor**: WebDAV no admite un segundo código, así que usa una **contraseña de aplicación** (Configuración > General > Doble factor); la contraseña normal no monta la unidad
 - Linux: `dav://<servidor>:3001/dav/` en el gestor de archivos (o `davfs2`); macOS: Finder > Ir > Conectarse al servidor
 - Mejor por HTTPS (`https://<servidor>:3443/dav/`, con el certificado instalado o uno propio). Windows sobre HTTP (sin TLS) requiere habilitar Basic en el cliente WebDAV (`HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters\BasicAuthLevel = 2`) o usar WinSCP / Cyberduck. Sin HTTPS la contraseña viaja en claro: úsalo solo en la LAN o sobre Tailscale
 
@@ -582,6 +583,7 @@ Todas las acciones registradas (subidas, borrados, cambios de rol, actualizacion
 - Registro abierto, pero las cuentas nuevas quedan **pendientes** hasta que un admin las apruebe
 - Acceso a archivos limitado a las raíces de almacenamiento (canonicalizadas: sin `..` ni symlinks que escapen); `~/.labnas` bloqueado
 - Passwords con bcrypt (cost 10, mínimo 8 caracteres); bloqueo de 5 min tras 5 intentos fallidos
+- **Doble factor (TOTP)** opcional por cuenta (Configuración > General): app de autenticación, 10 códigos de recuperación de un solo uso (guardados como hash), un código no se puede reutilizar y los errados cuentan para el bloqueo. Un admin puede quitarlo a quien perdió el teléfono (Configuración > Usuarios)
 - Sesiones de 24h persistidas en SQLite (sobreviven reinicios); cambiar la contraseña cierra las demás
 - `labnas.db` con permisos 600
 - Sin CORS por defecto (la web y el visor son mismo origen); para autorizar un origen externo: `LABNAS_CORS_ORIGINS=https://dashboard.lab.cl`

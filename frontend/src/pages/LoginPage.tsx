@@ -9,6 +9,9 @@ export default function LoginPage() {
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  // Segundo paso del login para cuentas con doble factor
+  const [needCode, setNeedCode] = useState(false)
+  const [code, setCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -55,7 +58,8 @@ export default function LoginPage() {
     setError(null)
     try {
       if (mode === 'login') {
-        await login(username, password)
+        const done = await login(username, password, needCode ? code : undefined)
+        if (!done) setNeedCode(true)
       } else {
         await register(username, password)
       }
@@ -95,7 +99,7 @@ export default function LoginPage() {
             <input
               type="text"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e) => { setUsername(e.target.value); setNeedCode(false); setCode('') }}
               placeholder="usuario"
               autoFocus
               className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
@@ -114,6 +118,26 @@ export default function LoginPage() {
             />
           </div>
 
+          {needCode && (
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Codigo de verificacion</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="123456"
+                autoFocus
+                className="w-full px-3 py-2.5 rounded-lg text-sm font-mono tracking-widest outline-none"
+                style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
+              />
+              <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
+                De tu app de autenticacion, o un codigo de recuperacion
+              </p>
+            </div>
+          )}
+
           {error && (
             <div className="text-xs rounded-lg p-3" style={{ backgroundColor: 'var(--danger)' + '15', color: 'var(--danger)' }}>
               {error}
@@ -122,7 +146,7 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading || !username.trim() || !password}
+            disabled={loading || !username.trim() || !password || (needCode && !code.trim())}
             className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90"
             style={{ backgroundColor: 'var(--accent)', color: '#ffffff' }}
           >
@@ -133,7 +157,7 @@ export default function LoginPage() {
 
         <div className="mt-4 text-center">
           <button
-            onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(null) }}
+            onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(null); setNeedCode(false); setCode('') }}
             className="text-xs transition-opacity hover:opacity-80"
             style={{ color: 'var(--accent)' }}
           >

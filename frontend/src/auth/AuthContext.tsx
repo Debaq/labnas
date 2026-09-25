@@ -12,7 +12,8 @@ interface AuthUser {
 interface AuthContextType {
   user: AuthUser | null
   loading: boolean
-  login: (username: string, password: string) => Promise<void>
+  /** false: la cuenta tiene doble factor y falta el codigo */
+  login: (username: string, password: string, code?: string) => Promise<boolean>
   register: (username: string, password: string) => Promise<void>
   logout: () => void
   can: (perm: 'terminal' | 'impresion' | 'archivos_escritura' | 'settings') => boolean
@@ -95,17 +96,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval)
   }, [])
 
-  async function login(username: string, password: string) {
+  async function login(username: string, password: string, code?: string): Promise<boolean> {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, code }),
     })
     if (!res.ok) {
       const text = await res.text()
       throw new Error(text || 'Error al iniciar sesion')
     }
     const data = await res.json()
+    if (data.totp_required) return false
     const authUser: AuthUser = {
       token: data.token,
       username: data.username,
@@ -115,6 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setUser(authUser)
     localStorage.setItem('labnas_auth', JSON.stringify(authUser))
+    return true
   }
 
   async function register(username: string, password: string) {
