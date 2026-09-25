@@ -432,13 +432,27 @@ async fn fetch_release_url_by_tag(client: &reqwest::Client, tag: &str) -> Option
     if !resp.status().is_success() { return None; }
 
     let json: serde_json::Value = resp.json().await.ok()?;
-    json["assets"].as_array()
-        .and_then(|assets| {
-            assets.iter().find(|a| {
-                a["name"].as_str()
-                    .map(|n| n.contains("linux") && n.contains("x86_64") && n.ends_with(".tar.gz"))
-                    .unwrap_or(false)
-            })
+    find_server_asset(&json)
+}
+
+/// Arquitectura tal como aparece en el nombre del tarball del release
+fn release_arch() -> &'static str {
+    match std::env::consts::ARCH {
+        "arm" => "armv7",
+        other => other,
+    }
+}
+
+/// URL del tarball del servidor para esta arquitectura: `labnas-v<ver>-linux-<arch>.tar.gz`.
+/// Nombre exacto para no confundirlo con otros assets (p.ej. labnas-viewer).
+fn find_server_asset(release: &serde_json::Value) -> Option<String> {
+    let suffix = format!("-linux-{}.tar.gz", release_arch());
+    release["assets"].as_array()?
+        .iter()
+        .find(|a| {
+            a["name"].as_str()
+                .map(|n| n.starts_with("labnas-v") && n.ends_with(&suffix))
+                .unwrap_or(false)
         })
         .and_then(|a| a["browser_download_url"].as_str().map(|s| s.to_string()))
 }
@@ -458,15 +472,7 @@ async fn fetch_latest_release(client: &reqwest::Client) -> (Option<String>, Opti
             if let Ok(json) = r.json::<serde_json::Value>().await {
                 let tag = json["tag_name"].as_str().map(|s| s.to_string());
 
-                let download_url = json["assets"].as_array()
-                    .and_then(|assets| {
-                        assets.iter().find(|a| {
-                            a["name"].as_str()
-                                .map(|n| n.contains("linux") && n.contains("x86_64") && n.ends_with(".tar.gz"))
-                                .unwrap_or(false)
-                        })
-                    })
-                    .and_then(|a| a["browser_download_url"].as_str().map(|s| s.to_string()));
+                let download_url = find_server_asset(&json);
 
                 if tag.is_some() {
                     return (tag, download_url);

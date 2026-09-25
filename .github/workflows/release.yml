@@ -139,3 +139,85 @@ jobs:
         run: |
           TAG="${{ steps.version.outputs.tag }}"
           gh release upload "$TAG" "${{ env.tarball }}" --clobber
+
+  viewer:
+    name: Viewer ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Nombres sin "linux"/"x86_64" para no confundir al updater de versiones antiguas
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extraer version del tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Instalar deps WebKitGTK
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev pkg-config
+
+      - name: Cache Rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            viewer/target
+          key: ${{ runner.os }}-viewer-${{ matrix.arch }}-cargo-${{ hashFiles('viewer/Cargo.lock') }}
+
+      - name: Build viewer
+        working-directory: viewer
+        run: cargo build --release
+
+      - name: Empaquetar viewer
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DIR="labnas-viewer"
+          mkdir -p "$DIR"
+          cp viewer/target/release/labnas-viewer "$DIR/"
+          cp -r viewer/assets "$DIR/assets"
+          cp viewer/install.sh "$DIR/"
+          TARBALL="labnas-viewer-v${VERSION}-${{ matrix.arch }}.tar.gz"
+          tar czf "$TARBALL" "$DIR"
+          echo "tarball=$TARBALL" >> "$GITHUB_ENV"
+
+      - name: Crear release si no existe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          for i in 1 2 3 4 5; do
+            if gh release view "$TAG" &>/dev/null; then
+              echo "Release $TAG ya existe"
+              exit 0
+            fi
+            if gh release create "$TAG" \
+                --title "LabNAS $VERSION" \
+                --generate-notes 2>/dev/null; then
+              echo "Release $TAG creado"
+              exit 0
+            fi
+            echo "Reintento $i..."
+            sleep 3
+          done
+          gh release view "$TAG"
+
+      - name: Subir asset al release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ steps.version.outputs.tag }}" "${{ env.tarball }}" --clobber

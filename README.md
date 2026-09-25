@@ -342,7 +342,14 @@ Script `version.sh` para bump de versión antes de commit release.
 
 ```bash
 # Requiere webkit2gtk-4.1 y gtk3 (Arch: sudo pacman -S webkit2gtk-4.1)
-./viewer/install.sh          # compila e instala en ~/.local (binario + .desktop + icono)
+
+# Desde el release (amd64 / arm64)
+TAG=$(curl -s https://api.github.com/repos/Debaq/labnas/releases/latest | grep tag_name | cut -d'"' -f4)
+curl -sL "https://github.com/Debaq/labnas/releases/download/${TAG}/labnas-viewer-${TAG}-amd64.tar.gz" | tar xz
+./labnas-viewer/install.sh   # instala en ~/.local (binario + .desktop + icono)
+
+# O desde el repo (compila)
+./viewer/install.sh
 labnas-viewer                # abre http://localhost:3001
 labnas-viewer http://192.168.1.10:3001
 ```

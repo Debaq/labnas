@@ -1,5 +1,5 @@
 #!/bin/bash
-# Compila e instala labnas-viewer para el usuario actual (~/.local)
+# Instala labnas-viewer (compila si no hay binario) para el usuario actual (~/.local)
 # Requiere: webkit2gtk-4.1 y gtk3 (Arch: pacman -S webkit2gtk-4.1)
 set -e
 
@@ -7,10 +7,16 @@ cd "$(dirname "$0")"
 PREFIX="${PREFIX:-$HOME/.local}"
 APP_ID="io.github.debaq.LabNAS"
 
-cargo build --release
-TARGET_DIR="$(cargo metadata --format-version 1 --no-deps | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')"
+# Tarball del release trae el binario precompilado; desde el repo se compila
+if [ -f ./labnas-viewer ]; then
+    BIN=./labnas-viewer
+else
+    cargo build --release
+    TARGET_DIR="$(cargo metadata --format-version 1 --no-deps | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')"
+    BIN="$TARGET_DIR/release/labnas-viewer"
+fi
 
-install -Dm755 "$TARGET_DIR/release/labnas-viewer" "$PREFIX/bin/labnas-viewer"
+install -Dm755 "$BIN" "$PREFIX/bin/labnas-viewer"
 install -Dm644 "assets/$APP_ID.desktop" "$PREFIX/share/applications/$APP_ID.desktop"
 install -Dm644 "assets/$APP_ID.svg" "$PREFIX/share/icons/hicolor/scalable/apps/$APP_ID.svg"
 
