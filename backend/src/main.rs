@@ -457,6 +457,7 @@ fn api_routes() -> Router<AppState> {
         .route("/api/network/scan", post(handlers::network::scan_network))
         .route("/api/network/hosts", get(handlers::network::get_hosts))
         .route("/api/network/device/{mac}", post(handlers::network::label_host))
+        .route("/api/network/wake/{mac}", post(handlers::network::wake_host))
         .route("/api/network/device/{mac}", delete(handlers::network::unlabel_host))
         // Music
         .route("/api/music/search", get(handlers::music::search))

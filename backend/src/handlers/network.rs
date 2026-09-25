@@ -14,6 +14,40 @@ use std::{
 use crate::models::network::{KnownDevice, LabelRequest, NetworkHost};
 use crate::state::AppState;
 
+/// Dispositivos conocidos que no respondieron: se listan apagados (con su ultima IP
+/// conocida) para poder encenderlos por Wake-on-LAN.
+fn add_offline_known(hosts: &mut Vec<NetworkHost>, previous: &[NetworkHost], known: &[KnownDevice]) {
+    for device in known {
+        let mac = device.mac.to_uppercase();
+        let alive = hosts.iter().any(|h| h.mac.as_deref().map(|m| m.to_uppercase()) == Some(mac.clone()));
+        if alive {
+            continue;
+        }
+        let prev = previous.iter().find(|h| h.mac.as_deref().map(|m| m.to_uppercase()) == Some(mac.clone()));
+        hosts.push(NetworkHost {
+            ip: prev.map(|h| h.ip.clone()).unwrap_or_default(),
+            hostname: prev.and_then(|h| h.hostname.clone()),
+            mac: Some(device.mac.clone()),
+            vendor: prev.and_then(|h| h.vendor.clone()).or_else(|| mac_vendor(&device.mac)),
+            is_alive: false,
+            is_known: true,
+            label: Some(device.label.clone()),
+            icon: device.icon.clone(),
+            last_seen: prev.map(|h| h.last_seen).unwrap_or_else(chrono::Utc::now),
+            response_time_ms: None,
+        });
+    }
+}
+
+/// Activos primero (por IP), luego los apagados
+fn sort_hosts(hosts: &mut [NetworkHost]) {
+    hosts.sort_by(|a, b| {
+        let a_ip: Ipv4Addr = a.ip.parse().unwrap_or(Ipv4Addr::UNSPECIFIED);
+        let b_ip: Ipv4Addr = b.ip.parse().unwrap_or(Ipv4Addr::UNSPECIFIED);
+        b.is_alive.cmp(&a.is_alive).then(a_ip.cmp(&b_ip))
+    });
+}
+
 pub async fn scan_network(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<NetworkHost>>, (StatusCode, String)> {
@@ -97,12 +131,12 @@ pub async fn scan_network(
         .collect();
 
     // Get previous scan to detect truly new devices
-    let prev_hosts = state.scanned_hosts.lock().await;
+    let prev_hosts = state.scanned_hosts.lock().await.clone();
     let prev_macs: Vec<String> = prev_hosts
         .iter()
+        .filter(|h| h.is_alive)
         .filter_map(|h| h.mac.clone())
         .collect();
-    drop(prev_hosts);
 
     let brand_new: Vec<&&NetworkHost> = new_unknown
         .iter()
@@ -154,11 +188,8 @@ pub async fn scan_network(
         }
     }
 
-    hosts.sort_by(|a, b| {
-        let a_ip: Ipv4Addr = a.ip.parse().unwrap_or(Ipv4Addr::UNSPECIFIED);
-        let b_ip: Ipv4Addr = b.ip.parse().unwrap_or(Ipv4Addr::UNSPECIFIED);
-        a_ip.cmp(&b_ip)
-    });
+    add_offline_known(&mut hosts, &prev_hosts, &known);
+    sort_hosts(&mut hosts);
 
     let mut stored = state.scanned_hosts.lock().await;
     *stored = hosts.clone();
@@ -230,11 +261,9 @@ pub async fn network_scan_loop(state: AppState) {
                 }
             }
 
-            hosts.sort_by(|a, b| {
-                let a_ip: Ipv4Addr = a.ip.parse().unwrap_or(Ipv4Addr::UNSPECIFIED);
-                let b_ip: Ipv4Addr = b.ip.parse().unwrap_or(Ipv4Addr::UNSPECIFIED);
-                a_ip.cmp(&b_ip)
-            });
+            let previous = state.scanned_hosts.lock().await.clone();
+            add_offline_known(&mut hosts, &previous, &known);
+            sort_hosts(&mut hosts);
 
             let active = hosts.iter().filter(|h| h.is_alive).count();
             let mut stored = state.scanned_hosts.lock().await;
@@ -535,4 +564,106 @@ fn mac_vendor(mac: &str) -> Option<String> {
     };
 
     Some(vendor.to_string())
+}
+
+// --- Wake-on-LAN ---
+
+/// "aa:bb:cc:dd:ee:ff" o "aa-bb-..." -> bytes
+fn parse_mac(s: &str) -> Option<[u8; 6]> {
+    let parts: Vec<&str> = s.split([':', '-']).collect();
+    if parts.len() != 6 {
+        return None;
+    }
+    let mut mac = [0u8; 6];
+    for (i, p) in parts.iter().enumerate() {
+        if p.len() != 2 {
+            return None;
+        }
+        mac[i] = u8::from_str_radix(p, 16).ok()?;
+    }
+    Some(mac)
+}
+
+/// Paquete magico: 6 x 0xFF + 16 repeticiones de la MAC
+fn magic_packet(mac: [u8; 6]) -> Vec<u8> {
+    let mut p = vec![0xFFu8; 6];
+    for _ in 0..16 {
+        p.extend_from_slice(&mac);
+    }
+    p
+}
+
+/// POST /api/network/wake/{mac} — enciende un equipo por Wake-on-LAN (operador/admin)
+pub async fn wake_host(
+    State(state): State<AppState>,
+    axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
+    Path(mac): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let bytes = parse_mac(&mac).ok_or((StatusCode::BAD_REQUEST, "MAC invalida".to_string()))?;
+    let packet = magic_packet(bytes);
+
+    let socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    socket.set_broadcast(true).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // broadcast global y de la subred local (/24), puertos habituales 9 y 7
+    let mut targets = vec!["255.255.255.255".to_string()];
+    if let Ok(IpAddr::V4(ip)) = local_ip_address::local_ip() {
+        let o = ip.octets();
+        targets.push(format!("{}.{}.{}.255", o[0], o[1], o[2]));
+    }
+    let mut sent = 0;
+    for t in &targets {
+        for port in [9u16, 7] {
+            if socket.send_to(&packet, (t.as_str(), port)).await.is_ok() {
+                sent += 1;
+            }
+        }
+    }
+    if sent == 0 {
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, "No se pudo enviar el paquete (¿sin red?)".to_string()));
+    }
+
+    state.log_activity("Wake-on-LAN", &mac.to_uppercase(), &session.username).await;
+    Ok(StatusCode::OK)
+}
+
+#[cfg(test)]
+mod wol_tests {
+    use super::*;
+
+    #[test]
+    fn conocidos_apagados_se_listan() {
+        let now = chrono::Utc::now();
+        let host = |ip: &str, mac: &str, alive: bool| NetworkHost {
+            ip: ip.into(), hostname: None, mac: Some(mac.into()), vendor: None, is_alive: alive,
+            is_known: false, label: None, icon: None, last_seen: now, response_time_ms: None,
+        };
+        let known = vec![
+            KnownDevice { mac: "aa:aa:aa:aa:aa:aa".into(), label: "PC lab".into(), icon: None },
+            KnownDevice { mac: "bb:bb:bb:bb:bb:bb".into(), label: "Nuevo".into(), icon: None },
+        ];
+        let previous = vec![host("192.168.1.20", "AA:AA:AA:AA:AA:AA", true)];
+        let mut hosts = vec![host("192.168.1.5", "CC:CC:CC:CC:CC:CC", true)];
+        add_offline_known(&mut hosts, &previous, &known);
+        sort_hosts(&mut hosts);
+        assert_eq!(hosts.len(), 3);
+        assert!(hosts[0].is_alive);
+        let pc = hosts.iter().find(|h| h.label.as_deref() == Some("PC lab")).unwrap();
+        assert_eq!((pc.ip.as_str(), pc.is_alive), ("192.168.1.20", false), "conserva su ultima IP");
+    }
+
+    #[test]
+    fn paquete_magico() {
+        let mac = parse_mac("AA:bb:0c:DD:ee:0F").unwrap();
+        assert_eq!(mac, [0xAA, 0xBB, 0x0C, 0xDD, 0xEE, 0x0F]);
+        let p = magic_packet(mac);
+        assert_eq!(p.len(), 102);
+        assert_eq!(&p[..6], &[0xFF; 6]);
+        assert_eq!(&p[96..], &mac);
+        assert_eq!(parse_mac("aa-bb-cc-dd-ee-ff"), Some([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]));
+        assert!(parse_mac("aa:bb:cc").is_none());
+        assert!(parse_mac("zz:bb:cc:dd:ee:ff").is_none());
+    }
 }

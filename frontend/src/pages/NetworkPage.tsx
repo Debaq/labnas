@@ -1,10 +1,26 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Radar, Monitor, Wifi, Loader2, Box, ShieldCheck, ShieldAlert, Tag, X } from 'lucide-react'
-import { scanNetwork, fetchHosts, labelDevice, unlabelDevice, fetchPrinters3D } from '../api'
+import { Radar, Monitor, Wifi, Loader2, Box, ShieldCheck, ShieldAlert, Tag, X, Power } from 'lucide-react'
+import { scanNetwork, fetchHosts, labelDevice, unlabelDevice, fetchPrinters3D, wakeHost } from '../api'
+import { useAuth } from '../auth/AuthContext'
+import { useToast } from '../components/ToastContext'
+import { errorMessage } from '../lib/errors'
 import type { NetworkHost } from '../types'
 
 export default function NetworkPage() {
+  const { user } = useAuth()
+  const { addToast } = useToast()
+  const canWake = user?.role === 'admin' || user?.role === 'operador'
+
+  async function handleWake(host: NetworkHost) {
+    if (!host.mac) return
+    try {
+      await wakeHost(host.mac)
+      addToast(`Paquete Wake-on-LAN enviado a ${host.label || host.hostname || host.mac}`, 'success')
+    } catch (e) {
+      addToast(errorMessage(e), 'error')
+    }
+  }
   const navigate = useNavigate()
   const [hosts, setHosts] = useState<NetworkHost[]>([])
   const [loading, setLoading] = useState(true)
@@ -144,7 +160,7 @@ export default function NetworkPage() {
             <tbody>
               {hosts.map((host) => (
                 <tr
-                  key={host.ip}
+                  key={host.mac || host.ip}
                   className="transition-all duration-200 hover:opacity-90"
                   style={{
                     borderBottom: '1px solid var(--border)',
@@ -173,7 +189,7 @@ export default function NetworkPage() {
                   {/* IP */}
                   <td className="px-4 py-3">
                     <span className="text-sm font-mono font-medium" style={{ color: 'var(--text-primary)' }}>
-                      {host.ip}
+                      {host.ip || '--'}
                     </span>
                   </td>
                   {/* Device info */}
@@ -215,6 +231,17 @@ export default function NetworkPage() {
                   {/* Actions */}
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1.5">
+                      {canWake && host.mac && !host.is_alive && (
+                        <button
+                          onClick={() => handleWake(host)}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all duration-200 hover:opacity-80"
+                          style={{ color: 'var(--warning)', border: '1px solid var(--warning)' }}
+                          title="Encender (Wake-on-LAN)"
+                        >
+                          <Power size={12} />
+                          Encender
+                        </button>
+                      )}
                       {host.mac && !host.is_known && (
                         <button
                           onClick={() => { setLabelModal(host); setLabelInput(''); setIconInput('') }}

@@ -164,6 +164,7 @@ Módulos disponibles:
 
 ### Escáner de red
 - Scan ICMP con descubrimiento automático
+- **Wake-on-LAN**: los dispositivos etiquetados siguen listados aunque estén apagados (con su última IP) y operadores/admins pueden encenderlos con un clic
 - Detección de MAC y fabricante
 - Tracking de dispositivos conocidos vs desconocidos con iconos (24 tipos)
 - Alertas Telegram ante nuevos dispositivos desconocidos

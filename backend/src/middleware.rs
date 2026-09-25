@@ -101,6 +101,7 @@ pub fn required_access(method: &Method, path: &str) -> Access {
 
         // --- Red ---
         ("GET", ["network", "hosts"]) | ("POST", ["network", "scan"]) => User,
+        ("POST", ["network", "wake", _]) => Operator,
 
         // --- Musica (reproductor compartido) ---
         ("POST", ["music", "lastfm-key"]) | ("POST", ["music", "mpv-args"]) => Admin,
@@ -258,6 +259,7 @@ mod tests {
         assert_eq!(acc(Method::POST, "/api/sensors/devices/abc/token"), Admin);
         assert_eq!(acc(Method::PUT, "/api/sensors/security"), Admin);
         assert_eq!(acc(Method::PUT, "/api/files/webdav"), Admin);
+        assert_eq!(acc(Method::POST, "/api/network/wake/aa:bb:cc:dd:ee:ff"), Operator);
         // ruta inventada: denegada por defecto
         assert_eq!(acc(Method::GET, "/api/nueva/ruta"), Admin);
     }
