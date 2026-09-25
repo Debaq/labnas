@@ -171,7 +171,7 @@ Módulos disponibles:
 |-----------|----------|
 | Sistema | `/estado` `/discos` `/ram` `/cpu` `/uptime` `/red` `/ip` `/actividad` |
 | Impresoras 3D | `/impresoras` `/temp` `/camara` `/imprimir` `/pausar` `/cancelar3d` |
-| Terminal | `/cmd <comando>` — shell remoto interactivo con sudo |
+| Terminal | `/cmd <comando>` — shell remoto interactivo (corre como el usuario del servicio, nunca root) |
 | Tareas | `/tarea` `/tareas` `/hecho` `/confirmar` `/rechazar` `/avance` |
 | Proyectos | `/proyecto` `/proyectos` |
 | Calendario | `/evento` `/eventos` `/aceptar` `/declinar` |
