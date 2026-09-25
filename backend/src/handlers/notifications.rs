@@ -68,7 +68,10 @@ pub struct NotificationConfigResponse {
 // DB helper: read notification_config singleton
 // =====================
 
-fn read_notif_config(conn: &rusqlite::Connection) -> Result<(Option<String>, Option<String>, bool, u8, u8), String> {
+/// (bot_token, bot_username, daily_enabled, daily_hour, daily_minute)
+type NotifConfigRow = (Option<String>, Option<String>, bool, u8, u8);
+
+fn read_notif_config(conn: &rusqlite::Connection) -> Result<NotifConfigRow, String> {
     conn.query_row(
         "SELECT bot_token, bot_username, daily_enabled, daily_hour, daily_minute FROM notification_config WHERE id = 1",
         [],
@@ -726,7 +729,7 @@ async fn handle_message(state: &AppState, token: &str, msg: &TgMessage) {
         s if s.starts_with("/uptime") => build_uptime_message(state),
         s if s.starts_with("/red") => build_network_message(state).await,
         s if s.starts_with("/camara") | s.starts_with("/foto") => {
-            handle_camera(state, &token, chat_id, s).await;
+            handle_camera(state, token, chat_id, s).await;
             return; // ya envió la foto directamente
         }
         s if s.starts_with("/temp") => handle_printer_temps(state).await,
@@ -1834,6 +1837,9 @@ async fn handle_progress(state: &AppState, user: &str, text: &str) -> String {
 // Reminder loop for insistent tasks
 // =====================
 
+/// Fila de evento de calendario leida para los recordatorios
+type CalendarEventRow = (String, String, String, String, String, String, String, u32, bool, bool, String, Option<String>);
+
 pub async fn task_reminder_loop(state: AppState) {
     loop {
         tokio::time::sleep(Duration::from_secs(60)).await; // Check every minute
@@ -1978,7 +1984,7 @@ pub async fn task_reminder_loop(state: AppState) {
         let now_min = local_now.hour() * 60 + local_now.minute();
 
         // Collect calendar event data into a Vec to avoid borrow conflicts
-        let calendar_events: Vec<(String, String, String, String, String, String, String, u32, bool, bool, String, Option<String>)> = {
+        let calendar_events: Vec<CalendarEventRow> = {
             let mut events = Vec::new();
             if let Ok(mut stmt) = conn.prepare(
                 "SELECT id, title, description, date, time, created_by, invitees, remind_before_min, reminded, notify_telegram, recurrence, recurrence_end FROM calendar_events WHERE date = ?1"
@@ -1999,10 +2005,8 @@ pub async fn task_reminder_loop(state: AppState) {
                         row.get::<_, Option<String>>(11)?,
                     ))
                 }) {
-                    for r in rows {
-                        if let Ok(event) = r {
-                            events.push(event);
-                        }
+                    for event in rows.flatten() {
+                        events.push(event);
                     }
                 }
             }

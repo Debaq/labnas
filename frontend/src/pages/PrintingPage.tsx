@@ -39,6 +39,7 @@ import {
 import { useAuth } from '../auth/AuthContext'
 import DuplexWizard from '../components/DuplexWizard'
 import type { CupsPrinter, CupsPrintJob, PrinterOption, PrinterStatsResponse, AllUserCostsResponse } from '../types'
+import { errorMessage } from '../lib/errors'
 
 export default function PrintingPage() {
   const { isAdmin } = useAuth()
@@ -253,9 +254,9 @@ export default function PrintingPage() {
       setJobs(j)
       // Refresh stats if expanded
       if (expandedStats === selectedPrinter) loadStats(selectedPrinter)
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error imprimiendo:', err)
-      alert('Error al imprimir: ' + (err.message || err))
+      alert('Error al imprimir: ' + (errorMessage(err) || err))
     } finally {
       setPrinting(false)
     }

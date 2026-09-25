@@ -8,6 +8,7 @@ import {
   fetchInventoryItems, createInventoryItem, updateInventoryItem, deleteInventoryItem,
 } from '../api'
 import type { InventoryCategory, InventoryItem, ItemStatus } from '../types'
+import { errorMessage } from '../lib/errors'
 
 const STATUS_LABELS: Record<ItemStatus, { label: string; color: string }> = {
   activo: { label: 'Activo', color: 'var(--success)' },
@@ -82,7 +83,7 @@ export default function InventoryPage() {
       }
       setShowItemModal(false)
       await loadData()
-    } catch (e: any) { alert(e.message) }
+    } catch (e) { alert(errorMessage(e)) }
   }
 
   async function handleDeleteItem(id: string) {
@@ -113,7 +114,7 @@ export default function InventoryPage() {
       }
       setShowCatModal(false)
       await loadData()
-    } catch (e: any) { alert(e.message) }
+    } catch (e) { alert(errorMessage(e)) }
   }
 
   async function handleDeleteCat(id: string) {

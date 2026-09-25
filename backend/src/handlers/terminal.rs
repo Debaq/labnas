@@ -163,8 +163,8 @@ async fn handle_terminal_socket(mut socket: WebSocket) {
         match msg {
             Message::Text(text) => {
                 let text_str: &str = &text;
-                if text_str.starts_with('\x01') {
-                    if let Ok(size) = serde_json::from_str::<ResizeMessage>(&text_str[1..]) {
+                if let Some(json) = text_str.strip_prefix('\x01') {
+                    if let Ok(size) = serde_json::from_str::<ResizeMessage>(json) {
                         let master_clone = Arc::clone(&master);
                         let _ = tokio::task::spawn_blocking(move || {
                             if let Ok(m) = master_clone.lock() {

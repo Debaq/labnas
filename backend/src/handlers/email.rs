@@ -655,7 +655,7 @@ fn fetch_emails_imap(account: &EmailAccount) -> Result<Vec<EmailMessage>, String
                 if let Some(addr) = addrs.first() {
                     let name = addr
                         .name
-                        .map(|n| decode_mime_header(&String::from_utf8_lossy(n).to_string()))
+                        .map(|n| decode_mime_header(String::from_utf8_lossy(n).as_ref()))
                         .unwrap_or_default();
                     let mailbox = addr
                         .mailbox
@@ -860,8 +860,7 @@ fn fetch_emails_pop3(account: &EmailAccount) -> Result<Vec<EmailMessage>, String
     if !resp.starts_with("+OK") {
         return Err(format!("POP3 STAT error: {}", resp.trim()));
     }
-    let total: usize = resp.trim()
-        .split_whitespace()
+    let total: usize = resp.split_whitespace()
         .nth(1)
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);

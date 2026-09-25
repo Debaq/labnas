@@ -70,7 +70,7 @@ pub async fn create_share(
         .to_string();
 
     let token = uuid::Uuid::new_v4().to_string();
-    let hours = req.expires_hours.max(1).min(168); // 1h to 7 days
+    let hours = req.expires_hours.clamp(1, 168); // 1h to 7 days
 
     let mut shares = state.share_links.lock().await;
     shares.insert(

@@ -800,6 +800,9 @@ fn calculate_estimated_cost(
     ink + paper_carta + paper_oficio + paper_special
 }
 
+/// ink_per_page, paper_carta, paper_oficio, paper_special, total_jobs, total_pages, pages_carta, pages_oficio, pages_special
+type PrinterStatsRow = (f64, f64, f64, f64, i64, i64, i64, i64, i64);
+
 /// GET /api/printing/printers/{name}/stats
 pub async fn get_printer_stats(
     State(state): State<AppState>,
@@ -807,7 +810,7 @@ pub async fn get_printer_stats(
 ) -> Result<Json<PrinterStatsResponse>, (StatusCode, String)> {
     let resp = db_op(&state.db, move |conn| {
         use rusqlite::OptionalExtension;
-        let row: Option<(f64, f64, f64, f64, i64, i64, i64, i64, i64)> = conn.query_row(
+        let row: Option<PrinterStatsRow> = conn.query_row(
             "SELECT ink_per_page, paper_carta, paper_oficio, paper_special, total_jobs, total_pages, pages_carta, pages_oficio, pages_special FROM cups_printers WHERE name = ?1",
             params![name],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?)),

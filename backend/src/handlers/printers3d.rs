@@ -37,14 +37,14 @@ pub async fn creality_ws_command(
     .map_err(|_| "Timeout conectando WebSocket Creality".to_string())?
     .map_err(|e| format!("Error WebSocket Creality: {}", e))?;
 
-    ws.send(Message::Text(msg.to_string().into()))
+    ws.send(Message::Text(msg.to_string()))
         .await
         .map_err(|e| format!("Error enviando WS: {}", e))?;
 
     let response = tokio::time::timeout(Duration::from_secs(5), async {
         while let Some(Ok(msg)) = ws.next().await {
             if let Message::Text(text) = msg {
-                let text_str: String = text.into();
+                let text_str: String = text;
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text_str) {
                     return Ok(json);
                 }
@@ -2182,7 +2182,7 @@ pub async fn printer_monitor_loop(state: AppState) {
             state.events.publish("printers3d.status", &map, crate::events::Audience::All, Some("printers3d"));
         }
 
-        for (printer, status) in printers.iter().zip(results.into_iter()) {
+        for (printer, status) in printers.iter().zip(results) {
             let Some(status) = status else { continue };
             if !status.online {
                 continue;

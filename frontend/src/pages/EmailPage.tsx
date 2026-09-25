@@ -1,3 +1,4 @@
+import { errorMessage } from '../lib/errors'
 import { useEffect, useState } from 'react'
 import {
   Mail, Settings, Loader2, Trash2, RefreshCw, Brain, ClipboardList,
@@ -87,8 +88,8 @@ export default function EmailPage() {
       setHasAccount(true)
       setEmailPw('')
       await loadInbox()
-    } catch (e: any) {
-      setConfigMsg({ ok: false, text: e.message })
+    } catch (e) {
+      setConfigMsg({ ok: false, text: errorMessage(e) })
     } finally {
       setConfiguring(false)
     }
@@ -127,8 +128,8 @@ export default function EmailPage() {
     try {
       await emailToTask(uid)
       setEmails(prev => prev.map(e => e.uid === uid ? { ...e, task_created: true } : e))
-    } catch (e: any) {
-      alert(e.message)
+    } catch (e) {
+      alert(errorMessage(e))
     }
   }
 
@@ -142,8 +143,8 @@ export default function EmailPage() {
       setFilterTag('')
       setShowAddFilter(false)
       await loadFilters()
-    } catch (e: any) {
-      alert(e.message)
+    } catch (e) {
+      alert(errorMessage(e))
     }
   }
 
@@ -530,7 +531,7 @@ export default function EmailPage() {
                         const msg = await setGroqKey(groqInput.trim())
                         setGroqMsg(msg)
                         setGroqInput('')
-                      } catch (e: any) { setGroqMsg(e.message) }
+                      } catch (e) { setGroqMsg(errorMessage(e)) }
                     }}
                     disabled={!groqInput.trim()}
                     className="px-4 py-2 rounded-lg text-sm font-medium"

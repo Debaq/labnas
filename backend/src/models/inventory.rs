@@ -14,18 +14,15 @@ pub struct InventoryCategory {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ItemStatus {
+    #[default]
     Activo,
     Mantenimiento,
     Retirado,
     Agotado,
 }
 
-impl Default for ItemStatus {
-    fn default() -> Self {
-        Self::Activo
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InventoryItem {

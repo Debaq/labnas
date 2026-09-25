@@ -967,7 +967,7 @@ pub async fn list_screens() -> Json<Vec<ScreenInfo>> {
 
         if !connected { continue; }
 
-        let connector = dir_name.splitn(2, '-').nth(1).unwrap_or(&dir_name).to_string();
+        let connector = dir_name.split_once('-').map(|x| x.1).unwrap_or(&dir_name).to_string();
 
         // Leer EDID para obtener nombre del monitor
         let edid_path = entry.path().join("edid");

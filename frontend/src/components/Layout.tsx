@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext'
 import { shutdownServer, getBranding, fetchHealth, checkUpdate } from '../api'
 import MusicPanel from './MusicPanel'
 import PersistentTerminal from './PersistentTerminal'
+import type { IconComponent } from '../lib/icons'
 
 const pageTitles: Record<string, string> = {
   '/dashboard': 'Dashboard',
@@ -110,7 +111,7 @@ export default function Layout() {
   }
 
   // Module nav registry
-  const moduleNav: Record<string, { to: string; label: string; icon: any }> = {
+  const moduleNav: Record<string, { to: string; label: string; icon: IconComponent }> = {
     dashboard:  { to: '/dashboard',  label: 'Dashboard',       icon: LayoutDashboard },
     files:      { to: '/files',      label: 'Archivos',        icon: FolderOpen },
     printing:   { to: '/printing',   label: 'Impresion',       icon: Printer },

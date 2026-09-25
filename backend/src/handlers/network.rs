@@ -179,71 +179,69 @@ pub async fn get_hosts(State(state): State<AppState>) -> Json<Vec<NetworkHost>> 
 pub async fn network_scan_loop(state: AppState) {
     loop {
         // Reutilizar la logica de scan_network pero sin extractores axum
-        if let Ok(local_ip) = local_ip_address::local_ip() {
-            if let IpAddr::V4(ipv4) = local_ip {
-                let octets = ipv4.octets();
-                let subnet_base = format!("{}.{}.{}", octets[0], octets[1], octets[2]);
+        if let Ok(IpAddr::V4(ipv4)) = local_ip_address::local_ip() {
+            let octets = ipv4.octets();
+            let subnet_base = format!("{}.{}.{}", octets[0], octets[1], octets[2]);
 
-                let mut handles = Vec::new();
-                for i in 1..=254u8 {
-                    let ip: Ipv4Addr = format!("{}.{}", subnet_base, i).parse().unwrap();
-                    handles.push(tokio::spawn(async move { ping_host(ip).await }));
-                }
-
-                let mut hosts = Vec::new();
-                for handle in handles {
-                    if let Ok(host) = handle.await {
-                        hosts.push(host);
-                    }
-                }
-                hosts.retain(|h| h.is_alive);
-
-                let mac_map = get_arp_table().await;
-
-                // Load known devices from DB (synchronous)
-                let known: Vec<KnownDevice> = match crate::db::get_conn(&state.db) {
-                    Ok(conn) => {
-                        let mut stmt = conn.prepare("SELECT mac, label, icon FROM known_devices")
-                            .unwrap_or_else(|_| conn.prepare("SELECT 1 WHERE 0").unwrap());
-                        stmt.query_map([], |row| {
-                            Ok(KnownDevice {
-                                mac: row.get(0)?,
-                                label: row.get(1)?,
-                                icon: row.get(2)?,
-                            })
-                        })
-                        .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                        .unwrap_or_default()
-                    }
-                    Err(_) => Vec::new(),
-                };
-
-                for host in &mut hosts {
-                    if let Some(mac) = mac_map.get(&host.ip) {
-                        host.mac = Some(mac.clone());
-                        host.vendor = mac_vendor(mac);
-                        let mac_upper = mac.to_uppercase();
-                        if let Some(device) = known.iter().find(|d| d.mac.to_uppercase() == mac_upper) {
-                            host.is_known = true;
-                            host.label = Some(device.label.clone());
-                            host.icon = device.icon.clone();
-                        }
-                    }
-                }
-
-                hosts.sort_by(|a, b| {
-                    let a_ip: Ipv4Addr = a.ip.parse().unwrap_or(Ipv4Addr::UNSPECIFIED);
-                    let b_ip: Ipv4Addr = b.ip.parse().unwrap_or(Ipv4Addr::UNSPECIFIED);
-                    a_ip.cmp(&b_ip)
-                });
-
-                let active = hosts.iter().filter(|h| h.is_alive).count();
-                let mut stored = state.scanned_hosts.lock().await;
-                *stored = hosts;
-                drop(stored);
-
-                println!("[LabNAS] Red escaneada: {} dispositivos activos", active);
+            let mut handles = Vec::new();
+            for i in 1..=254u8 {
+                let ip: Ipv4Addr = format!("{}.{}", subnet_base, i).parse().unwrap();
+                handles.push(tokio::spawn(async move { ping_host(ip).await }));
             }
+
+            let mut hosts = Vec::new();
+            for handle in handles {
+                if let Ok(host) = handle.await {
+                    hosts.push(host);
+                }
+            }
+            hosts.retain(|h| h.is_alive);
+
+            let mac_map = get_arp_table().await;
+
+            // Load known devices from DB (synchronous)
+            let known: Vec<KnownDevice> = match crate::db::get_conn(&state.db) {
+                Ok(conn) => {
+                    let mut stmt = conn.prepare("SELECT mac, label, icon FROM known_devices")
+                        .unwrap_or_else(|_| conn.prepare("SELECT 1 WHERE 0").unwrap());
+                    stmt.query_map([], |row| {
+                        Ok(KnownDevice {
+                            mac: row.get(0)?,
+                            label: row.get(1)?,
+                            icon: row.get(2)?,
+                        })
+                    })
+                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                    .unwrap_or_default()
+                }
+                Err(_) => Vec::new(),
+            };
+
+            for host in &mut hosts {
+                if let Some(mac) = mac_map.get(&host.ip) {
+                    host.mac = Some(mac.clone());
+                    host.vendor = mac_vendor(mac);
+                    let mac_upper = mac.to_uppercase();
+                    if let Some(device) = known.iter().find(|d| d.mac.to_uppercase() == mac_upper) {
+                        host.is_known = true;
+                        host.label = Some(device.label.clone());
+                        host.icon = device.icon.clone();
+                    }
+                }
+            }
+
+            hosts.sort_by(|a, b| {
+                let a_ip: Ipv4Addr = a.ip.parse().unwrap_or(Ipv4Addr::UNSPECIFIED);
+                let b_ip: Ipv4Addr = b.ip.parse().unwrap_or(Ipv4Addr::UNSPECIFIED);
+                a_ip.cmp(&b_ip)
+            });
+
+            let active = hosts.iter().filter(|h| h.is_alive).count();
+            let mut stored = state.scanned_hosts.lock().await;
+            *stored = hosts;
+            drop(stored);
+
+            println!("[LabNAS] Red escaneada: {} dispositivos activos", active);
         }
 
         tokio::time::sleep(Duration::from_secs(5 * 60)).await;
@@ -348,10 +346,7 @@ async fn ping_host(ip: Ipv4Addr) -> NetworkHost {
         .await;
     pinger.timeout(Duration::from_millis(1500));
 
-    let is_alive = matches!(
-        pinger.ping(surge_ping::PingSequence(0), &payload).await,
-        Ok(_)
-    );
+    let is_alive = pinger.ping(surge_ping::PingSequence(0), &payload).await.is_ok();
 
     let elapsed = start.elapsed().as_secs_f64() * 1000.0;
 

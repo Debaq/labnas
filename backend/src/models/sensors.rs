@@ -143,38 +143,6 @@ fn default_limit() -> i64 {
     1000
 }
 
-/// Mapa de key numérico del protocolo binario a nombre string
-pub fn reading_key_name(code: u8) -> &'static str {
-    match code {
-        0x01 => "temperature",
-        0x02 => "humidity",
-        0x03 => "pressure",
-        0x04 => "co2",
-        0x05 => "tvoc",
-        0x06 => "pm2_5",
-        0x07 => "pm10",
-        0x08 => "light",
-        0x09 => "uv_index",
-        0x0A => "noise",
-        0x0B => "soil_moisture",
-        0x0C => "water_level",
-        0x0D => "ph",
-        0x0E => "conductivity",
-        0x0F => "dissolved_o2",
-        0x10 => "wind_speed",
-        0x11 => "wind_direction",
-        0x12 => "rain",
-        0x13 => "weight",
-        0x14 => "current",
-        0x15 => "voltage",
-        0x16 => "power",
-        0x17 => "energy",
-        0x18 => "distance",
-        0x19 => "flow_rate",
-        _ => "custom",
-    }
-}
-
 /// Unidad por defecto para cada key
 pub fn reading_key_unit(key: &str) -> &'static str {
     match key {

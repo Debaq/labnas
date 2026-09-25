@@ -115,7 +115,7 @@ pub async fn list_entries(State(state): State<AppState>) -> Json<Vec<PortfolioEn
     let entries = crate::db::db_op(&state.db, |conn| {
         let mut stmt = conn.prepare(&format!("{} ORDER BY created_at DESC", ENTRY_SELECT))
             .map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| row_to_entry(row))
+        let rows = stmt.query_map([], row_to_entry)
             .map_err(|e| e.to_string())?;
         let mut result = Vec::new();
         for row in rows {
@@ -238,7 +238,7 @@ pub async fn toggle_requirement(
         let entry = conn.query_row(
             &format!("{} WHERE id = ?1", ENTRY_SELECT),
             params![id],
-            |row| row_to_entry(row),
+            row_to_entry,
         ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         Ok(entry)
     }).await?;
@@ -278,7 +278,7 @@ pub async fn toggle_milestone(
         let entry = conn.query_row(
             &format!("{} WHERE id = ?1", ENTRY_SELECT),
             params![id],
-            |row| row_to_entry(row),
+            row_to_entry,
         ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         Ok(entry)
     }).await?;

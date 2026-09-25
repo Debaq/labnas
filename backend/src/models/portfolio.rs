@@ -3,22 +3,21 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum PortfolioType {
+    #[default]
     Project,
     Course,
     Diploma,
     Workshop,
 }
 
-impl Default for PortfolioType {
-    fn default() -> Self {
-        Self::Project
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum PortfolioStatus {
+    #[default]
     Planned,
     Active,
     Completed,
@@ -29,23 +28,15 @@ pub enum PortfolioStatus {
 /// Alcance: propio (participamos), externo (referencia), historico (archivo)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum PortfolioScope {
+    #[default]
     Own,       // Participamos / lideramos
     External,  // Externo, solo referencia informativa
     Historic,  // Historico / archivo
 }
 
-impl Default for PortfolioScope {
-    fn default() -> Self {
-        Self::Own
-    }
-}
 
-impl Default for PortfolioStatus {
-    fn default() -> Self {
-        Self::Planned
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Requirement {

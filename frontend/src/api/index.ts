@@ -291,7 +291,15 @@ export async function fetchSystemInfo(): Promise<SystemInfo> {
   return res.json()
 }
 
-export async function fetchHealth(): Promise<any> {
+export interface HealthInfo {
+  status: string
+  version: string
+  uptime: string
+  ip: string | null
+  upload_limit_mb: number
+}
+
+export async function fetchHealth(): Promise<HealthInfo> {
   const res = await api('/api/health')
   if (!res.ok) throw new Error('Error al obtener estado')
   return res.json()

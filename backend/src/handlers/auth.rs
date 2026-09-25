@@ -699,7 +699,7 @@ pub async fn rename_user(
         .unwrap_or_default();
 
     Ok(Json(AuthResponse {
-        token: token,
+        token,
         username: new_username,
         role,
         permissions,

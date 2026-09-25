@@ -13,6 +13,7 @@ import {
 } from '../api'
 import { useAuth } from '../auth/AuthContext'
 import type { SensorLatest, SensorAlert, ReceiverStatus, SensorReading } from '../types'
+import { errorMessage } from '../lib/errors'
 
 const READING_LABELS: Record<string, string> = {
   temperature: 'Temperatura', humidity: 'Humedad', pressure: 'Presion',
@@ -179,11 +180,11 @@ export default function SensorsPage() {
   }
   async function handleAddDevice() {
     if (!addForm.name.trim() || !addForm.mac.trim()) return
-    try { await registerSensorDevice(addForm); setShowAddDevice(false); setAddForm({ name: '', mac: '', device_type: '', connection: 'wifi' }); await loadData() } catch (e: any) { alert(e.message) }
+    try { await registerSensorDevice(addForm); setShowAddDevice(false); setAddForm({ name: '', mac: '', device_type: '', connection: 'wifi' }); await loadData() } catch (e) { alert(errorMessage(e)) }
   }
   async function handleAddAlert() {
     if (!alertForm.device_id || !alertForm.key) return
-    try { await createSensorAlert(alertForm); setShowAddAlert(false); await loadData() } catch (e: any) { alert(e.message) }
+    try { await createSensorAlert(alertForm); setShowAddAlert(false); await loadData() } catch (e) { alert(errorMessage(e)) }
   }
   async function handleToggleAlert(id: string, enabled: boolean) {
     try { await updateSensorAlert(id, { enabled }); await loadData() } catch {}
@@ -193,7 +194,7 @@ export default function SensorsPage() {
   }
   async function handleConfigPort() {
     if (!portInput.trim()) return
-    try { await configureReceiver(portInput.trim()); setShowPortConfig(false); await loadData() } catch (e: any) { alert(e.message) }
+    try { await configureReceiver(portInput.trim()); setShowPortConfig(false); await loadData() } catch (e) { alert(errorMessage(e)) }
   }
 
   const pending = latest.filter(s => s.device?.status === 'pending')

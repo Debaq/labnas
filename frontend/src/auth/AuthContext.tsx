@@ -28,9 +28,22 @@ const AuthContext = createContext<AuthContextType | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
-  const [loading, setLoading] = useState(true)
+  // Sesion guardada: si hay una, se valida contra el servidor antes de mostrar la app
+  const [saved] = useState<AuthUser | null>(() => {
+    try {
+      const raw = localStorage.getItem('labnas_auth')
+      if (!raw) return null
+      const parsed = JSON.parse(raw) as AuthUser
+      if (!parsed.enabledModules) parsed.enabledModules = []
+      return parsed
+    } catch {
+      localStorage.removeItem('labnas_auth')
+      return null
+    }
+  })
+  const [loading, setLoading] = useState(saved !== null)
 
-  function parseModules(data: any): ModuleInfo[] {
+  function parseModules(data: { enabled_modules?: unknown } | null | undefined): ModuleInfo[] {
     if (Array.isArray(data?.enabled_modules)) return data.enabled_modules
     return []
   }
@@ -59,21 +72,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Initial load
   useEffect(() => {
-    const saved = localStorage.getItem('labnas_auth')
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as AuthUser
-        if (!parsed.enabledModules) parsed.enabledModules = []
-        refreshFromServer(parsed.token, parsed)
-          .catch(() => localStorage.removeItem('labnas_auth'))
-          .finally(() => setLoading(false))
-      } catch {
-        localStorage.removeItem('labnas_auth')
-        setLoading(false)
-      }
-    } else {
-      setLoading(false)
-    }
+    if (!saved) return
+    refreshFromServer(saved.token, saved)
+      .catch(() => localStorage.removeItem('labnas_auth'))
+      .finally(() => setLoading(false))
+    // Solo al montar
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Poll for role/permission/module changes every 30s

@@ -116,6 +116,9 @@ fn task_status_str(s: &TaskStatus) -> &'static str {
 
 // ---- Notificaciones Telegram para tareas ----
 
+/// (chat_id, name, username, role, linked_web_user)
+type TelegramChatRow = (i64, String, Option<String>, String, Option<String>);
+
 async fn notify_task_assigned(state: &AppState, task: &Task) {
     let pool = state.db.clone();
     let (token, chats) = match crate::db::db_op(&pool, |conn| {
@@ -132,7 +135,7 @@ async fn notify_task_assigned(state: &AppState, task: &Task) {
         let mut stmt = conn
             .prepare("SELECT chat_id, name, username, role, linked_web_user FROM telegram_chats")
             .map_err(|e| format!("telegram_chats: {}", e))?;
-        let chats: Vec<(i64, String, Option<String>, String, Option<String>)> = stmt
+        let chats: Vec<TelegramChatRow> = stmt
             .query_map([], |row| {
                 Ok((
                     row.get(0)?,
@@ -277,7 +280,7 @@ pub async fn list_projects(State(state): State<AppState>) -> Result<Json<Vec<Pro
             .prepare("SELECT id, name, description, created_by, members, member_tags, created_at FROM projects ORDER BY created_at")
             .map_err(|e| format!("list_projects: {}", e))?;
         let rows = stmt
-            .query_map([], |row| row_to_project(row))
+            .query_map([], row_to_project)
             .map_err(|e| format!("list_projects query: {}", e))?
             .filter_map(|r| r.ok())
             .collect::<Vec<_>>();
@@ -407,7 +410,7 @@ pub async fn update_project(
             .query_row(
                 "SELECT id, name, description, created_by, members, member_tags, created_at FROM projects WHERE id = ?1",
                 params![id],
-                |row| row_to_project(row),
+                row_to_project,
             )
             .map_err(|_| "Proyecto no encontrado".to_string())?;
 
@@ -496,7 +499,7 @@ pub async fn list_tasks(
         let mut stmt = conn.prepare(&sql).map_err(|e| format!("list_tasks: {}", e))?;
         let params_refs: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|p| p.as_ref()).collect();
         let rows = stmt
-            .query_map(params_refs.as_slice(), |row| row_to_task(row))
+            .query_map(params_refs.as_slice(), row_to_task)
             .map_err(|e| format!("list_tasks query: {}", e))?
             .filter_map(|r| r.ok())
             .collect::<Vec<_>>();
@@ -621,7 +624,7 @@ pub async fn update_task(
             .query_row(
                 "SELECT id, project_id, title, description, assigned_to, status, created_by, due_date, due_time, requires_confirmation, insistent, reminder_minutes, confirmed_by, rejected_by, created_at, last_reminder FROM tasks WHERE id = ?1",
                 params![id],
-                |row| row_to_task(row),
+                row_to_task,
             )
             .map_err(|_| "Tarea no encontrada".to_string())?;
 
@@ -730,7 +733,7 @@ pub async fn confirm_task(
             .query_row(
                 "SELECT id, project_id, title, description, assigned_to, status, created_by, due_date, due_time, requires_confirmation, insistent, reminder_minutes, confirmed_by, rejected_by, created_at, last_reminder FROM tasks WHERE id = ?1",
                 params![id],
-                |row| row_to_task(row),
+                row_to_task,
             )
             .map_err(|_| "Tarea no encontrada".to_string())?;
 
@@ -839,7 +842,7 @@ pub async fn reject_task(
             .query_row(
                 "SELECT id, project_id, title, description, assigned_to, status, created_by, due_date, due_time, requires_confirmation, insistent, reminder_minutes, confirmed_by, rejected_by, created_at, last_reminder FROM tasks WHERE id = ?1",
                 params![id],
-                |row| row_to_task(row),
+                row_to_task,
             )
             .map_err(|_| "Tarea no encontrada".to_string())?;
 
@@ -894,7 +897,7 @@ pub async fn done_task(
             .query_row(
                 "SELECT id, project_id, title, description, assigned_to, status, created_by, due_date, due_time, requires_confirmation, insistent, reminder_minutes, confirmed_by, rejected_by, created_at, last_reminder FROM tasks WHERE id = ?1",
                 params![id],
-                |row| row_to_task(row),
+                row_to_task,
             )
             .map_err(|_| "Tarea no encontrada".to_string())?;
 
@@ -1013,7 +1016,7 @@ pub async fn schedule_task(
             .query_row(
                 "SELECT id, project_id, title, description, assigned_to, status, created_by, due_date, due_time, requires_confirmation, insistent, reminder_minutes, confirmed_by, rejected_by, created_at, last_reminder FROM tasks WHERE id = ?1",
                 params![id],
-                |row| row_to_task(row),
+                row_to_task,
             )
             .map_err(|_| "Tarea no encontrada".to_string())?;
 
@@ -1145,7 +1148,7 @@ pub async fn list_events(State(state): State<AppState>) -> Result<Json<Vec<Calen
             .prepare("SELECT id, title, description, date, time, end_time, location, created_by, invitees, accepted, declined, remind_before_min, reminded, notify_telegram, recurrence, recurrence_end, created_at, category FROM calendar_events ORDER BY date, time")
             .map_err(|e| format!("list_events: {}", e))?;
         let rows = stmt
-            .query_map([], |row| row_to_event(row))
+            .query_map([], row_to_event)
             .map_err(|e| format!("list_events query: {}", e))?
             .filter_map(|r| r.ok())
             .collect::<Vec<_>>();
@@ -1229,7 +1232,7 @@ pub async fn update_event(
             .query_row(
                 "SELECT id, title, description, date, time, end_time, location, created_by, invitees, accepted, declined, remind_before_min, reminded, notify_telegram, recurrence, recurrence_end, created_at, category FROM calendar_events WHERE id = ?1",
                 params![id],
-                |row| row_to_event(row),
+                row_to_event,
             )
             .map_err(|_| "Evento no encontrado".to_string())?;
 
@@ -1341,7 +1344,7 @@ pub async fn accept_event(
             .query_row(
                 "SELECT id, title, description, date, time, end_time, location, created_by, invitees, accepted, declined, remind_before_min, reminded, notify_telegram, recurrence, recurrence_end, created_at, category FROM calendar_events WHERE id = ?1",
                 params![id],
-                |row| row_to_event(row),
+                row_to_event,
             )
             .map_err(|_| "Evento no encontrado".to_string())?;
 
@@ -1388,7 +1391,7 @@ pub async fn decline_event(
             .query_row(
                 "SELECT id, title, description, date, time, end_time, location, created_by, invitees, accepted, declined, remind_before_min, reminded, notify_telegram, recurrence, recurrence_end, created_at, category FROM calendar_events WHERE id = ?1",
                 params![id],
-                |row| row_to_event(row),
+                row_to_event,
             )
             .map_err(|_| "Evento no encontrado".to_string())?;
 

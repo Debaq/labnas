@@ -19,5 +19,11 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // Convencion del proyecto: `catch {}` para operaciones best-effort (la UI sigue igual si fallan)
+      'no-empty': ['error', { allowEmptyCatch: true }],
+      // Contextos que exportan su hook junto al Provider
+      'react-refresh/only-export-components': ['error', { allowConstantExport: true, allowExportNames: ['useAuth', 'useToast', 'useTheme'] }],
+    },
   },
 ])

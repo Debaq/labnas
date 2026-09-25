@@ -32,17 +32,16 @@ fn resolve_url() -> String {
     if let Some(arg) = std::env::args().nth(1) {
         return arg;
     }
-    if let Ok(env) = std::env::var("LABNAS_URL") {
-        if !env.trim().is_empty() {
-            return env.trim().to_string();
-        }
+    if let Ok(env) = std::env::var("LABNAS_URL")
+        && !env.trim().is_empty()
+    {
+        return env.trim().to_string();
     }
-    if let Some(cfg) = dirs::config_dir().map(|d| d.join("labnas-viewer/url")) {
-        if let Ok(content) = std::fs::read_to_string(cfg) {
-            if let Some(line) = content.lines().map(str::trim).find(|l| !l.is_empty()) {
-                return line.to_string();
-            }
-        }
+    if let Some(cfg) = dirs::config_dir().map(|d| d.join("labnas-viewer/url"))
+        && let Ok(content) = std::fs::read_to_string(cfg)
+        && let Some(line) = content.lines().map(str::trim).find(|l| !l.is_empty())
+    {
+        return line.to_string();
     }
     DEFAULT_URL.to_string()
 }

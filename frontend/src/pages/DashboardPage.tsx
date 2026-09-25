@@ -70,7 +70,6 @@ export default function DashboardPage() {
   const [disks, setDisks] = useState<DiskInfo[]>([])
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
   const [hosts, setHosts] = useState<NetworkHost[]>([])
-  const [_health, setHealth] = useState<any>(null)
   const [printers3d, setPrinters3d] = useState<Printer3DConfig[]>([])
   const [printerStatuses, setPrinterStatuses] = useState<Printer3DStatus[]>([])
   const [loading, setLoading] = useState(true)
@@ -83,62 +82,45 @@ export default function DashboardPage() {
   async function loadData(initial = false) {
     if (initial) setLoading(true)
     try {
-      // Always fetch system basics
-      const promises: Promise<any>[] = [
+      // Los modulos desactivados no se consultan (se resuelven vacios y no se usan)
+      const hasNetwork = isModuleEnabled('network')
+      const hasPrinters3d = isModuleEnabled('printers3d')
+      const hasTasks = isModuleEnabled('tasks')
+      const skip = <T,>(value: T) => Promise.resolve(value)
+
+      const [
+        disksData, healthData, sysInfoData, servicesData,
+        hostsData, printers3dData, tasksData, eventsData, projectsData,
+      ] = await Promise.allSettled([
         fetchDisks(),
         fetchHealth(),
         fetchSystemInfo(),
         getServices(),
-      ]
-      // Conditional fetches by module
-      const hasNetwork = isModuleEnabled('network')
-      const hasPrinters3d = isModuleEnabled('printers3d')
-      const hasTasks = isModuleEnabled('tasks')
-
-      if (hasNetwork) promises.push(fetchHosts())
-      if (hasPrinters3d) promises.push(fetchPrinters3D())
-      if (hasTasks) {
-        promises.push(fetchTasks())
-        promises.push(fetchEvents())
-        promises.push(fetchProjects())
-      }
-
-      const results = await Promise.allSettled(promises)
-      let idx = 0
-
-      // System basics (always)
-      const disksData = results[idx++]
-      const healthData = results[idx++]
-      const sysInfoData = results[idx++]
-      const servicesData = results[idx++]
+        hasNetwork ? fetchHosts() : skip<NetworkHost[]>([]),
+        hasPrinters3d ? fetchPrinters3D() : skip<Printer3DConfig[]>([]),
+        hasTasks ? fetchTasks() : skip<Task[]>([]),
+        hasTasks ? fetchEvents() : skip<CalendarEvent[]>([]),
+        hasTasks ? fetchProjects() : skip<Project[]>([]),
+      ] as const)
 
       if (disksData.status === 'fulfilled') setDisks(disksData.value)
-      if (healthData.status === 'fulfilled') { setHealth(healthData.value); if (healthData.value.ip) setServerIp(healthData.value.ip) }
+      if (healthData.status === 'fulfilled' && healthData.value.ip) setServerIp(healthData.value.ip)
       if (sysInfoData.status === 'fulfilled') setSystemInfo(sysInfoData.value)
       if (servicesData.status === 'fulfilled') setServices(servicesData.value)
 
-      if (hasNetwork) {
-        const hostsData = results[idx++]
-        if (hostsData.status === 'fulfilled') setHosts(hostsData.value)
-      }
-      if (hasPrinters3d) {
-        const printers3dData = results[idx++]
-        if (printers3dData.status === 'fulfilled') {
-          setPrinters3d(printers3dData.value)
-          const statusResults = await Promise.allSettled(
-            printers3dData.value.map((p: Printer3DConfig) => fetchPrinter3DStatus(p.id))
-          )
-          setPrinterStatuses(
-            statusResults
-              .filter((r): r is PromiseFulfilledResult<Printer3DStatus> => r.status === 'fulfilled')
-              .map((r) => r.value)
-          )
-        }
+      if (hasNetwork && hostsData.status === 'fulfilled') setHosts(hostsData.value)
+      if (hasPrinters3d && printers3dData.status === 'fulfilled') {
+        setPrinters3d(printers3dData.value)
+        const statusResults = await Promise.allSettled(
+          printers3dData.value.map((p) => fetchPrinter3DStatus(p.id))
+        )
+        setPrinterStatuses(
+          statusResults
+            .filter((r): r is PromiseFulfilledResult<Printer3DStatus> => r.status === 'fulfilled')
+            .map((r) => r.value)
+        )
       }
       if (hasTasks) {
-        const tasksData = results[idx++]
-        const eventsData = results[idx++]
-        const projectsData = results[idx++]
         if (tasksData.status === 'fulfilled') setTasks(tasksData.value)
         if (eventsData.status === 'fulfilled') setEvents(eventsData.value)
         if (projectsData.status === 'fulfilled') setProjects(projectsData.value)

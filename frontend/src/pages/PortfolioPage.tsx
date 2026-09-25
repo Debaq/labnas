@@ -11,6 +11,7 @@ import {
   togglePortfolioRequirement, togglePortfolioMilestone, fetchUsernames,
 } from '../api'
 import type { PortfolioEntry, PortfolioType, PortfolioStatus, PortfolioScope } from '../types'
+import { errorMessage } from '../lib/errors'
 
 const TYPE_CONFIG: Record<PortfolioType, { label: string; icon: typeof Microscope }> = {
   project: { label: 'Proyecto', icon: Microscope },
@@ -144,7 +145,7 @@ export default function PortfolioPage() {
       }
       setShowModal(false)
       await loadData()
-    } catch (e: any) { alert(e.message) }
+    } catch (e) { alert(errorMessage(e)) }
   }
 
   async function handleDelete(id: string) {

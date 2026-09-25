@@ -660,12 +660,6 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), Stri
     Ok(())
 }
 
-pub fn delete_setting(conn: &Connection, key: &str) -> Result<(), String> {
-    conn.execute("DELETE FROM settings WHERE key = ?1", params![key])
-        .map_err(|e| format!("Error eliminando setting {}: {}", key, e))?;
-    Ok(())
-}
-
 pub fn get_setting_bool(conn: &Connection, key: &str) -> bool {
     get_setting(conn, key)
         .map(|v| v == "true" || v == "1")
@@ -739,15 +733,6 @@ pub fn get_enabled_module_ids(conn: &Connection) -> Vec<String> {
         .unwrap()
         .filter_map(|r| r.ok())
         .collect()
-}
-
-pub fn is_module_enabled(conn: &Connection, module_id: &str) -> bool {
-    conn.query_row(
-        "SELECT enabled FROM modules WHERE id = ?1",
-        params![module_id],
-        |row| row.get::<_, bool>(0),
-    )
-    .unwrap_or(true)
 }
 
 pub fn set_module_enabled(conn: &Connection, module_id: &str, enabled: bool) -> Result<(), String> {

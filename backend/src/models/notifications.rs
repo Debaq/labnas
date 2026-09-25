@@ -2,18 +2,15 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum UserRole {
+    #[default]
     Pendiente,
     Observador,
     Operador,
     Admin,
 }
 
-impl Default for UserRole {
-    fn default() -> Self {
-        Self::Pendiente
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UserPermissions {

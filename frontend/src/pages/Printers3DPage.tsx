@@ -93,6 +93,49 @@ interface HardwareItem {
   qty: number | string
 }
 
+// Piezas de la calculadora de costos. Definidas fuera del modal: si se crean durante
+// el render, React las remonta en cada tecla y los inputs pierden el foco.
+const calcInputStyle = { backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }
+const calcInputClass = "w-full px-3 py-2 rounded-lg text-sm outline-none"
+
+function NumField({ label, hint, value, onChange, unit, placeholder }: {
+  label: string; hint?: string; value: number | string; onChange: (v: number | string) => void; unit?: string; placeholder?: string
+}) {
+  return (
+    <div>
+      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{label}</label>
+      <div className="relative">
+        <input type="number" min={0} step="any" value={value}
+          onChange={(e) => onChange(e.target.value === '' ? '' : parseFloat(e.target.value))}
+          placeholder={placeholder || '0'} className={calcInputClass + (unit ? ' pr-10' : '')} style={calcInputStyle} />
+        {unit && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style={{ color: 'var(--text-secondary)', opacity: 0.6 }}>{unit}</span>}
+      </div>
+      {hint && <span className="block text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>{hint}</span>}
+    </div>
+  )
+}
+
+function CostLine({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
+  if (value <= 0) return null
+  return (
+    <div className="flex justify-between items-center py-1">
+      <span className="text-xs" style={{ color: highlight ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{label}</span>
+      <span className={'text-sm font-mono' + (highlight ? ' font-bold' : '')} style={{ color: highlight ? 'var(--accent)' : 'var(--text-primary)' }}>
+        ${value.toFixed(2)}
+      </span>
+    </div>
+  )
+}
+
+function CalcSectionHeader({ title }: { title: string }) {
+  return (
+    <div className="flex items-center gap-2 mb-2 mt-1">
+      <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent)' }}>{title}</span>
+      <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
+    </div>
+  )
+}
+
 function CostCalculatorModal({ printers, onClose }: { printers: Printer3DConfig[]; onClose: () => void }) {
   const [selectedPrinterId, setSelectedPrinterId] = useState<string>('')
   // Material
@@ -183,6 +226,8 @@ function CostCalculatorModal({ printers, onClose }: { printers: Printer3DConfig[
   function removeHardwareItem(id: string) {
     setHardwareItems(prev => prev.filter(item => item.id !== id))
   }
+  const inputStyle = calcInputStyle
+
   function resetAll() {
     setSelectedPrinterId('')
     setMaterialWeight(''); setMaterialPriceKg(''); setMaterialDensity('')
@@ -192,47 +237,6 @@ function CostCalculatorModal({ printers, onClose }: { printers: Printer3DConfig[
     setDesignHours(''); setPrepHours(''); setPostProcessHours(''); setHourlyRate('')
     setHardwareItems([])
     setFailRate(''); setMargin(''); setQuantity(1)
-  }
-
-  const inputStyle = { backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }
-  const inputClass = "w-full px-3 py-2 rounded-lg text-sm outline-none"
-
-  function NumField({ label, hint, value, onChange, unit, placeholder }: {
-    label: string; hint?: string; value: number | string; onChange: (v: number | string) => void; unit?: string; placeholder?: string
-  }) {
-    return (
-      <div>
-        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{label}</label>
-        <div className="relative">
-          <input type="number" min={0} step="any" value={value}
-            onChange={(e) => onChange(e.target.value === '' ? '' : parseFloat(e.target.value))}
-            placeholder={placeholder || '0'} className={inputClass + (unit ? ' pr-10' : '')} style={inputStyle} />
-          {unit && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style={{ color: 'var(--text-secondary)', opacity: 0.6 }}>{unit}</span>}
-        </div>
-        {hint && <span className="block text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>{hint}</span>}
-      </div>
-    )
-  }
-
-  function CostLine({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
-    if (value <= 0) return null
-    return (
-      <div className="flex justify-between items-center py-1">
-        <span className="text-xs" style={{ color: highlight ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{label}</span>
-        <span className={'text-sm font-mono' + (highlight ? ' font-bold' : '')} style={{ color: highlight ? 'var(--accent)' : 'var(--text-primary)' }}>
-          ${value.toFixed(2)}
-        </span>
-      </div>
-    )
-  }
-
-  function CalcSectionHeader({ title }: { title: string }) {
-    return (
-      <div className="flex items-center gap-2 mb-2 mt-1">
-        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent)' }}>{title}</span>
-        <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
-      </div>
-    )
   }
 
   return (

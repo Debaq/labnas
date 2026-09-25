@@ -9,8 +9,10 @@ import { useTheme } from '../themes/ThemeContext'
 import { themes, getThemeNames, type ThemeName } from '../themes/themes'
 import { fetchDisks, fetchSystemInfo, fetchAutostartStatus, fetchNotificationConfig, setBotToken, deleteBotToken, deleteTelegramChat, sendTestTelegram, setNotificationSchedule, setChatRole, adminLinkChat, fetchWebUsers, generateLinkCode, changePassword, renameUser, checkUpdate, forceCheckUpdate, doUpdate, doReinstall, fetchRollbackStatus, doRollback, type RollbackStatus, getMdnsStatus, setMdns, getBranding, setBranding, setWebUserRole, deleteWebUser, getServices, addService, deleteService, updateService, setLastfmKey, fetchHealth, getMpvArgs, setMpvArgs as saveMpvArgs, setUploadLimit, fetchModules, toggleModule, reorderModules, type LabBranding, type LabService } from '../api'
 import type { DiskInfo, SystemInfo, AutostartStatus, NotificationConfig, UserRole, UserPermissions, ModuleInfo } from '../types'
+import { errorMessage } from '../lib/errors'
+import type { IconComponent } from '../lib/icons'
 
-const MODULE_META: Record<string, { label: string; icon: any; description: string }> = {
+const MODULE_META: Record<string, { label: string; icon: IconComponent; description: string }> = {
   dashboard:  { label: 'Dashboard',        icon: LayoutDashboard, description: 'Panel principal con estadisticas y resumen' },
   files:      { label: 'Archivos',         icon: FolderOpen,      description: 'Explorador y gestor de archivos' },
   network:    { label: 'Red',              icon: Network,         description: 'Escaneo y monitoreo de red local' },
@@ -28,7 +30,7 @@ const MODULE_META: Record<string, { label: string; icon: any; description: strin
 
 type TabId = 'general' | 'lab' | 'users' | 'notifications' | 'network' | 'media' | 'system' | 'backups' | 'admin'
 
-const TABS: { id: TabId; label: string; icon: any; adminOnly: boolean }[] = [
+const TABS: { id: TabId; label: string; icon: IconComponent; adminOnly: boolean }[] = [
   { id: 'general',       label: 'General',        icon: SlidersHorizontal, adminOnly: false },
   { id: 'lab',           label: 'Laboratorio',    icon: Building2,         adminOnly: true  },
   { id: 'users',         label: 'Usuarios',       icon: Users,             adminOnly: true  },
@@ -447,7 +449,7 @@ export default function SettingsPage() {
                       }
                       setSvcName(''); setSvcPort(''); setSvcDesc(''); setSvcIcon(''); setEditingSvcPort(null)
                       setShowAddService(false)
-                    } catch (e: any) { alert(e.message) }
+                    } catch (e) { alert(errorMessage(e)) }
                   }}
                   disabled={!svcName || !svcPort}
                   className="px-4 py-2 rounded-lg text-sm font-medium"
@@ -544,7 +546,7 @@ export default function SettingsPage() {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           {/* Auto theme card */}
           <button
-            onClick={() => setTheme('auto' as any)}
+            onClick={() => setTheme('auto')}
             className="rounded-xl p-4 transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 text-left"
             style={{
               background: 'linear-gradient(135deg, #282a36 50%, #f8fafc 50%)',
@@ -621,8 +623,8 @@ export default function SettingsPage() {
                     localStorage.setItem('labnas_auth', JSON.stringify(parsed))
                     window.location.reload()
                   }
-                } catch (e: any) {
-                  setRenameMsg({ ok: false, text: e.message })
+                } catch (e) {
+                  setRenameMsg({ ok: false, text: errorMessage(e) })
                 }
               }}
               disabled={!newName.trim()}
@@ -681,8 +683,8 @@ export default function SettingsPage() {
                   setPwMsg({ ok: true, text: 'Contrasena cambiada' })
                   setCurrentPw('')
                   setNewPw('')
-                } catch (e: any) {
-                  setPwMsg({ ok: false, text: e.message })
+                } catch (e) {
+                  setPwMsg({ ok: false, text: errorMessage(e) })
                 }
               }}
               disabled={!currentPw || !newPw}
@@ -1165,8 +1167,8 @@ export default function SettingsPage() {
                       const cfg = await setBotToken(tokenInput.trim())
                       setNotifConfig(cfg)
                       setTokenInput('')
-                    } catch (e: any) {
-                      setTokenError(e.message)
+                    } catch (e) {
+                      setTokenError(errorMessage(e))
                     } finally {
                       setTokenLoading(false)
                     }
@@ -1196,7 +1198,7 @@ export default function SettingsPage() {
               </span>
               <button onClick={async () => {
                 setSendingTest(true); setTestResult(null)
-                try { setTestResult(await sendTestTelegram()) } catch (e: any) { setTestResult(e.message) } finally { setSendingTest(false) }
+                try { setTestResult(await sendTestTelegram()) } catch (e) { setTestResult(errorMessage(e)) } finally { setSendingTest(false) }
               }} disabled={sendingTest || !notifConfig.telegram_chats.length}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium hover:opacity-90"
                 style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>

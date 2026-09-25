@@ -1,3 +1,4 @@
+import { errorMessage } from '../lib/errors'
 import { useCallback, useEffect, useState, useRef } from 'react'
 import { useEvent, useEventsConnected } from '../events/useEvents'
 import { useNavigate } from 'react-router-dom'
@@ -145,8 +146,8 @@ export default function MusicPanel() {
     setRadioError(null)
     try {
       setMusicState(safeMusicState(await recommendMusic()))
-    } catch (e: any) {
-      setRadioError(e.message || 'Error generando mix')
+    } catch (e) {
+      setRadioError(errorMessage(e) || 'Error generando mix')
       setTimeout(() => setRadioError(null), 5000)
     } finally { setLoadingMix(false) }
   }
@@ -157,8 +158,8 @@ export default function MusicPanel() {
     setRadioError(null)
     try {
       setMusicState(safeMusicState(await startRadio(artist, track)))
-    } catch (e: any) {
-      setRadioError(e.message || 'Error iniciando radio')
+    } catch (e) {
+      setRadioError(errorMessage(e) || 'Error iniciando radio')
       setTimeout(() => setRadioError(null), 5000)
     } finally {
       setLoadingRadio(false)
@@ -171,8 +172,8 @@ export default function MusicPanel() {
     setRadioError(null)
     try {
       setMusicState(safeMusicState(await luckyPlay(musicState.current.artist, musicState.current.title)))
-    } catch (e: any) {
-      setRadioError(e.message || 'Sin suerte esta vez')
+    } catch (e) {
+      setRadioError(errorMessage(e) || 'Sin suerte esta vez')
       setTimeout(() => setRadioError(null), 5000)
     } finally {
       setLoadingLucky(false)

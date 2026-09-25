@@ -157,7 +157,7 @@ pub async fn list_items(State(state): State<AppState>) -> Json<Vec<InventoryItem
     let items = crate::db::db_op(&state.db, |conn| {
         let mut stmt = conn.prepare(&format!("{} ORDER BY name", ITEM_SELECT))
             .map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| row_to_item(row))
+        let rows = stmt.query_map([], row_to_item)
             .map_err(|e| e.to_string())?;
         let mut result = Vec::new();
         for row in rows {
@@ -295,7 +295,7 @@ pub async fn list_print_history(State(state): State<AppState>) -> Json<Vec<Print
         let mut stmt = conn.prepare(
             "SELECT id, printer_id, file_name, filament_id, weight_grams, print_time_minutes, material_cost, electricity_cost, total_cost, success, notes, created_at FROM print_history ORDER BY created_at DESC"
         ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| row_to_print_history(row))
+        let rows = stmt.query_map([], row_to_print_history)
             .map_err(|e| e.to_string())?;
         let mut result = Vec::new();
         for row in rows {

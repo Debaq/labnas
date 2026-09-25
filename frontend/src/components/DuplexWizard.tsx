@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { duplexPrepare, duplexPrintStep, duplexCleanup, fetchPrinterOptions } from '../api'
 import type { CupsPrinter, DuplexPrepareResponse, PrinterOption } from '../types'
+import { errorMessage } from '../lib/errors'
 
 interface DuplexWizardProps {
   printers: CupsPrinter[]
@@ -154,8 +155,8 @@ export default function DuplexWizard({ printers, defaultPrinter, onClose, onComp
       setPrepareData(data)
       cleanupRef.current = data.temp_id
       setStep('configure')
-    } catch (err: any) {
-      setError(err.message || 'Error al preparar archivo')
+    } catch (err) {
+      setError(errorMessage(err) || 'Error al preparar archivo')
     } finally {
       setPreparing(false)
     }

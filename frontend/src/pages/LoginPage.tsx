@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Loader2, LogIn, UserPlus } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { getBranding } from '../api'
+import { errorMessage } from '../lib/errors'
 
 export default function LoginPage() {
   const { login, register } = useAuth()
@@ -58,8 +59,8 @@ export default function LoginPage() {
       } else {
         await register(username, password)
       }
-    } catch (err: any) {
-      setError(err.message)
+    } catch (err) {
+      setError(errorMessage(err))
     } finally {
       setLoading(false)
     }

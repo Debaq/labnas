@@ -69,9 +69,9 @@ async fn musica_por_interes() {
     s.post("/api/music/volume", &bob, json!({ "volume": 30 })).await;
     assert!(!kinds(&events(&mut ws, 1500).await).contains(&"music.state".to_string()));
 
-    ws.send(Message::Text(json!({ "sub": "music.state" }).to_string().into())).await.unwrap();
+    ws.send(Message::Text(json!({ "sub": "music.state" }).to_string())).await.unwrap();
     s.post("/api/music/volume", &bob, json!({ "volume": 42 })).await;
     let ev = events(&mut ws, 2500).await;
-    let last = ev.iter().filter(|e| e["kind"] == "music.state").last().expect("music.state");
+    let last = ev.iter().rfind(|e| e["kind"] == "music.state").expect("music.state");
     assert_eq!(last["data"]["volume"], 42);
 }

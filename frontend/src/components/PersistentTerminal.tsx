@@ -15,7 +15,7 @@ export default function PersistentTerminal() {
   const wsRef = useRef<WebSocket | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const [initialized, setInitialized] = useState(false)
-  const pendingCmd = isVisible ? (location.state as any)?.commands as string | undefined : undefined
+  const pendingCmd = isVisible ? (location.state as { commands?: string } | null)?.commands : undefined
 
   // Inicializar solo la primera vez que se visita /terminal
   useEffect(() => {
@@ -137,6 +137,8 @@ export default function PersistentTerminal() {
       }
     })
 
+    // Inicializacion imperativa de xterm + WebSocket: marca que ya se hizo
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setInitialized(true)
   }, [isVisible, initialized])
 

@@ -11,18 +11,15 @@ pub enum MailProtocol {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum FilterAction {
     Prioritario,  // siempre notificar, marcar urgente
+    #[default]
     Normal,       // clasificar con IA normalmente
     Silencioso,   // clasificar pero no notificar
     Ignorar,      // no procesar, descartarlo
 }
 
-impl Default for FilterAction {
-    fn default() -> Self {
-        Self::Normal
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailFilter {

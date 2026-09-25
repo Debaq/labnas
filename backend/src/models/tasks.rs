@@ -4,18 +4,15 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum TaskStatus {
+    #[default]
     Pendiente,
     EnProgreso,
     Completada,
     Rechazada,
 }
 
-impl Default for TaskStatus {
-    fn default() -> Self {
-        Self::Pendiente
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
