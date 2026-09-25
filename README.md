@@ -494,6 +494,16 @@ Cada conexión recibe solo lo de su rol y de módulos activos. El WebSocket se a
 
 Click en un archivo del explorador abre la vista previa: imágenes, video y audio (con adelantar/retroceder), PDF y texto/código (primeros 512 KB). Se sirven con un **link temporal de un solo archivo** (30 min), no con el token de sesión. HTML/XML/JS se muestran como texto y los SVG sin permitir scripts, para que un archivo subido no pueda ejecutar código en LabNAS. Las descargas usan el mismo mecanismo (en streaming, sin cargar el archivo en memoria del navegador).
 
+## WebDAV (montar como unidad)
+
+Desactivado por defecto; se activa en **Configuración > Sistema > Carpetas accesibles**. Dirección: `http://<servidor>:3001/dav/`, con el mismo usuario y contraseña de la web.
+
+- Cada carpeta accesible que el usuario puede leer aparece como `/dav/<nombre>/`; se aplican los **mismos permisos por carpeta** (leer / escribir)
+- Borrar desde el explorador del sistema envía a la **papelera** de LabNAS
+- Rutas canonicalizadas (sin `..` ni symlinks que escapen) y `~/.labnas` bloqueado; mismo bloqueo por intentos fallidos que el login
+- Linux: `dav://<servidor>:3001/dav/` en el gestor de archivos (o `davfs2`); macOS: Finder > Ir > Conectarse al servidor
+- Windows sobre HTTP (sin TLS) requiere habilitar Basic en el cliente WebDAV (`HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters\BasicAuthLevel = 2`) o usar WinSCP / Cyberduck. Sin HTTPS la contraseña viaja en claro: úsalo solo en la LAN o sobre Tailscale
+
 ## Papelera
 
 Borrar desde el explorador **mueve a la papelera** (`.labnas-trash/`, oculta, en el mismo disco que el archivo: mover es instantáneo). Desde **Archivos > Papelera** se restaura a la ruta original (con sufijo si ya existe algo con ese nombre) o se borra definitivamente; un admin puede vaciarla entera. Lo que lleva más de 30 días se borra solo (setting `trash_retention_days`). La papelera no se incluye en los respaldos.

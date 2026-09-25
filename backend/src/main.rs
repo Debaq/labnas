@@ -12,7 +12,7 @@ mod updater;
 use axum::{
     http::Method,
     middleware as axum_mw,
-    routing::{delete, get, post, put},
+    routing::{any, delete, get, post, put},
     Router,
 };
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Instant};
@@ -419,6 +419,12 @@ fn api_routes() -> Router<AppState> {
         .route("/api/files/quickaccess", get(handlers::files::quick_access))
         .route("/api/files/preview-token", post(handlers::files::create_preview_token))
         .route("/api/preview/{token}/{name}", get(handlers::files::serve_preview))
+        .route("/api/files/webdav", get(handlers::webdav::get_settings))
+        .route("/api/files/webdav", put(handlers::webdav::set_settings))
+        // WebDAV (autenticacion Basic propia; fuera de /api)
+        .route("/dav", any(handlers::webdav::handle))
+        .route("/dav/", any(handlers::webdav::handle))
+        .route("/dav/{*path}", any(handlers::webdav::handle))
         .route("/api/files/roots", get(handlers::files::get_roots))
         .route("/api/files/roots", put(handlers::files::set_roots))
         // Papelera

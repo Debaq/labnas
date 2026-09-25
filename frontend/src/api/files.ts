@@ -169,3 +169,21 @@ export async function downloadFromUrl(url: string, destination: string): Promise
   if (!res.ok) throw new Error('Error al descargar')
   return res.text()
 }
+
+// --- WebDAV (admin) ---
+
+export async function fetchWebdavSettings(): Promise<{ enabled: boolean }> {
+  const res = await api('/api/files/webdav')
+  if (!res.ok) throw new Error('Error al obtener WebDAV')
+  return res.json()
+}
+
+export async function saveWebdavSettings(enabled: boolean): Promise<{ enabled: boolean }> {
+  const res = await api('/api/files/webdav', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al guardar WebDAV')
+  return res.json()
+}

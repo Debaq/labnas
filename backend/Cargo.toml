@@ -37,6 +37,7 @@ tokio-util = { version = "0.7.19", features = ["io"] }
 sha2 = "0.11.0"
 chacha20poly1305 = { version = "0.11.0", features = ["getrandom"] }
 base64 = "0.23.1"
+dav-server = { version = "0.11", default-features = false, features = ["localfs"] }
 
 [features]
 default = []

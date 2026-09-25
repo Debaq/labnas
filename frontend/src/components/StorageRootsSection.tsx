@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { FolderLock, Plus, Trash2, Loader2, RotateCcw, X } from 'lucide-react'
-import { fetchStorageRoots, saveStorageRoots, fetchWebUsers, type RootConfig } from '../api'
+import { FolderLock, Plus, Trash2, Loader2, RotateCcw, X, HardDriveUpload } from 'lucide-react'
+import { fetchStorageRoots, saveStorageRoots, fetchWebUsers, fetchWebdavSettings, saveWebdavSettings, type RootConfig } from '../api'
 import { errorMessage } from '../lib/errors'
 
 const DEFAULT_READERS = ['*']
@@ -59,8 +59,10 @@ export default function StorageRootsSection() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+  const [webdav, setWebdav] = useState<boolean | null>(null)
 
   useEffect(() => {
+    fetchWebdavSettings().then((w) => setWebdav(w.enabled)).catch(() => {})
     fetchStorageRoots()
       .then((r) => { setRoots(r.roots); setDefaults(r.defaults) })
       .catch((e) => setError(errorMessage(e)))
@@ -166,6 +168,32 @@ export default function StorageRootsSection() {
 
         {error && <p className="text-sm" style={{ color: 'var(--danger)' }}>{error}</p>}
         {saved && !error && <p className="text-sm" style={{ color: 'var(--success)' }}>Guardado</p>}
+
+        <div className="pt-4 space-y-2" style={{ borderTop: '1px solid var(--border)' }}>
+          <label className="flex items-center gap-2 text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+            <input
+              type="checkbox"
+              checked={webdav ?? false}
+              disabled={webdav === null}
+              onChange={(e) => {
+                const v = e.target.checked
+                saveWebdavSettings(v).then((w) => setWebdav(w.enabled)).catch((err) => setError(errorMessage(err)))
+              }}
+            />
+            <HardDriveUpload size={15} style={{ color: 'var(--accent)' }} />
+            Montar como unidad de red (WebDAV)
+          </label>
+          {webdav && (
+            <div className="text-xs space-y-1" style={{ color: 'var(--text-secondary)' }}>
+              <p>
+                Direccion: <code style={{ color: 'var(--text-primary)' }}>{`${window.location.protocol}//${window.location.host}/dav/`}</code> con el mismo usuario y contraseña de la web.
+                Se aplican los mismos permisos por carpeta; borrar envia a la papelera.
+              </p>
+              <p>Linux: Archivos &gt; Otras ubicaciones &gt; <code>dav://{window.location.host}/dav/</code> · macOS: Finder &gt; Ir &gt; Conectarse al servidor.</p>
+              <p>Windows sin HTTPS: habilitar Basic sobre HTTP (registro WebClient <code>BasicAuthLevel=2</code>) o usar un cliente como WinSCP/Cyberduck.</p>
+            </div>
+          )}
+        </div>
       </div>
     </section>
   )
