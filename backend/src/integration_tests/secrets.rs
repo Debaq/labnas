@@ -14,12 +14,12 @@ async fn secretos_cifrados_en_la_base() {
     let admin = s.admin().await;
 
     // API key de Groq (setting)
-    assert_eq!(s.post("/api/email/groq-key", &admin, json!({ "key": "gsk_supersecreta" })).await.status, 200);
-    let stored = raw(&s, "SELECT value FROM settings WHERE key = 'groq_api_key'").unwrap();
+    assert_eq!(s.put("/api/ai/config", &admin, json!({ "base_url": "https://api.deepseek.com", "model": "deepseek-chat", "api_key": "gsk_supersecreta" })).await.status, 200);
+    let stored = raw(&s, "SELECT value FROM settings WHERE key = 'ai_api_key'").unwrap();
     assert!(stored.starts_with("enc:v1:"), "{}", stored);
     assert!(!stored.contains("gsk_supersecreta"));
     let conn = s.state.db.get().unwrap();
-    assert_eq!(crate::db::get_secret_setting(&conn, "groq_api_key").as_deref(), Some("gsk_supersecreta"));
+    assert_eq!(crate::db::get_secret_setting(&conn, "ai_api_key").as_deref(), Some("gsk_supersecreta"));
     drop(conn);
 
     // API key de una impresora 3D: cifrada en la base, en claro para la API

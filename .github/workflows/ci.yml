@@ -22,7 +22,7 @@ jobs:
           components: clippy
 
       - name: Instalar deps del sistema
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libudev-dev rsync ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libudev-dev rsync ffmpeg
 
       - name: Cache Rust
         uses: actions/cache@v6
@@ -75,9 +75,7 @@ jobs:
       # Mismo target y features que el release: detecta a tiempo dependencias que no enlazan en musl
       - name: cargo build (musl)
         working-directory: backend
-        env:
-          OPENSSL_STATIC: "1"
-        run: cargo build --target x86_64-unknown-linux-musl --features vendored-ssl
+        run: cargo build --locked --target x86_64-unknown-linux-musl
 
   frontend:
     name: Frontend (tipos + lint + build)

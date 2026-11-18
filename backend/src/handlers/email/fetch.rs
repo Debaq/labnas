@@ -1,221 +1,333 @@
-//! Descarga de correo por IMAP y POP3
+//! Descarga de correo por IMAP y POP3 sobre TLS (rustls), sin bloquear el runtime.
+//! Solo descarga los mensajes que aun no estan guardados (`known`).
 
 use super::*;
+use std::collections::HashSet;
+use std::sync::{Arc, LazyLock};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::TcpStream;
 
-// =====================
-// Dispatch por protocolo
-// =====================
+use super::ics::IcsEvent;
 
-pub fn fetch_emails_dispatch(account: &EmailAccount) -> Result<Vec<EmailMessage>, String> {
-    match account.protocol {
-        MailProtocol::Imap => fetch_emails_imap(account),
-        MailProtocol::Pop3 => fetch_emails_pop3(account),
+/// Mensajes nuevos por revision (los mas recientes)
+const MAX_NEW_PER_CHECK: usize = 20;
+/// Texto guardado por correo (lo que ve la IA)
+const BODY_MAX_CHARS: usize = 6000;
+/// Una revision completa no puede tardar mas que esto
+const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// Tope por mensaje (POP3 los baja enteros)
+const MAX_MESSAGE_BYTES: usize = 25 * 1024 * 1024;
+
+#[derive(Debug, Clone)]
+pub struct FetchedMail {
+    pub uid: u32,
+    pub message_id: Option<String>,
+    pub from: String,
+    pub subject: String,
+    pub date: String,
+    pub body_text: String,
+    pub ics: Vec<IcsEvent>,
+}
+
+/// Descarga los correos nuevos de la cuenta (no leidos en IMAP; los ultimos en POP3)
+pub async fn fetch_new(account: &EmailAccount, known: &HashSet<u32>) -> Result<Vec<FetchedMail>, String> {
+    let work = async {
+        match account.protocol {
+            MailProtocol::Imap => fetch_imap(account, known).await,
+            MailProtocol::Pop3 => fetch_pop3(account, known).await,
+        }
+    };
+    tokio::time::timeout(FETCH_TIMEOUT, work)
+        .await
+        .map_err(|_| "Tiempo de espera agotado con el servidor de correo".to_string())?
+}
+
+/// Solo prueba conexion y login (al configurar la cuenta)
+pub async fn test_login(account: &EmailAccount) -> Result<(), String> {
+    let work = async {
+        match account.protocol {
+            MailProtocol::Imap => imap_session(account).await.map(|mut s| {
+                tokio::spawn(async move {
+                    let _ = s.logout().await;
+                });
+            }),
+            MailProtocol::Pop3 => pop3_login(account).await.map(|_| ()),
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(30), work)
+        .await
+        .map_err(|_| "Tiempo de espera agotado con el servidor de correo".to_string())?
+}
+
+// ─── TLS ───
+
+fn tls_connector() -> tokio_rustls::TlsConnector {
+    static CONFIG: LazyLock<Arc<rustls::ClientConfig>> = LazyLock::new(|| {
+        let mut roots = rustls::RootCertStore::empty();
+        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let cfg = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+            .with_safe_default_protocol_versions()
+            .expect("versiones TLS")
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        Arc::new(cfg)
+    });
+    tokio_rustls::TlsConnector::from(CONFIG.clone())
+}
+
+type Tls = tokio_rustls::client::TlsStream<TcpStream>;
+
+async fn tls_connect(host: &str, port: u16) -> Result<Tls, String> {
+    let tcp = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect((host, port)))
+        .await
+        .map_err(|_| format!("Sin respuesta de {}:{}", host, port))?
+        .map_err(|e| format!("Error conectando a {}:{}: {}", host, port, e))?;
+    let name = rustls::pki_types::ServerName::try_from(host.to_string())
+        .map_err(|_| format!("Nombre de servidor invalido: {}", host))?;
+    tls_connector()
+        .connect(name, tcp)
+        .await
+        .map_err(|e| format!("Error TLS con {}: {}", host, e))
+}
+
+// ─── IMAP ───
+
+async fn imap_session(account: &EmailAccount) -> Result<async_imap::Session<Tls>, String> {
+    let tls = tls_connect(&account.host, account.port).await?;
+    let mut client = async_imap::Client::new(tls);
+    // El cliente no lee el saludo del servidor por su cuenta
+    client
+        .read_response()
+        .await
+        .ok_or("El servidor IMAP cerro la conexion")?
+        .map_err(|e| format!("Error leyendo saludo IMAP: {}", e))?;
+    client
+        .login(&account.email, &account.password)
+        .await
+        .map_err(|(e, _)| format!("Error de login IMAP: {}", e))
+}
+
+async fn fetch_imap(account: &EmailAccount, known: &HashSet<u32>) -> Result<Vec<FetchedMail>, String> {
+    use futures_util::TryStreamExt;
+
+    let mut session = imap_session(account).await?;
+    session.select("INBOX").await.map_err(|e| format!("Error seleccionando INBOX: {}", e))?;
+
+    let unseen = session
+        .uid_search("UNSEEN")
+        .await
+        .map_err(|e| format!("Error buscando correos: {}", e))?;
+    let mut uids: Vec<u32> = unseen.into_iter().filter(|u| !known.contains(u)).collect();
+    uids.sort_unstable();
+    let uids = &uids[uids.len().saturating_sub(MAX_NEW_PER_CHECK)..];
+
+    let mut out = Vec::new();
+    if !uids.is_empty() {
+        let set = uids.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(",");
+        // BODY.PEEK no marca como leido
+        let fetches: Vec<async_imap::types::Fetch> = session
+            .uid_fetch(&set, "(UID BODY.PEEK[])")
+            .await
+            .map_err(|e| format!("Error obteniendo correos: {}", e))?
+            .try_collect()
+            .await
+            .map_err(|e| format!("Error obteniendo correos: {}", e))?;
+        for f in &fetches {
+            if let (Some(uid), Some(body)) = (f.uid, f.body()) {
+                if let Some(mail) = parse_raw(uid, body) {
+                    out.push(mail);
+                }
+            }
+        }
+    }
+    let _ = session.logout().await;
+    Ok(out)
+}
+
+// ─── POP3 ───
+
+struct Pop3 {
+    io: BufReader<Tls>,
+}
+
+impl Pop3 {
+    async fn line(&mut self) -> Result<Vec<u8>, String> {
+        let mut buf = Vec::new();
+        let n = self.io.read_until(b'\n', &mut buf).await.map_err(|e| format!("Error leyendo POP3: {}", e))?;
+        if n == 0 {
+            return Err("El servidor POP3 cerro la conexion".into());
+        }
+        while buf.last().is_some_and(|b| *b == b'\n' || *b == b'\r') {
+            buf.pop();
+        }
+        Ok(buf)
+    }
+
+    async fn cmd(&mut self, cmd: &str) -> Result<String, String> {
+        let s = self.io.get_mut();
+        s.write_all(format!("{}\r\n", cmd).as_bytes()).await.map_err(|e| format!("Error enviando POP3: {}", e))?;
+        s.flush().await.map_err(|e| format!("Error enviando POP3: {}", e))?;
+        let line = String::from_utf8_lossy(&self.line().await?).to_string();
+        if !line.starts_with("+OK") {
+            // No repetir la contraseña en el error
+            let shown = if cmd.starts_with("PASS ") { "PASS ***" } else { cmd };
+            return Err(format!("POP3 rechazo {}: {}", shown, line.trim()));
+        }
+        Ok(line)
+    }
+
+    /// Lineas de una respuesta multilinea hasta ".", deshaciendo el byte-stuffing
+    async fn multiline(&mut self, max_bytes: usize) -> Result<Vec<u8>, String> {
+        let mut out = Vec::new();
+        loop {
+            let line = self.line().await?;
+            if line == b"." {
+                return Ok(out);
+            }
+            let line = if line.starts_with(b"..") { &line[1..] } else { &line[..] };
+            if out.len() + line.len() > max_bytes {
+                return Err("Mensaje POP3 demasiado grande".into());
+            }
+            out.extend_from_slice(line);
+            out.extend_from_slice(b"\r\n");
+        }
     }
 }
 
-// =====================
-// IMAP - Fetch emails (BLOCKING)
-// =====================
-
-pub(super) fn fetch_emails_imap(account: &EmailAccount) -> Result<Vec<EmailMessage>, String> {
-    let tls = native_tls::TlsConnector::new().map_err(|e| format!("Error TLS: {}", e))?;
-
-    let addr = (&*account.host, account.port);
-    let client = imap::connect(addr, &account.host, &tls)
-        .map_err(|e| format!("Error conectando a IMAP: {}", e))?;
-
-    let mut session = client
-        .login(&account.email, &account.password)
-        .map_err(|e| format!("Error de login IMAP: {}", e.0))?;
-
-    session
-        .select("INBOX")
-        .map_err(|e| format!("Error seleccionando INBOX: {}", e))?;
-
-    // Buscar no leidos
-    let search_result = session
-        .search("UNSEEN")
-        .map_err(|e| format!("Error buscando correos: {}", e))?;
-
-    let mut seqs: Vec<u32> = search_result.into_iter().collect();
-    seqs.sort();
-
-    // Tomar los ultimos 20
-    let seqs: Vec<u32> = if seqs.len() > 20 {
-        seqs[seqs.len() - 20..].to_vec()
-    } else {
-        seqs
-    };
-
-    if seqs.is_empty() {
-        let _ = session.logout();
-        return Ok(Vec::new());
+async fn pop3_login(account: &EmailAccount) -> Result<Pop3, String> {
+    let tls = tls_connect(&account.host, account.port).await?;
+    let mut p = Pop3 { io: BufReader::new(tls) };
+    let greeting = String::from_utf8_lossy(&p.line().await?).to_string();
+    if !greeting.starts_with("+OK") {
+        return Err(format!("Saludo POP3 inesperado: {}", greeting.trim()));
     }
+    p.cmd(&format!("USER {}", account.email)).await?;
+    p.cmd(&format!("PASS {}", account.password)).await?;
+    Ok(p)
+}
 
-    let seq_str = seqs
-        .iter()
-        .map(|u| u.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
+/// POP3 no tiene UID numerico: se deriva del UIDL (mismo calculo que versiones anteriores)
+fn pop3_uid(uidl: &str) -> u32 {
+    uidl.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32))
+}
 
-    let messages = session
-        .fetch(&seq_str, "( UID ENVELOPE BODY.PEEK[] )")
-        .map_err(|e| format!("Error obteniendo correos: {}", e))?;
+async fn fetch_pop3(account: &EmailAccount, known: &HashSet<u32>) -> Result<Vec<FetchedMail>, String> {
+    let mut p = pop3_login(account).await?;
 
-    let mut emails = Vec::new();
+    p.cmd("UIDL").await?;
+    let listing = p.multiline(4 * 1024 * 1024).await?;
+    let mut pending: Vec<(usize, u32)> = String::from_utf8_lossy(&listing)
+        .lines()
+        .filter_map(|l| {
+            let (num, uidl) = l.trim().split_once(' ')?;
+            Some((num.parse().ok()?, pop3_uid(uidl.trim())))
+        })
+        .filter(|(_, uid)| !known.contains(uid))
+        .collect();
+    let start = pending.len().saturating_sub(MAX_NEW_PER_CHECK);
+    pending.drain(..start);
 
-    for msg in messages.iter() {
-        let uid = msg.uid.unwrap_or(0);
-        if uid == 0 {
+    let mut out = Vec::new();
+    for (num, uid) in pending {
+        if p.cmd(&format!("RETR {}", num)).await.is_err() {
             continue;
         }
-
-        let envelope = msg.envelope();
-        let subject = envelope
-            .map(|env| {
-                env.subject
-                    .map(|s| String::from_utf8_lossy(s).to_string())
-                    .unwrap_or_default()
-            })
-            .unwrap_or_default();
-
-        // Decodificar subject MIME si es necesario
-        let subject = decode_mime_header(&subject);
-
-        let from = if let Some(env) = envelope {
-            if let Some(addrs) = &env.from {
-                if let Some(addr) = addrs.first() {
-                    let name = addr
-                        .name
-                        .map(|n| decode_mime_header(String::from_utf8_lossy(n).as_ref()))
-                        .unwrap_or_default();
-                    let mailbox = addr
-                        .mailbox
-                        .map(|m| String::from_utf8_lossy(m).to_string())
-                        .unwrap_or_default();
-                    let host = addr
-                        .host
-                        .map(|h| String::from_utf8_lossy(h).to_string())
-                        .unwrap_or_default();
-                    if name.is_empty() {
-                        format!("{}@{}", mailbox, host)
-                    } else {
-                        format!("{} <{}@{}>", name, mailbox, host)
-                    }
-                } else {
-                    "desconocido".to_string()
-                }
-            } else {
-                "desconocido".to_string()
-            }
-        } else {
-            "desconocido".to_string()
-        };
-
-        let date = envelope
-            .map(|env| {
-                env.date
-                    .map(|d| String::from_utf8_lossy(d).to_string())
-                    .unwrap_or_default()
-            })
-            .unwrap_or_default();
-
-        // Parsear body con mailparse
-        let body_preview = msg
-            .body()
-            .and_then(|body| {
-                let parsed = mailparse::parse_mail(body).ok()?;
-                let text = extract_text_body(&parsed);
-                Some(text)
-            })
-            .unwrap_or_default();
-
-        // Limitar a 500 chars
-        let body_preview = if body_preview.len() > 500 {
-            format!("{}...", &body_preview[..497])
-        } else {
-            body_preview
-        };
-
-        emails.push(EmailMessage {
-            uid,
-            from,
-            subject,
-            date,
-            body_preview,
-            ai_classification: None,
-            ai_summary: None,
-            ai_action: None,
-            filter_label: None,
-            filter_action: None,
-            processed: false,
-            task_created: false,
-            fetched_at: Utc::now(),
-        });
+        let raw = p.multiline(MAX_MESSAGE_BYTES).await?;
+        if let Some(mail) = parse_raw(uid, &raw) {
+            out.push(mail);
+        }
     }
+    let _ = p.cmd("QUIT").await;
+    Ok(out)
+}
 
-    let _ = session.logout();
-    Ok(emails)
+// ─── Parseo comun ───
+
+pub(super) fn parse_raw(uid: u32, raw: &[u8]) -> Option<FetchedMail> {
+    use mailparse::MailHeaderMap;
+    let parsed = mailparse::parse_mail(raw).ok()?;
+    let h = &parsed.headers;
+    let body = extract_text_body(&parsed);
+    let body = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    Some(FetchedMail {
+        uid,
+        message_id: h.get_first_value("Message-ID").map(|s| s.trim().to_string()),
+        from: h.get_first_value("From").unwrap_or_else(|| "desconocido".to_string()),
+        subject: crate::textutil::ellipsize(&h.get_first_value("Subject").unwrap_or_default(), 300),
+        date: h.get_first_value("Date").unwrap_or_default(),
+        body_text: crate::textutil::take_chars(&body, BODY_MAX_CHARS),
+        ics: super::ics::events_from_mail(&parsed),
+    })
 }
 
 /// Extrae el texto plano de un email parseado
 pub(super) fn extract_text_body(parsed: &mailparse::ParsedMail) -> String {
-    // Si tiene subpartes (multipart), buscar text/plain
     if !parsed.subparts.is_empty() {
-        for part in &parsed.subparts {
-            let ct = part
-                .ctype
-                .mimetype
-                .to_lowercase();
-            if ct == "text/plain" {
-                return part.get_body().unwrap_or_default();
+        for mime in ["text/plain", "text/html"] {
+            if let Some(part) = parsed.subparts.iter().find(|p| p.ctype.mimetype.eq_ignore_ascii_case(mime)) {
+                let body = part.get_body().unwrap_or_default();
+                return if mime == "text/html" { strip_html_tags(&body) } else { body };
             }
         }
-        // Si no hay text/plain, buscar text/html y limpiar tags
-        for part in &parsed.subparts {
-            let ct = part
-                .ctype
-                .mimetype
-                .to_lowercase();
-            if ct == "text/html" {
-                let html = part.get_body().unwrap_or_default();
-                return strip_html_tags(&html);
-            }
-        }
-        // Buscar recursivamente en subpartes
         for part in &parsed.subparts {
             let text = extract_text_body(part);
             if !text.is_empty() {
                 return text;
             }
         }
+        return String::new();
     }
 
-    // Es un mensaje simple
     let ct = parsed.ctype.mimetype.to_lowercase();
-    if ct == "text/plain" {
+    if ct == "text/html" {
+        strip_html_tags(&parsed.get_body().unwrap_or_default())
+    } else if ct.starts_with("text/") {
         parsed.get_body().unwrap_or_default()
-    } else if ct == "text/html" {
-        let html = parsed.get_body().unwrap_or_default();
-        strip_html_tags(&html)
     } else {
-        parsed.get_body().unwrap_or_default()
+        String::new()
     }
 }
 
-/// Remueve tags HTML de forma basica
+/// Quita etiquetas HTML (y el contenido de <style>/<script>) de forma basica
 pub(super) fn strip_html_tags(html: &str) -> String {
     let mut result = String::new();
     let mut in_tag = false;
+    let mut tag = String::new();
+    let mut skip_until: Option<&str> = None;
     for ch in html.chars() {
         match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => result.push(ch),
+            '<' => {
+                in_tag = true;
+                tag.clear();
+            }
+            '>' if in_tag => {
+                in_tag = false;
+                let t = tag.trim().to_ascii_lowercase();
+                if let Some(end) = skip_until {
+                    if t.starts_with(end) {
+                        skip_until = None;
+                    }
+                } else if t.starts_with("style") {
+                    skip_until = Some("/style");
+                } else if t.starts_with("script") {
+                    skip_until = Some("/script");
+                } else if t.starts_with("br") || t.starts_with("/p") || t.starts_with("/div") || t.starts_with("/tr") {
+                    result.push('\n');
+                }
+            }
+            _ if in_tag => tag.push(ch),
+            _ if skip_until.is_none() => result.push(ch),
             _ => {}
         }
     }
-    // Limpiar whitespace excesivo
+    let result = result
+        .replace("&nbsp;", " ")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&");
     result
         .lines()
         .map(|l| l.trim())
@@ -224,174 +336,46 @@ pub(super) fn strip_html_tags(html: &str) -> String {
         .join("\n")
 }
 
-/// Decodifica headers MIME (=?UTF-8?Q?...?= o =?UTF-8?B?...?=)
-pub(super) fn decode_mime_header(input: &str) -> String {
-    // Intentar decodificar con mailparse
-    match mailparse::parse_header(format!("Subject: {}", input).as_bytes()) {
-        Ok((header, _)) => header.get_value(),
-        Err(_) => input.to_string(),
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parsea_correo_con_tildes_largas() {
+        let cuerpo = "ñ".repeat(10_000);
+        let raw = format!(
+            "From: =?UTF-8?Q?Mar=C3=ADa?= <maria@uni.cl>\r\nSubject: =?UTF-8?B?UmV1bmnDs24=?=\r\nMessage-ID: <abc@uni.cl>\r\nDate: Wed, 18 Nov 2026 10:00:00 -0300\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{}\r\n",
+            cuerpo
+        );
+        let m = parse_raw(7, raw.as_bytes()).unwrap();
+        assert_eq!(m.from, "María <maria@uni.cl>");
+        assert_eq!(m.subject, "Reunión");
+        assert_eq!(m.message_id.as_deref(), Some("<abc@uni.cl>"));
+        assert_eq!(m.body_text.chars().count(), BODY_MAX_CHARS);
+    }
+
+    #[test]
+    fn html_sin_estilos() {
+        let t = strip_html_tags("<html><style>p{color:red}</style><p>Hola&nbsp;mundo</p><script>x()</script><br>chao &amp; adios</html>");
+        assert_eq!(t, "Hola mundo\nchao & adios");
+    }
+
+    #[test]
+    fn uid_pop3_estable() {
+        assert_eq!(pop3_uid("abc"), 96354);
     }
 }
 
-// =====================
-// POP3 - Fetch emails (BLOCKING)
-// =====================
-
-pub(super) fn fetch_emails_pop3(account: &EmailAccount) -> Result<Vec<EmailMessage>, String> {
-    use std::io::{BufRead, BufReader, Write};
-
-    let tls = native_tls::TlsConnector::new().map_err(|e| format!("Error TLS: {}", e))?;
-    let tcp = std::net::TcpStream::connect((&*account.host, account.port))
-        .map_err(|e| format!("Error conectando a POP3 {}:{}: {}", account.host, account.port, e))?;
-    tcp.set_read_timeout(Some(std::time::Duration::from_secs(30))).ok();
-    tcp.set_write_timeout(Some(std::time::Duration::from_secs(15))).ok();
-
-    let stream = tls
-        .connect(&account.host, tcp)
-        .map_err(|e| format!("Error TLS POP3: {}", e))?;
-
-    let mut reader = BufReader::new(stream);
-
-    fn pop3_read_line(reader: &mut BufReader<native_tls::TlsStream<std::net::TcpStream>>) -> Result<String, String> {
-        let mut line = String::new();
-        reader.read_line(&mut line).map_err(|e| format!("Error leyendo POP3: {}", e))?;
-        Ok(line)
+/// Red real: TLS (rustls + raices webpki) y saludo IMAP, sin login.
+/// `cargo test -- --ignored saludo_imap_real`
+#[cfg(test)]
+mod red {
+    #[tokio::test]
+    #[ignore]
+    async fn saludo_imap_real() {
+        let tls = super::tls_connect("imap.gmail.com", 993).await.expect("TLS");
+        let mut client = async_imap::Client::new(tls);
+        let greeting = client.read_response().await.expect("saludo").expect("io");
+        assert!(format!("{:?}", greeting.parsed()).contains("Ok"), "{:?}", greeting.parsed());
     }
-
-    fn pop3_send(reader: &mut BufReader<native_tls::TlsStream<std::net::TcpStream>>, cmd: &str) -> Result<(), String> {
-        reader.get_mut().write_all(format!("{}\r\n", cmd).as_bytes())
-            .map_err(|e| format!("Error enviando POP3: {}", e))?;
-        reader.get_mut().flush().map_err(|e| format!("Error flush POP3: {}", e))?;
-        Ok(())
-    }
-
-    fn pop3_cmd(reader: &mut BufReader<native_tls::TlsStream<std::net::TcpStream>>, cmd: &str) -> Result<String, String> {
-        pop3_send(reader, cmd)?;
-        pop3_read_line(reader)
-    }
-
-    // Leer greeting
-    let greeting = pop3_read_line(&mut reader)?;
-    if !greeting.starts_with("+OK") {
-        return Err(format!("POP3 greeting inesperado: {}", greeting.trim()));
-    }
-
-    // AUTH
-    let resp = pop3_cmd(&mut reader, &format!("USER {}", account.email))?;
-    if !resp.starts_with("+OK") {
-        return Err(format!("POP3 USER rechazado: {}", resp.trim()));
-    }
-
-    let resp = pop3_cmd(&mut reader, &format!("PASS {}", account.password))?;
-    if !resp.starts_with("+OK") {
-        return Err(format!("POP3 login fallido: {}", resp.trim()));
-    }
-
-    // STAT para obtener cantidad de mensajes
-    let resp = pop3_cmd(&mut reader, "STAT")?;
-    if !resp.starts_with("+OK") {
-        return Err(format!("POP3 STAT error: {}", resp.trim()));
-    }
-    let total: usize = resp.split_whitespace()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-
-    if total == 0 {
-        let _ = pop3_cmd(&mut reader, "QUIT");
-        return Ok(Vec::new());
-    }
-
-    // UIDL para IDs unicos
-    let resp = pop3_cmd(&mut reader, "UIDL")?;
-    if !resp.starts_with("+OK") {
-        return Err(format!("POP3 UIDL error: {}", resp.trim()));
-    }
-    let mut uidl_map: Vec<(usize, String)> = Vec::new();
-    loop {
-        let line = pop3_read_line(&mut reader)?;
-        let line = line.trim().to_string();
-        if line == "." { break; }
-        let parts: Vec<&str> = line.splitn(2, ' ').collect();
-        if parts.len() == 2 {
-            if let Ok(num) = parts[0].parse::<usize>() {
-                uidl_map.push((num, parts[1].to_string()));
-            }
-        }
-    }
-
-    // Tomar los ultimos 20
-    let start = if uidl_map.len() > 20 { uidl_map.len() - 20 } else { 0 };
-    let to_fetch: Vec<(usize, String)> = uidl_map[start..].to_vec();
-
-    let mut emails = Vec::new();
-
-    for (msg_num, uidl) in &to_fetch {
-        // RETR para obtener el mensaje completo
-        let resp = pop3_cmd(&mut reader, &format!("RETR {}", msg_num))?;
-        if !resp.starts_with("+OK") {
-            continue;
-        }
-
-        let mut raw_msg = Vec::new();
-        loop {
-            let line = pop3_read_line(&mut reader)?;
-            let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
-            if trimmed == "." { break; }
-            // Byte-stuffing: lineas que empiezan con ".." se decodifican a "."
-            let decoded = if trimmed.starts_with("..") { &trimmed[1..] } else { trimmed };
-            raw_msg.extend_from_slice(decoded.as_bytes());
-            raw_msg.push(b'\n');
-        }
-
-        // Parsear con mailparse
-        let parsed = match mailparse::parse_mail(&raw_msg) {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-
-        // Generar UID numerico a partir del UIDL string
-        let uid: u32 = uidl.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
-
-        let subject = parsed.headers.iter()
-            .find(|h| h.get_key().eq_ignore_ascii_case("subject"))
-            .map(|h| decode_mime_header(&h.get_value()))
-            .unwrap_or_default();
-
-        let from = parsed.headers.iter()
-            .find(|h| h.get_key().eq_ignore_ascii_case("from"))
-            .map(|h| decode_mime_header(&h.get_value()))
-            .unwrap_or_else(|| "desconocido".to_string());
-
-        let date = parsed.headers.iter()
-            .find(|h| h.get_key().eq_ignore_ascii_case("date"))
-            .map(|h| h.get_value())
-            .unwrap_or_default();
-
-        let body_preview = extract_text_body(&parsed);
-        let body_preview = if body_preview.len() > 500 {
-            format!("{}...", &body_preview[..497])
-        } else {
-            body_preview
-        };
-
-        emails.push(EmailMessage {
-            uid,
-            from,
-            subject,
-            date,
-            body_preview,
-            ai_classification: None,
-            ai_summary: None,
-            ai_action: None,
-            filter_label: None,
-            filter_action: None,
-            processed: false,
-            task_created: false,
-            fetched_at: Utc::now(),
-        });
-    }
-
-    let _ = pop3_cmd(&mut reader, "QUIT");
-    Ok(emails)
 }

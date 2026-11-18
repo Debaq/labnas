@@ -76,14 +76,12 @@ jobs:
       - name: Build backend (nativo)
         if: matrix.use_cross == false
         working-directory: backend
-        env:
-          OPENSSL_STATIC: "1"
-        run: cargo build --release --target ${{ matrix.target }} --features vendored-ssl
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Build backend (cross)
         if: matrix.use_cross == true
         working-directory: backend
-        run: cross build --release --target ${{ matrix.target }} --features vendored-ssl
+        run: cross build --release --locked --target ${{ matrix.target }}
 
       - name: Empaquetar release
         run: |

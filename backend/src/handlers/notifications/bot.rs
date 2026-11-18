@@ -178,6 +178,15 @@ pub(super) async fn handle_message(state: &AppState, token: &str, msg: &TgMessag
             let uid_str = s.strip_prefix("/leer ").unwrap_or("").trim();
             crate::handlers::email::get_email_detail(state, &chat_name, uid_str).await
         }
+        "/propuestas" => crate::handlers::email::telegram_list_proposals(state, &chat_name).await,
+        s if s.starts_with("/aprobar ") => {
+            let id = s.strip_prefix("/aprobar ").unwrap_or("").trim();
+            crate::handlers::email::telegram_approve_proposal(state, &chat_name, id).await
+        }
+        s if s.starts_with("/descartar ") => {
+            let id = s.strip_prefix("/descartar ").unwrap_or("").trim();
+            crate::handlers::email::telegram_dismiss_proposal(state, &chat_name, id).await
+        }
         s if s.starts_with("/correos") => {
             crate::handlers::email::get_emails_summary(state, &chat_name).await
         }
@@ -472,7 +481,10 @@ pub(super) fn build_help_message(role: &UserRole, has_terminal: bool, has_printe
     msg.push_str("*Correo*\n");
     msg.push_str("/correos - Resumen de bandeja\n");
     msg.push_str("/leer UID - Detalle de un correo\n");
-    msg.push_str("/correo2tarea UID - Email a tarea\n\n");
+    msg.push_str("/correo2tarea UID - Email a tarea\n");
+    msg.push_str("/propuestas - Eventos y tareas que propone la IA\n");
+    msg.push_str("/aprobar ID - Agendar una propuesta\n");
+    msg.push_str("/descartar ID - Descartar una propuesta\n\n");
     msg.push_str("*Calendario*\n");
     msg.push_str("/evento FECHA HORA Titulo @persona\n");
     msg.push_str("/eventos - Mis eventos\n");

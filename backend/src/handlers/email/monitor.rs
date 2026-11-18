@@ -1,207 +1,263 @@
-//! Revision periodica de correo y avisos
+//! Revision de correo: descarga lo nuevo, aplica filtros, lee invitaciones .ics,
+//! analiza con IA, guarda todo y avisa (web, Telegram).
 
 use super::*;
 
-// =====================
-// Background loop
-// =====================
+use super::ai::{analyze_email, ProposedItem};
+use super::fetch::{fetch_new, FetchedMail};
+use super::store::{self, NewEmail};
+use crate::events::{self, Audience, Level};
 
-/// Loop que revisa correos cada 5 minutos
+const CHECK_EVERY: Duration = Duration::from_secs(300);
+const DEFAULT_RETENTION_DAYS: u32 = 90;
+
+/// Resultado de revisar una cuenta
+#[derive(Debug, Default)]
+pub struct CheckResult {
+    pub new_emails: usize,
+    pub proposals: Vec<(String, ProposedItem)>,
+    /// "- remitente [filtro]: asunto" de los urgentes nuevos que si notifican
+    pub urgent: Vec<String>,
+}
+
+/// Revisa una cuenta y guarda lo nuevo. Usado por el loop y por "Revisar ahora".
+pub async fn check_account(state: &AppState, account: &EmailAccount) -> Result<CheckResult, String> {
+    let user = account.username.clone();
+    let (known, ai_cfg) = db_op(&state.db, move |conn| {
+        Ok((store::known_uids(conn, &user)?, crate::ai::AiConfig::load(conn)))
+    })
+    .await
+    .map_err(|(_, e)| e)?;
+
+    let fetched = fetch_new(account, &known).await?;
+    let mut result = CheckResult::default();
+
+    for mail in fetched {
+        let (msg, proposals) = process_mail(state, account, ai_cfg.as_ref(), &mail).await;
+
+        let notify_urgent = msg.ai_classification.as_deref() == Some("urgente")
+            && msg.filter_action != Some(FilterAction::Silencioso)
+            && msg.filter_action != Some(FilterAction::Ignorar);
+        if notify_urgent {
+            let label = msg.filter_label.as_deref().map(|l| format!(" [{}]", l)).unwrap_or_default();
+            result.urgent.push(format!("- {}{}: {}", msg.from, label, msg.subject));
+        }
+        if msg.filter_action != Some(FilterAction::Ignorar) {
+            result.new_emails += 1;
+        }
+
+        let username = account.username.clone();
+        let uid = mail.uid;
+        let message_id = mail.message_id.clone();
+        let body = mail.body_text.clone();
+        let saved = db_op(&state.db, move |conn| {
+            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+            store::insert_email(
+                &tx,
+                &NewEmail { username: &username, msg: &msg, message_id: message_id.as_deref(), body_text: &body },
+            )?;
+            let mut ids = Vec::new();
+            for (source, p) in &proposals {
+                ids.push((store::insert_proposal(&tx, &username, Some(uid), source, p)?, p.clone()));
+            }
+            tx.commit().map_err(|e| e.to_string())?;
+            Ok(ids)
+        })
+        .await;
+        match saved {
+            Ok(ids) => result.proposals.extend(ids),
+            Err((_, e)) => eprintln!("[Email] Error guardando correo {} de {}: {}", uid, account.username, e),
+        }
+    }
+    Ok(result)
+}
+
+/// Filtros + .ics + IA para un correo. Devuelve el mensaje y sus propuestas (origen, item).
+async fn process_mail(
+    state: &AppState,
+    account: &EmailAccount,
+    ai_cfg: Option<&crate::ai::AiConfig>,
+    mail: &FetchedMail,
+) -> (EmailMessage, Vec<(&'static str, ProposedItem)>) {
+    let mut msg = EmailMessage {
+        uid: mail.uid,
+        from: mail.from.clone(),
+        subject: mail.subject.clone(),
+        date: mail.date.clone(),
+        body_preview: String::new(),
+        ai_classification: None,
+        ai_summary: None,
+        ai_action: None,
+        filter_label: None,
+        filter_action: None,
+        processed: false,
+        task_created: false,
+        fetched_at: Utc::now(),
+    };
+    let mut proposals: Vec<(&'static str, ProposedItem)> = Vec::new();
+
+    if let Some((label, action, auto_tag)) = apply_filters(&account.filters, &mail.from) {
+        msg.filter_label = Some(label.clone());
+        msg.filter_action = Some(action.clone());
+        match action {
+            // Se guarda (para no volver a bajarlo) pero no se muestra ni se analiza
+            FilterAction::Ignorar => return (msg, proposals),
+            FilterAction::Prioritario => {
+                msg.ai_classification = Some("urgente".to_string());
+                msg.ai_summary = Some(format!("Correo prioritario ({})", label));
+                msg.ai_action = auto_tag.or(Some("Responder".to_string()));
+                msg.processed = true;
+            }
+            FilterAction::Silencioso | FilterAction::Normal => {}
+        }
+    }
+
+    // Invitaciones de calendario: exactas, sin IA
+    for ev in mail.ics.iter().filter(|e| !e.cancelled) {
+        proposals.push((
+            "ics",
+            ProposedItem {
+                kind: "evento",
+                title: ev.summary.clone(),
+                description: ev.description.clone(),
+                date: Some(ev.date.clone()),
+                time: Some(ev.time.clone()),
+                end_time: ev.end_time.clone(),
+                location: ev.location.clone(),
+            },
+        ));
+    }
+
+    if let Some(cfg) = ai_cfg {
+        let want_events = mail.ics.is_empty();
+        match analyze_email(&state.http_client, cfg, &mail.from, &mail.subject, &mail.date, &mail.body_text, want_events).await {
+            Ok(a) => {
+                if !msg.processed {
+                    msg.ai_classification = Some(a.classification);
+                    msg.ai_summary = Some(a.summary);
+                    msg.ai_action = Some(a.action);
+                    msg.processed = true;
+                }
+                proposals.extend(a.proposals.into_iter().map(|p| ("ia", p)));
+            }
+            Err(e) => eprintln!("[Email] IA no pudo analizar el correo de {}: {}", account.email, e),
+        }
+    }
+    (msg, proposals)
+}
+
+/// Avisos tras una revision: bus en vivo (web/visor) y Telegram
+pub async fn announce(state: &AppState, username: &str, r: &CheckResult) {
+    if r.new_emails > 0 {
+        state.events.publish(
+            "email.inbox",
+            serde_json::json!({ "new": r.new_emails }),
+            Audience::User(username.to_string()),
+            Some("email"),
+        );
+    }
+    if !r.proposals.is_empty() {
+        super::proposals::publish_count(state, username).await;
+        let n = r.proposals.len();
+        events::notify(
+            state,
+            Audience::User(username.to_string()),
+            Some("email"),
+            Level::Info,
+            "Propuestas de la IA",
+            &format!("{} {} desde tu correo para revisar", n, if n == 1 { "propuesta" } else { "propuestas" }),
+        );
+    }
+
+    if r.urgent.is_empty() && r.proposals.is_empty() {
+        return;
+    }
+    let u = username.to_string();
+    let target = db_op(&state.db, move |conn| {
+        let token: Option<String> = conn
+            .query_row("SELECT labnas_decrypt(bot_token) FROM notification_config WHERE id = 1", [], |row| row.get(0))
+            .optional()
+            .map_err(|e| e.to_string())?
+            .flatten();
+        let chat: Option<i64> = conn
+            .query_row("SELECT chat_id FROM telegram_chats WHERE linked_web_user = ?1", params![u], |row| row.get(0))
+            .optional()
+            .map_err(|e| e.to_string())?;
+        Ok(token.zip(chat))
+    })
+    .await
+    .ok()
+    .flatten();
+    let Some((token, chat_id)) = target else { return };
+
+    let mut msg = String::new();
+    if !r.urgent.is_empty() {
+        msg.push_str(&format!(
+            "*Correo urgente!*\n\n{} correo(s) nuevo(s), {} urgente(s):\n{}\n",
+            r.new_emails,
+            r.urgent.len(),
+            md_escape(&r.urgent.join("\n"))
+        ));
+    }
+    if !r.proposals.is_empty() {
+        if !msg.is_empty() {
+            msg.push('\n');
+        }
+        msg.push_str("*Propuestas desde tu correo:*\n");
+        for (id, p) in &r.proposals {
+            let when = match (&p.date, &p.time) {
+                (Some(d), Some(t)) => format!(" — {} {}", d, t),
+                (Some(d), None) => format!(" — {}", d),
+                _ => String::new(),
+            };
+            let icon = if p.kind == "evento" { "📅" } else { "✅" };
+            msg.push_str(&format!("{} {}{}\n  `/aprobar {}`  `/descartar {}`\n", icon, md_escape(&p.title), when, id, id));
+        }
+    }
+    let _ = send_telegram_notification(&state.http_client, &token, chat_id, &msg).await;
+}
+
+/// Escapa el Markdown de Telegram en texto ajeno (asuntos, remitentes): un "_" suelto
+/// hace que Telegram rechace el mensaje completo
+fn md_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(c, '_' | '*' | '`' | '[') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Revisa todas las cuentas cada 5 minutos
 pub async fn email_check_loop(state: AppState) {
-    // Esperar 30 segundos antes de la primera revision
     tokio::time::sleep(Duration::from_secs(30)).await;
+    let mut last_purge = std::time::Instant::now() - Duration::from_secs(86_400);
 
     loop {
-        let db_data = {
-            let conn = match get_conn(&state.db) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("[Email] Error obteniendo conexion DB: {}", e);
-                    tokio::time::sleep(Duration::from_secs(300)).await;
-                    continue;
-                }
-            };
-
-            // Leer cuentas de email
-            let accounts: Vec<EmailAccount> = match conn.prepare(
-                "SELECT username, host, port, protocol, email, labnas_decrypt(password), filters FROM email_accounts"
-            ) {
-                Ok(mut stmt) => {
-                    stmt.query_map([], |row| {
-                        let proto_str: String = row.get(3)?;
-                        let filters_str: String = row.get(6)?;
-                        Ok(EmailAccount {
-                            username: row.get(0)?,
-                            host: row.get(1)?,
-                            port: row.get::<_, i64>(2)? as u16,
-                            protocol: match proto_str.as_str() {
-                                "pop3" => MailProtocol::Pop3,
-                                _ => MailProtocol::Imap,
-                            },
-                            email: row.get(4)?,
-                            password: row.get(5)?,
-                            filters: serde_json::from_str(&filters_str).unwrap_or_default(),
-                        })
-                    }).unwrap().filter_map(|r| r.ok()).collect()
-                }
-                Err(e) => {
-                    eprintln!("[Email] Error preparando query: {}", e);
-                    Vec::new()
-                }
-            };
-
-            let groq_key = crate::db::get_secret_setting(&conn, "groq_api_key");
-
-            // Leer bot_token de notification_config
-            let token: Option<String> = conn.query_row(
-                "SELECT labnas_decrypt(bot_token) FROM notification_config WHERE id = 1",
-                [],
-                |row| row.get(0),
-            ).ok().flatten();
-
-            // Leer chats de telegram_chats
-            let chats: Vec<(i64, Option<String>, String)> = match conn.prepare(
-                "SELECT chat_id, linked_web_user, name FROM telegram_chats"
-            ) {
-                Ok(mut stmt) => {
-                    stmt.query_map([], |row| {
-                        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-                    }).unwrap().filter_map(|r| r.ok()).collect()
-                }
-                Err(_) => Vec::new(),
-            };
-
-            (accounts, groq_key, token, chats)
-        };
-
-        let (accounts, groq_key, token, chats) = db_data;
+        let accounts = db_op(&state.db, store::load_accounts).await.unwrap_or_else(|(_, e)| {
+            eprintln!("[Email] Error leyendo cuentas: {}", e);
+            Vec::new()
+        });
 
         for account in &accounts {
-            let account_clone = account.clone();
-            let result =
-                tokio::task::spawn_blocking(move || fetch_emails_dispatch(&account_clone)).await;
-
-            let emails_result = match result {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!(
-                        "[Email] Error en spawn_blocking para {}: {}",
-                        account.email, e
-                    );
-                    continue;
-                }
-            };
-
-            let mut emails = match emails_result {
-                Ok(e) => e,
-                Err(e) => {
-                    eprintln!("[Email] Error {:?} para {}: {}", account.protocol, account.email, e);
-                    continue;
-                }
-            };
-
-            // Aplicar filtros del usuario
-            let filters = &account.filters;
-            emails.retain_mut(|email| {
-                if let Some((label, action, auto_tag)) = apply_filters(filters, &email.from) {
-                    email.filter_label = Some(label);
-                    email.filter_action = Some(action.clone());
-                    match action {
-                        FilterAction::Ignorar => return false, // descartar
-                        FilterAction::Prioritario => {
-                            email.ai_classification = Some("urgente".to_string());
-                            email.ai_summary = Some(format!("Correo prioritario ({})", email.filter_label.as_deref().unwrap_or("filtro")));
-                            email.ai_action = auto_tag.or(Some("Responder".to_string()));
-                            email.processed = true;
-                        }
-                        FilterAction::Silencioso => {
-                            // Se clasificará con IA pero no notificará
-                        }
-                        FilterAction::Normal => {
-                            // Clasificar normalmente con IA
-                        }
-                    }
-                }
-                true
-            });
-
-            // Clasificar con Groq los que no fueron procesados por filtros
-            if let Some(ref key) = groq_key {
-                for email in &mut emails {
-                    if email.ai_classification.is_none() {
-                        match classify_with_groq(&state.http_client, key, email).await {
-                            Ok((classification, summary, action)) => {
-                                email.ai_classification = Some(classification);
-                                email.ai_summary = Some(summary);
-                                email.ai_action = Some(action);
-                                email.processed = true;
-                            }
-                            Err(e) => {
-                                eprintln!("[Email] Error Groq para {}: {}", account.email, e);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Guardar en inbox
-            let username = account.username.clone();
-            let mut inbox = state.email_inbox.lock().await;
-
-            // Detectar nuevos emails comparando UIDs
-            let existing_uids: Vec<u32> = inbox
-                .get(&username)
-                .map(|existing| existing.iter().map(|e| e.uid).collect())
-                .unwrap_or_default();
-            let new_emails: Vec<&EmailMessage> = emails
-                .iter()
-                .filter(|e| !existing_uids.contains(&e.uid))
-                .collect();
-            let new_count = new_emails.len();
-            let new_urgent: Vec<String> = new_emails
-                .iter()
-                .filter(|e| {
-                    e.ai_classification.as_deref() == Some("urgente")
-                        && e.filter_action != Some(FilterAction::Silencioso)
-                })
-                .map(|e| {
-                    let label = e.filter_label.as_deref().map(|l| format!(" [{}]", l)).unwrap_or_default();
-                    format!("- {}{}: {}", e.from, label, e.subject)
-                })
-                .collect();
-
-            inbox.insert(username.clone(), emails);
-            drop(inbox);
-
-            // Notificar por Telegram si hay correos urgentes nuevos
-            if !new_urgent.is_empty() {
-                if let Some(ref token) = token {
-                    // Buscar chat_id del usuario via linked_web_user
-                    let target_chat = chats
-                        .iter()
-                        .find(|c| c.1.as_deref() == Some(&username));
-
-                    if let Some((chat_id, _, _)) = target_chat {
-                        let msg = format!(
-                            "*Correo urgente!*\n\n{} correo(s) nuevo(s), {} urgente(s):\n{}",
-                            new_count,
-                            new_urgent.len(),
-                            new_urgent.join("\n")
-                        );
-                        let _ = send_telegram_notification(
-                            &state.http_client,
-                            token,
-                            *chat_id,
-                            &msg,
-                        )
-                        .await;
-                    }
-                }
+            match check_account(&state, account).await {
+                Ok(r) => announce(&state, &account.username, &r).await,
+                Err(e) => eprintln!("[Email] Error {:?} para {}: {}", account.protocol, account.email, e),
             }
         }
 
-        // Esperar 5 minutos
-        tokio::time::sleep(Duration::from_secs(300)).await;
+        if last_purge.elapsed() >= Duration::from_secs(86_400) {
+            last_purge = std::time::Instant::now();
+            let _ = db_op(&state.db, |conn| {
+                let days = crate::db::get_setting_u32(conn, "email_retention_days", DEFAULT_RETENTION_DAYS);
+                store::purge_old(conn, days)
+            })
+            .await;
+        }
+
+        tokio::time::sleep(CHECK_EVERY).await;
     }
 }
 

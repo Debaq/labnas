@@ -11,6 +11,8 @@ mod tls;
 mod totp;
 mod updater;
 mod netguard;
+mod ai;
+mod textutil;
 
 use axum::{
     http::Method,
@@ -410,7 +412,6 @@ fn new_state(pool: db::DbPool) -> AppState {
         link_codes: Arc::new(Mutex::new(std::collections::HashMap::new())),
         share_links: Arc::new(Mutex::new(std::collections::HashMap::new())),
         tg_terminals: Arc::new(Mutex::new(std::collections::HashMap::new())),
-        email_inbox: Arc::new(Mutex::new(std::collections::HashMap::new())),
         mdns_service: Arc::new(Mutex::new(None)),
         music: Arc::new(Mutex::new(handlers::music::MusicState::default())),
         music_process: Arc::new(Mutex::new(None)),
@@ -711,7 +712,11 @@ fn api_routes() -> Router<AppState> {
         .route("/api/email/check", post(handlers::email::check_now))
         .route("/api/email/classify/{uid}", post(handlers::email::classify_email))
         .route("/api/email/to-task/{uid}", post(handlers::email::email_to_task))
-        .route("/api/email/groq-key", post(handlers::email::set_groq_key))
+        .route("/api/email/proposals", get(handlers::email::list_proposals))
+        .route("/api/email/proposals/{id}/approve", post(handlers::email::approve_proposal_handler))
+        .route("/api/email/proposals/{id}/dismiss", post(handlers::email::dismiss_proposal_handler))
+        .route("/api/ai/config", get(ai::get_config).put(ai::set_config))
+        .route("/api/ai/test", post(ai::test_config))
         .route("/api/email/filters", get(handlers::email::list_filters))
         .route("/api/email/filters", post(handlers::email::add_filter))
         .route("/api/email/filters/{pattern}", delete(handlers::email::delete_filter))

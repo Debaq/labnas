@@ -2,12 +2,15 @@ import { errorMessage } from '../lib/errors'
 import { useEffect, useState } from 'react'
 import {
   Mail, Settings, Loader2, Trash2, RefreshCw, Brain, ClipboardList,
-  Plus, Filter, AlertTriangle, Bell, BellOff, EyeOff, Key, Tag,
+  Plus, Filter, AlertTriangle, Bell, BellOff, EyeOff, Tag,
 } from 'lucide-react'
+import ProposalsPanel from '../components/ProposalsPanel'
+import AiProviderSection from '../components/AiProviderSection'
+import { useEvent } from '../events/useEvents'
 import { useAuth } from '../auth/AuthContext'
 import {
   configureEmailAccount, deleteEmailAccount, fetchInbox, checkEmailNow,
-  classifyEmail, emailToTask, setGroqKey, fetchEmailFilters, addEmailFilter,
+  classifyEmail, emailToTask, fetchEmailFilters, addEmailFilter,
   deleteEmailFilter,
   type EmailMessage, type EmailFilter,
 } from '../api'
@@ -47,10 +50,6 @@ export default function EmailPage() {
   const [filterAction, setFilterAction] = useState<string>('normal')
   const [filterTag, setFilterTag] = useState('')
 
-  // Groq key (admin)
-  const [groqInput, setGroqInput] = useState('')
-  const [groqMsg, setGroqMsg] = useState<string | null>(null)
-
   // Load inbox on mount
   useEffect(() => {
     loadInbox()
@@ -70,6 +69,8 @@ export default function EmailPage() {
       setLoadingInbox(false)
     }
   }
+
+  useEvent('email.inbox', () => { void loadInbox() }, () => { void loadInbox() })
 
   async function loadFilters() {
     try {
@@ -196,10 +197,12 @@ export default function EmailPage() {
             </div>
           ) : (
             <>
+              <ProposalsPanel />
+
               {/* Toolbar */}
               <div className="flex items-center justify-between">
                 <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                  {emails.length} correo{emails.length !== 1 ? 's' : ''} no leido{emails.length !== 1 ? 's' : ''}
+                  {emails.length} correo{emails.length !== 1 ? 's' : ''} reciente{emails.length !== 1 ? 's' : ''}
                 </span>
                 <button
                   onClick={handleCheck}
@@ -220,7 +223,7 @@ export default function EmailPage() {
               ) : emails.length === 0 ? (
                 <div className="rounded-xl p-8 text-center" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
                   <Mail size={48} className="mx-auto mb-4" style={{ color: 'var(--text-secondary)' }} />
-                  <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>No hay correos sin leer</p>
+                  <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>No hay correos procesados todavia</p>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -509,40 +512,7 @@ export default function EmailPage() {
             </div>
           </section>
 
-          {/* Groq API Key (admin only) */}
-          {isAdmin && (
-            <section>
-              <div className="flex items-center gap-3 mb-4">
-                <Key size={22} style={{ color: 'var(--accent)' }} />
-                <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Clasificacion IA (Groq)</h2>
-              </div>
-              <div className="rounded-xl p-6 space-y-3" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
-                <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                  La API key de Groq permite clasificar correos automaticamente con IA. Se aplica a todos los usuarios.
-                </p>
-                <div className="flex items-center gap-2">
-                  <input value={groqInput} onChange={e => { setGroqInput(e.target.value); setGroqMsg(null) }}
-                    placeholder="gsk_..." className="flex-1 px-3 py-2 rounded-lg text-sm outline-none font-mono"
-                    style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
-                  <button
-                    onClick={async () => {
-                      if (!groqInput.trim()) return
-                      try {
-                        const msg = await setGroqKey(groqInput.trim())
-                        setGroqMsg(msg)
-                        setGroqInput('')
-                      } catch (e) { setGroqMsg(errorMessage(e)) }
-                    }}
-                    disabled={!groqInput.trim()}
-                    className="px-4 py-2 rounded-lg text-sm font-medium"
-                    style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
-                    Guardar
-                  </button>
-                </div>
-                {groqMsg && <p className="text-xs" style={{ color: 'var(--success)' }}>{groqMsg}</p>}
-              </div>
-            </section>
-          )}
+          {isAdmin && <AiProviderSection />}
         </div>
       )}
     </div>

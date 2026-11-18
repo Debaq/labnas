@@ -4,6 +4,7 @@
 mod harness;
 
 mod backups;
+mod email_ai;
 mod events;
 mod files;
 mod folders;

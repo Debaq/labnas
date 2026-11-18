@@ -136,7 +136,6 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         (_, ["notes", ..]) | (_, ["portfolio", ..]) | (_, ["inventory", ..]) => User,
 
         // --- Correo (cuenta propia de cada usuario) ---
-        ("POST", ["email", "groq-key"]) => Admin,
         (_, ["email", ..]) => User,
 
         // --- Reportes ---
@@ -267,6 +266,9 @@ mod tests {
         assert_eq!(acc(Method::POST, "/api/network/wake/aa:bb:cc:dd:ee:ff"), Operator);
         assert_eq!(acc(Method::GET, "/api/system/smart"), Admin);
         assert_eq!(acc(Method::PUT, "/api/system/tls"), Admin);
+        assert_eq!(acc(Method::GET, "/api/ai/config"), Admin);
+        assert_eq!(acc(Method::PUT, "/api/ai/config"), Admin);
+        assert_eq!(acc(Method::POST, "/api/ai/test"), Admin);
         // ruta inventada: denegada por defecto
         assert_eq!(acc(Method::GET, "/api/nueva/ruta"), Admin);
     }
@@ -298,6 +300,8 @@ mod tests {
         assert_eq!(acc(Method::GET, "/api/auth/me"), User);
         assert_eq!(acc(Method::POST, "/api/auth/password"), User);
         assert_eq!(acc(Method::POST, "/api/music/play"), User);
+        assert_eq!(acc(Method::GET, "/api/email/proposals"), User);
+        assert_eq!(acc(Method::POST, "/api/email/proposals/abc/approve"), User);
         assert_eq!(acc(Method::GET, "/api/terminal"), PermTerminal);
         assert_eq!(acc(Method::POST, "/api/live/ticket"), User);
         assert_eq!(acc(Method::GET, "/api/live"), User);

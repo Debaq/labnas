@@ -149,6 +149,52 @@ const MIGRATIONS: &[&str] = &[
         code_hash TEXT NOT NULL,
         PRIMARY KEY (username, code_hash)
     );",
+    // 10: correo persistente (antes en RAM: se perdia y se re-clasificaba con IA en cada
+    // revision), propuestas de la IA, y proveedor de IA generico en vez de la clave de Groq
+    "CREATE TABLE IF NOT EXISTS emails (
+        username TEXT NOT NULL REFERENCES web_users(username) ON DELETE CASCADE ON UPDATE CASCADE,
+        uid INTEGER NOT NULL,
+        message_id TEXT,
+        from_addr TEXT NOT NULL DEFAULT '',
+        subject TEXT NOT NULL DEFAULT '',
+        date TEXT NOT NULL DEFAULT '',
+        body_text TEXT NOT NULL DEFAULT '',
+        ai_classification TEXT,
+        ai_summary TEXT,
+        ai_action TEXT,
+        filter_label TEXT,
+        filter_action TEXT,
+        processed INTEGER NOT NULL DEFAULT 0,
+        task_created INTEGER NOT NULL DEFAULT 0,
+        fetched_at TEXT NOT NULL,
+        PRIMARY KEY (username, uid)
+    );
+    CREATE INDEX IF NOT EXISTS idx_emails_user_fetched ON emails(username, fetched_at);
+    CREATE TABLE IF NOT EXISTS ai_proposals (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL REFERENCES web_users(username) ON DELETE CASCADE ON UPDATE CASCADE,
+        email_uid INTEGER,
+        source TEXT NOT NULL DEFAULT 'ia',
+        kind TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        date TEXT,
+        time TEXT,
+        end_time TEXT,
+        location TEXT,
+        status TEXT NOT NULL DEFAULT 'pendiente',
+        created_ref TEXT,
+        created_at TEXT NOT NULL,
+        resolved_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_proposals_user_status ON ai_proposals(username, status);
+    INSERT OR IGNORE INTO settings (key, value)
+        SELECT 'ai_api_key', value FROM settings WHERE key = 'groq_api_key' AND value != '';
+    INSERT OR IGNORE INTO settings (key, value)
+        SELECT 'ai_base_url', 'https://api.groq.com/openai/v1' FROM settings WHERE key = 'groq_api_key' AND value != '';
+    INSERT OR IGNORE INTO settings (key, value)
+        SELECT 'ai_model', 'llama-3.3-70b-versatile' FROM settings WHERE key = 'groq_api_key' AND value != '';
+    DELETE FROM settings WHERE key = 'groq_api_key';",
 ];
 
 fn run_migrations(conn: &Connection) {
@@ -431,7 +477,10 @@ fn do_migration(conn: &Connection, config: &crate::config::LabNasConfig) -> Resu
     // Email
     if let Some(ref key) = config.email.groq_api_key {
         conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES ('groq_api_key', labnas_encrypt(?1))",
+            "INSERT OR REPLACE INTO settings (key, value) VALUES
+                ('ai_api_key', labnas_encrypt(?1)),
+                ('ai_base_url', 'https://api.groq.com/openai/v1'),
+                ('ai_model', 'llama-3.3-70b-versatile')",
             params![key],
         )
         .map_err(|e| format!("groq_key: {}", e))?;

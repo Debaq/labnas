@@ -2,6 +2,17 @@
 
 ## [Sin publicar]
 
+### Correo con IA
+
+- **Proveedor de IA genérico** compatible con OpenAI (URL, modelo y clave cifrada; solo admin): DeepSeek por defecto, también Groq, OpenAI u Ollama local. Reemplaza la clave de Groq (se migra sola). Endpoints `/api/ai/config` y `/api/ai/test`; se elimina `/api/email/groq-key`
+- **Propuestas de agenda**: la IA detecta eventos y tareas en cada correo nuevo y crea propuestas que el usuario aprueba (con edición), o descarta, desde la web o Telegram (`/propuestas`, `/aprobar ID`, `/descartar ID`). Las invitaciones `.ics` se leen sin IA. Nada se agenda sin aprobación
+- **Correo persistente** en SQLite (antes en RAM: se perdía al reiniciar y la IA volvía a clasificar los mismos correos cada 5 minutos). Solo se descargan y analizan correos nuevos; retención de 90 días (`email_retention_days`)
+- IMAP y POP3 asíncronos (ya no ocupan hilos del runtime), con timeouts, y sin cortes que hacían caer el proceso con tildes o emoji en asuntos y cuerpos
+
+### Build
+
+- **Sin OpenSSL**: todo el TLS saliente usa rustls (reqwest, IMAP, POP3). Corrige la compilación en distros con OpenSSL 4 y simplifica el build musl. La feature `vendored-ssl` queda sin efecto
+
 ### Seguridad
 
 - **Impresión:** el nombre del archivo subido se reduce a su nombre base; antes un nombre con `../` escribía fuera de `/tmp` (impresión normal, dúplex y subida de G-code)

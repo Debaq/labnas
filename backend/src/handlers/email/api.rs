@@ -1,27 +1,20 @@
 //! Endpoints de cuenta, bandeja, clasificacion y correo a tarea
 
 use super::*;
+use axum::Extension;
 
-// =====================
-// API Handlers
-// =====================
+use super::store;
+use crate::state::SessionInfo;
 
-/// POST /api/email/account - Configurar cuenta IMAP
+/// POST /api/email/account - Configurar cuenta IMAP/POP3 (prueba el login antes de guardar)
 pub async fn configure_account(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(session): Extension<SessionInfo>,
     Json(req): Json<ConfigureAccountRequest>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
-    let sessions = state.sessions.lock().await;
-    let (username, _role) = extract_username(&sessions, &headers)
-        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
-    drop(sessions);
-
-    if req.host.is_empty() || req.email.is_empty() || req.password.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "Host, email y password son requeridos".to_string(),
-        ));
+    let username = session.username.clone();
+    if req.host.trim().is_empty() || req.email.trim().is_empty() || req.password.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Host, email y password son requeridos".to_string()));
     }
 
     let protocol_label = match req.protocol {
@@ -39,26 +32,26 @@ pub async fn configure_account(
         filters: Vec::new(),
     };
 
-    // Verificar conexion antes de guardar
-    let test_account = account.clone();
-    let test_result = tokio::task::spawn_blocking(move || fetch_emails_dispatch(&test_account))
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Error interno: {}", e),
-            )
-        })?;
-
-    if let Err(e) = test_result {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!("No se pudo conectar al servidor {}: {}", protocol_label, e),
-        ));
-    }
+    test_login(&account).await.map_err(|e| {
+        (StatusCode::BAD_REQUEST, format!("No se pudo conectar al servidor {}: {}", protocol_label, e))
+    })?;
 
     let acct = account.clone();
     db_op(&state.db, move |conn| {
+        // Conserva los filtros si la cuenta ya existia
+        let filters: String = conn
+            .query_row("SELECT filters FROM email_accounts WHERE username = ?1", params![acct.username], |r| r.get(0))
+            .optional()
+            .map_err(|e| e.to_string())?
+            .unwrap_or_else(|| "[]".to_string());
+        let previous: Option<(String, String)> = conn
+            .query_row(
+                "SELECT host, email FROM email_accounts WHERE username = ?1",
+                params![acct.username],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT OR REPLACE INTO email_accounts (username, host, port, protocol, email, password, filters)
              VALUES (?1, ?2, ?3, ?4, ?5, labnas_encrypt(?6), ?7)",
@@ -66,331 +59,161 @@ pub async fn configure_account(
                 acct.username,
                 acct.host,
                 acct.port as i64,
-                serde_json::to_string(&acct.protocol).unwrap_or_default().trim_matches('"'),
+                if acct.protocol == MailProtocol::Pop3 { "pop3" } else { "imap" },
                 acct.email,
                 acct.password,
-                serde_json::to_string(&acct.filters).unwrap_or_else(|_| "[]".to_string()),
+                filters,
             ],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
+        // Otra casilla: los UID guardados ya no significan nada
+        if previous.is_some_and(|(h, e)| h != acct.host || e != acct.email) {
+            store::delete_user_emails(conn, &acct.username)?;
+        }
         Ok(())
-    }).await?;
+    })
+    .await?;
 
     state
-        .log_activity(
-            "email_configurado",
-            &format!("Cuenta {}: {}", protocol_label, req.email),
-            &username,
-        )
+        .log_activity("email_configurado", &format!("Cuenta {}: {}", protocol_label, account.email), &username)
         .await;
 
     Ok((StatusCode::OK, format!("Cuenta {} configurada correctamente", protocol_label)))
 }
 
-/// DELETE /api/email/account - Eliminar mi cuenta IMAP
+/// DELETE /api/email/account - Eliminar mi cuenta (y los correos guardados)
 pub async fn delete_account(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(session): Extension<SessionInfo>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let sessions = state.sessions.lock().await;
-    let (username, _role) = extract_username(&sessions, &headers)
-        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
-    drop(sessions);
-
-    let uname = username.clone();
+    let uname = session.username.clone();
     let deleted = db_op(&state.db, move |conn| {
-        let changes = conn.execute(
-            "DELETE FROM email_accounts WHERE username = ?1",
-            params![&uname],
-        ).map_err(|e| e.to_string())?;
+        let changes = conn
+            .execute("DELETE FROM email_accounts WHERE username = ?1", params![&uname])
+            .map_err(|e| e.to_string())?;
+        store::delete_user_emails(conn, &uname)?;
         Ok(changes)
-    }).await?;
+    })
+    .await?;
 
     if deleted == 0 {
-        return Err((
-            StatusCode::NOT_FOUND,
-            "No tienes cuenta de correo configurada".to_string(),
-        ));
+        return Err((StatusCode::NOT_FOUND, "No tienes cuenta de correo configurada".to_string()));
     }
 
-    // Limpiar inbox del usuario
-    let mut inbox = state.email_inbox.lock().await;
-    inbox.remove(&username);
-
-    state
-        .log_activity("email_eliminado", "Cuenta de correo eliminada", &username)
-        .await;
-
+    state.log_activity("email_eliminado", "Cuenta de correo eliminada", &session.username).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// GET /api/email/inbox - Ver mi bandeja
+/// GET /api/email/inbox - Ver mi bandeja (ultimos correos procesados)
 pub async fn get_inbox(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(session): Extension<SessionInfo>,
 ) -> Result<Json<Vec<EmailMessage>>, (StatusCode, String)> {
-    let sessions = state.sessions.lock().await;
-    let (username, _role) = extract_username(&sessions, &headers)
-        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
-    drop(sessions);
-
-    let inbox = state.email_inbox.lock().await;
-    let emails = inbox.get(&username).cloned().unwrap_or_default();
-    Ok(Json(emails))
+    let u = session.username.clone();
+    db_op(&state.db, move |conn| store::list_inbox(conn, &u)).await.map(Json)
 }
 
-/// POST /api/email/check - Forzar revision de correo ahora
+/// POST /api/email/check - Revisar correo ahora
 pub async fn check_now(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(session): Extension<SessionInfo>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
-    let sessions = state.sessions.lock().await;
-    let (username, _role) = extract_username(&sessions, &headers)
-        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
-    drop(sessions);
+    let username = session.username.clone();
+    let u = username.clone();
+    let account = db_op(&state.db, move |conn| store::load_account(conn, &u))
+        .await?
+        .ok_or((StatusCode::NOT_FOUND, "No tienes cuenta de correo configurada".to_string()))?;
 
-    let uname = username.clone();
-    let (account, groq_key) = db_op(&state.db, move |conn| {
-        let acct = conn.query_row(
-            "SELECT username, host, port, protocol, email, labnas_decrypt(password), filters FROM email_accounts WHERE username = ?1",
-            params![&uname],
-            |row| {
-                let proto_str: String = row.get(3)?;
-                let filters_str: String = row.get(6)?;
-                Ok(EmailAccount {
-                    username: row.get(0)?,
-                    host: row.get(1)?,
-                    port: row.get::<_, i64>(2)? as u16,
-                    protocol: match proto_str.as_str() {
-                        "pop3" => MailProtocol::Pop3,
-                        _ => MailProtocol::Imap,
-                    },
-                    email: row.get(4)?,
-                    password: row.get(5)?,
-                    filters: serde_json::from_str(&filters_str).unwrap_or_default(),
-                })
-            },
-        ).optional().map_err(|e| e.to_string())?;
-        let gk = crate::db::get_secret_setting(conn, "groq_api_key");
-        Ok((acct, gk))
-    }).await?;
-
-    let Some(account) = account else {
-        return Err((
-            StatusCode::NOT_FOUND,
-            "No tienes cuenta de correo configurada".to_string(),
-        ));
-    };
-
-    let cloned_account = account.clone();
-    let emails_result = tokio::task::spawn_blocking(move || fetch_emails_dispatch(&cloned_account))
+    let r = check_account(&state, &account)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Error interno: {}", e),
-            )
-        })?;
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Error obteniendo correos: {}", e)))?;
+    announce(&state, &username, &r).await;
 
-    let mut emails = emails_result.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Error obteniendo correos: {}", e),
-        )
-    })?;
-
-    // Si hay groq_key, clasificar emails nuevos
-    if let Some(ref key) = groq_key {
-        for email in &mut emails {
-            if email.ai_classification.is_none() {
-                match classify_with_groq(&state.http_client, key, email).await {
-                    Ok((classification, summary, action)) => {
-                        email.ai_classification = Some(classification);
-                        email.ai_summary = Some(summary);
-                        email.ai_action = Some(action);
-                        email.processed = true;
-                    }
-                    Err(e) => {
-                        eprintln!("[Email] Error clasificando con Groq: {}", e);
-                    }
-                }
-            }
-        }
-    }
-
-    let count = emails.len();
-    let mut inbox = state.email_inbox.lock().await;
-    inbox.insert(username.clone(), emails);
-
-    state
-        .log_activity(
-            "email_check",
-            &format!("{} correos obtenidos", count),
-            &username,
-        )
-        .await;
-
-    Ok((
-        StatusCode::OK,
-        format!("{} correos obtenidos", count),
-    ))
+    let msg = match (r.new_emails, r.proposals.len()) {
+        (0, _) => "Sin correos nuevos".to_string(),
+        (n, 0) => format!("{} correos nuevos", n),
+        (n, p) => format!("{} correos nuevos, {} propuestas de la IA", n, p),
+    };
+    state.log_activity("email_check", &msg, &username).await;
+    Ok((StatusCode::OK, msg))
 }
 
-/// POST /api/email/classify/{uid} - Clasificar un email con IA
+/// POST /api/email/classify/{uid} - (Re)analizar un correo con IA
 pub async fn classify_email(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(session): Extension<SessionInfo>,
     Path(uid): Path<u32>,
 ) -> Result<Json<EmailMessage>, (StatusCode, String)> {
-    let sessions = state.sessions.lock().await;
-    let (username, _role) = extract_username(&sessions, &headers)
-        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
-    drop(sessions);
+    let u = session.username.clone();
+    let (cfg, found) = db_op(&state.db, move |conn| {
+        Ok((crate::ai::AiConfig::load(conn), store::get_email(conn, &u, uid)?))
+    })
+    .await?;
+    let cfg = cfg.ok_or((StatusCode::BAD_REQUEST, "IA no configurada".to_string()))?;
+    let (mut email, body) = found.ok_or((StatusCode::NOT_FOUND, "Correo no encontrado".to_string()))?;
 
-    let groq_key = db_op(&state.db, |conn| {
-        Ok(crate::db::get_secret_setting(conn, "groq_api_key"))
-    }).await?
-    .ok_or((StatusCode::BAD_REQUEST, "Groq API key no configurada".to_string()))?;
+    // Solo clasifica: re-proponer duplicaria eventos y tareas ya propuestos
+    let a = super::ai::analyze_email(&state.http_client, &cfg, &email.from, &email.subject, &email.date, &body, false)
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
 
-    let mut inbox = state.email_inbox.lock().await;
-    let emails = inbox
-        .get_mut(&username)
-        .ok_or((StatusCode::NOT_FOUND, "No tienes correos".to_string()))?;
-    let email = emails
-        .iter_mut()
-        .find(|e| e.uid == uid)
-        .ok_or((StatusCode::NOT_FOUND, "Correo no encontrado".to_string()))?;
+    let u = session.username.clone();
+    let (c, s, ac) = (a.classification.clone(), a.summary.clone(), a.action.clone());
+    db_op(&state.db, move |conn| store::set_ai(conn, &u, uid, &c, &s, &ac)).await?;
 
-    // Clasificar con Groq (necesitamos clonar para la llamada async)
-    let email_clone = email.clone();
-    drop(inbox);
-
-    let (classification, summary, action) =
-        classify_with_groq(&state.http_client, &groq_key, &email_clone)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error Groq: {}", e)))?;
-
-    // Guardar resultado
-    let mut inbox = state.email_inbox.lock().await;
-    let emails = inbox.get_mut(&username).unwrap();
-    let email = emails.iter_mut().find(|e| e.uid == uid).unwrap();
-    email.ai_classification = Some(classification);
-    email.ai_summary = Some(summary);
-    email.ai_action = Some(action);
+    email.ai_classification = Some(a.classification);
+    email.ai_summary = Some(a.summary);
+    email.ai_action = Some(a.action);
     email.processed = true;
-
-    Ok(Json(email.clone()))
+    Ok(Json(email))
 }
 
 /// POST /api/email/to-task/{uid} - Convertir email en tarea
 pub async fn email_to_task(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(session): Extension<SessionInfo>,
     Path(uid): Path<u32>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
-    let sessions = state.sessions.lock().await;
-    let (username, _role) = extract_username(&sessions, &headers)
-        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
-    drop(sessions);
-
-    // Buscar el email
-    let mut inbox = state.email_inbox.lock().await;
-    let emails = inbox
-        .get_mut(&username)
-        .ok_or((StatusCode::NOT_FOUND, "No tienes correos".to_string()))?;
-    let email = emails
-        .iter_mut()
-        .find(|e| e.uid == uid)
-        .ok_or((StatusCode::NOT_FOUND, "Correo no encontrado".to_string()))?;
-
-    if email.task_created {
-        return Err((
-            StatusCode::CONFLICT,
-            "Ya se creo una tarea para este correo".to_string(),
-        ));
-    }
-
-    let title = if let Some(ref summary) = email.ai_summary {
-        format!("[Email] {} - {}", email.subject, summary)
-    } else {
-        format!("[Email] {}", email.subject)
-    };
-    let title = if title.len() > 200 {
-        format!("{}...", &title[..197])
-    } else {
-        title
-    };
-
-    email.task_created = true;
-    drop(inbox);
-
-    // Crear la tarea
-    let from_str = email_from_str(uid, &state, &username).await;
-    let task_id = uuid::Uuid::new_v4().to_string()[..6].to_string();
-    let description = format!("De: {}", from_str);
-    let assigned_json = serde_json::to_string(&vec![&username]).unwrap_or_default();
-    let now = Utc::now().to_rfc3339();
-    let tid = task_id.clone();
-    let t = title.clone();
-    let d = description.clone();
-    let u = username.clone();
-    let aj = assigned_json.clone();
-    let n = now.clone();
-
-    db_op(&state.db, move |conn| {
-        conn.execute(
-            "INSERT INTO tasks (id, project_id, title, description, assigned_to, status, created_by, due_date, due_time, requires_confirmation, insistent, reminder_minutes, confirmed_by, rejected_by, created_at, last_reminder)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
-            params![
-                tid, Option::<String>::None, t, d,
-                aj, "pendiente", u, Option::<String>::None, Option::<String>::None,
-                false, false, 8i64,
-                "[]", "[]", n, Option::<String>::None,
-            ],
-        ).map_err(|e| e.to_string())?;
-        Ok(())
-    }).await?;
-
-    state
-        .log_activity("email_a_tarea", &title, &username)
-        .await;
-
+    let title = create_task_from_email(&state, &session.username, &session.username, uid, false)
+        .await?;
+    state.log_activity("email_a_tarea", &title, &session.username).await;
     Ok((StatusCode::CREATED, format!("Tarea creada: {}", title)))
 }
 
-/// Auxiliar para obtener el from de un email
-pub(super) async fn email_from_str(uid: u32, state: &AppState, username: &str) -> String {
-    let inbox = state.email_inbox.lock().await;
-    inbox
-        .get(username)
-        .and_then(|emails| emails.iter().find(|e| e.uid == uid))
-        .map(|e| e.from.clone())
-        .unwrap_or_default()
-}
+/// Crea una tarea a partir de un correo guardado (web y Telegram). Devuelve el titulo.
+pub(super) async fn create_task_from_email(
+    state: &AppState,
+    username: &str,
+    assignee: &str,
+    uid: u32,
+    insistent: bool,
+) -> Result<String, (StatusCode, String)> {
+    let (u, a) = (username.to_string(), assignee.to_string());
+    crate::db::db_op_status(&state.db, move |conn| {
+        let internal = |e: String| (StatusCode::INTERNAL_SERVER_ERROR, e);
+        let (email, _) = store::get_email(conn, &u, uid)
+            .map_err(internal)?
+            .ok_or((StatusCode::NOT_FOUND, "Correo no encontrado".to_string()))?;
 
-/// POST /api/email/groq-key - Configurar API key de Groq (admin)
-pub async fn set_groq_key(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(req): Json<SetGroqKeyRequest>,
-) -> Result<(StatusCode, String), (StatusCode, String)> {
-    let sessions = state.sessions.lock().await;
-    let (username, _role) = extract_username(&sessions, &headers)
-        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
-    drop(sessions);
-
-    let key = req.key.trim().to_string();
-    if key.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "Key vacia".to_string()));
-    }
-
-    let k = key.clone();
-    db_op(&state.db, move |conn| {
-        crate::db::set_secret_setting(conn, "groq_api_key", &k)
-    }).await?;
-
-    state
-        .log_activity("groq_key", "API key de Groq configurada", &username)
-        .await;
-
-    Ok((StatusCode::OK, "Groq API key configurada".to_string()))
+        let tx = conn.unchecked_transaction().map_err(|e| internal(e.to_string()))?;
+        if !store::claim_task_created(&tx, &u, uid).map_err(internal)? {
+            return Err((StatusCode::CONFLICT, "Ya se creo una tarea para este correo".to_string()));
+        }
+        let title = match &email.ai_summary {
+            Some(summary) if !insistent => format!("[Email] {} - {}", email.subject, summary),
+            _ => format!("[Email] {}", email.subject),
+        };
+        let title = crate::textutil::ellipsize(&title, 200);
+        let task_id = uuid::Uuid::new_v4().simple().to_string()[..6].to_string();
+        let assigned = serde_json::to_string(&[&a]).unwrap_or_else(|_| "[]".into());
+        tx.execute(
+            "INSERT INTO tasks (id, project_id, title, description, assigned_to, status, created_by, due_date, due_time, requires_confirmation, insistent, reminder_minutes, confirmed_by, rejected_by, created_at, last_reminder)
+             VALUES (?1, NULL, ?2, ?3, ?4, 'pendiente', ?5, NULL, NULL, ?6, ?6, 8, '[]', '[]', ?7, NULL)",
+            params![task_id, title, format!("De: {}", email.from), assigned, a, insistent, Utc::now().to_rfc3339()],
+        )
+        .map_err(|e| internal(e.to_string()))?;
+        tx.commit().map_err(|e| internal(e.to_string()))?;
+        Ok(title)
+    })
+    .await
 }

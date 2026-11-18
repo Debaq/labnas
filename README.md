@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/TypeScript-5.9-blue?style=flat-square" alt="TypeScript" />
   <img src="https://img.shields.io/badge/SQLite-WAL-003B57?style=flat-square" alt="SQLite" />
   <img src="https://img.shields.io/badge/Telegram-40%2B_cmds-26A5E4?style=flat-square" alt="Telegram" />
-  <img src="https://img.shields.io/badge/AI-Groq_Llama_3.3-orange?style=flat-square" alt="Groq" />
+  <img src="https://img.shields.io/badge/AI-DeepSeek%20%7C%20Ollama%20%7C%20OpenAI-orange?style=flat-square" alt="IA" />
   <img src="https://img.shields.io/badge/Tested_on-Arch_Linux-1793D1?style=flat-square" alt="Arch" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" />
 </p>
@@ -88,12 +88,14 @@ Módulos disponibles:
 ### Correo (IMAP y POP3)
 - IMAP y POP3 con selector de protocolo por cuenta
 - Compatible con Gmail (IMAP), Outlook (POP3 + app password), y cualquier servidor estándar
-- Clasificación IA vía Groq LLM: urgente, tarea, informativo, spam
+- Clasificación IA (cualquier API compatible con OpenAI: DeepSeek, Groq, OpenAI u Ollama local): urgente, tarea, informativo, spam
 - Resumen y acciones sugeridas por correo
+- **Propuestas de agenda**: la IA detecta reuniones y tareas en cada correo nuevo y las propone; se aprueban (con edición) desde la web o Telegram. Las invitaciones `.ics` se leen sin IA. Nada se agenda solo
+- Los correos procesados se guardan (90 días, `email_retention_days`): la IA analiza cada correo una sola vez
 - Filtros por remitente: prioridad, normal, silencioso, ignorar
 - Convertir correo a tarea en un click
 - Chequeo en segundo plano cada 5 min + alertas Telegram para urgentes
-- Comandos Telegram: `/correos`, `/leer UID`, `/correo2tarea UID`
+- Comandos Telegram: `/correos`, `/leer UID`, `/correo2tarea UID`, `/propuestas`, `/aprobar ID`, `/descartar ID`
 
 ### Impresoras 3D
 - **4 protocolos**: Moonraker (Klipper), OctoPrint, Creality stock (WebSocket), FlashForge stock (TCP)
@@ -240,14 +242,14 @@ Módulos disponibles:
 | Terminal | portable-pty + xterm.js 6 (WebSocket) |
 | Música/Video | yt-dlp + mpv (X11 multi-monitor), Last.fm API |
 | Correo | IMAP (nativo), POP3 (TLS custom) |
-| IA | Groq API (Llama 3.3 70B Versatile) |
+| IA | API compatible con OpenAI (DeepSeek por defecto; Groq, OpenAI, Ollama) |
 | Impresoras 3D | Moonraker, OctoPrint, Creality WS, FlashForge TCP |
 | Impresión | CUPS CLI (lp, lpstat, cancel) |
 | Red | ICMP ping (surge-ping), DNS lookup |
 | mDNS | mdns-sd |
 | Notificaciones | Telegram Bot API (long polling) |
 | Auth | bcrypt + UUID session tokens |
-| Build | Binario estático vía musl + OpenSSL vendored |
+| Build | Binario estático vía musl; TLS con rustls (sin OpenSSL) |
 
 ## Requisitos
 
@@ -434,8 +436,10 @@ Config persiste en `~/.labnas/` (SQLite + assets). Override con `LABNAS_CONFIG`.
 4. Vincular cuenta web: generar código en Configuración, luego `/vincular CODIGO` en Telegram
 
 ### Correo con IA
-1. API key gratis en [console.groq.com](https://console.groq.com)
-2. Admin pega la key en **Configuración > Correo > Groq API Key**
+1. El admin elige el proveedor en **Correo > Proveedor de IA**: DeepSeek (por defecto), Groq, OpenAI, Ollama local o cualquier URL compatible con OpenAI, y pega la API key (Ollama no la necesita). **Probar conexión** verifica la configuración
+   - **Privacidad**: con un proveedor en la nube el texto de los correos se envía a ese servicio. Con Ollama (`http://IP:11434/v1`) no sale de tu red
+   - Si antes había una key de Groq, se migra sola al nuevo ajuste
+2. La IA nunca agenda sola: crea propuestas que cada usuario aprueba, edita o descarta (web o Telegram). El texto del correo se le pasa como dato y la salida se valida; aun así, revisa lo que apruebas
 3. Cada usuario configura su cuenta:
    - **Gmail**: IMAP, `imap.gmail.com:993`, app password
    - **Outlook**: POP3, `outlook.office365.com:995`, app password
@@ -587,7 +591,7 @@ Todas las acciones registradas (subidas, borrados, cambios de rol, actualizacion
 - Sesiones de 24h persistidas en SQLite (sobreviven reinicios); cambiar la contraseña cierra las demás
 - `labnas.db` con permisos 600
 - Sin CORS por defecto (la web y el visor son mismo origen); para autorizar un origen externo: `LABNAS_CORS_ORIGINS=https://dashboard.lab.cl`
-- Secretos cifrados en la base (token del bot, API keys de impresoras/Groq/Last.fm, contraseñas de correo) con XChaCha20-Poly1305; la clave está en `~/.labnas/secret.key` (600)
+- Secretos cifrados en la base (token del bot, API keys de impresoras/IA/Last.fm, contraseñas de correo) con XChaCha20-Poly1305; la clave está en `~/.labnas/secret.key` (600)
 - Token del bot jamás expuesto en la API
 - Comandos CUPS sanitizados contra inyección
 - Terminal web y `/cmd` de Telegram nunca corren como root

@@ -1,6 +1,5 @@
 use crate::db::DbPool;
 use crate::handlers::music::MusicState;
-use crate::models::email::EmailMessage;
 use crate::models::network::NetworkHost;
 use crate::models::notifications::{UserPermissions, UserRole};
 use crate::models::sensors::SensorLatest;
@@ -62,7 +61,6 @@ pub struct AppState {
     pub link_codes: Arc<Mutex<HashMap<String, LinkCode>>>,
     pub share_links: Arc<Mutex<HashMap<String, ShareLink>>>,
     pub tg_terminals: Arc<Mutex<HashMap<i64, TgTerminal>>>,
-    pub email_inbox: Arc<Mutex<HashMap<String, Vec<EmailMessage>>>>,
     pub mdns_service: Arc<Mutex<Option<mdns_sd::ServiceDaemon>>>,
     pub music: Arc<Mutex<MusicState>>,
     pub music_process: Arc<Mutex<Option<tokio::process::Child>>>,

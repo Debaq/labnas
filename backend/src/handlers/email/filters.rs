@@ -1,6 +1,9 @@
 //! Filtros por remitente
 
 use super::*;
+use crate::db::db_op_status;
+use crate::state::SessionInfo;
+use axum::Extension;
 
 // =====================
 // Email filters
@@ -8,12 +11,9 @@ use super::*;
 
 pub async fn list_filters(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(session): Extension<SessionInfo>,
 ) -> Result<Json<Vec<EmailFilter>>, (StatusCode, String)> {
-    let sessions = state.sessions.lock().await;
-    let (username, _) = extract_username(&sessions, &headers)
-        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
-    drop(sessions);
+    let username = session.username.clone();
 
     let uname = username.clone();
     let filters = db_op(&state.db, move |conn| {
@@ -41,13 +41,10 @@ pub struct AddFilterRequest {
 
 pub async fn add_filter(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(session): Extension<SessionInfo>,
     Json(req): Json<AddFilterRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let sessions = state.sessions.lock().await;
-    let (username, _) = extract_username(&sessions, &headers)
-        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
-    drop(sessions);
+    let username = session.username.clone();
 
     let uname = username.clone();
     db_op_status(&state.db, move |conn| {
@@ -84,13 +81,10 @@ pub async fn add_filter(
 
 pub async fn delete_filter(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(session): Extension<SessionInfo>,
     Path(pattern): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let sessions = state.sessions.lock().await;
-    let (username, _) = extract_username(&sessions, &headers)
-        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
-    drop(sessions);
+    let username = session.username.clone();
 
     let decoded = urlencoding::decode(&pattern).unwrap_or_default().to_string();
     let uname = username.clone();
