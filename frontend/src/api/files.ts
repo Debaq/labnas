@@ -137,6 +137,12 @@ export async function fetchQuickAccess(): Promise<QuickAccess[]> {
 
 // --- File Sharing ---
 
+// El backend devuelve la ruta relativa: se completa con el origen con que se entro
+// (http/https, IP, nombre .local o Tailscale, puerto)
+function absoluteShareUrl(url: string): string {
+  return new URL(url, window.location.origin).href
+}
+
 export async function createShare(path: string, expiresHours?: number): Promise<{ token: string; url: string; expires_hours: number }> {
   const res = await api('/api/shares', {
     method: 'POST',
@@ -144,13 +150,15 @@ export async function createShare(path: string, expiresHours?: number): Promise<
     body: JSON.stringify({ path, expires_hours: expiresHours || 24 }),
   })
   if (!res.ok) throw new Error('Error al compartir')
-  return res.json()
+  const data = await res.json()
+  return { ...data, url: absoluteShareUrl(data.url) }
 }
 
 export async function fetchShares(): Promise<import('../types/notes').ShareLink[]> {
   const res = await api('/api/shares')
   if (!res.ok) throw new Error('Error al obtener links')
-  return res.json()
+  const list: import('../types/notes').ShareLink[] = await res.json()
+  return list.map((s) => ({ ...s, url: absoluteShareUrl(s.url) }))
 }
 
 export async function deleteShare(token: string): Promise<void> {

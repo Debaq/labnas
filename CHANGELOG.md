@@ -1,5 +1,14 @@
 # Changelog
 
+## [Sin publicar]
+
+### Seguridad
+
+- **Impresión:** el nombre del archivo subido se reduce a su nombre base; antes un nombre con `../` escribía fuera de `/tmp` (impresión normal, dúplex y subida de G-code)
+- **Descargar desde URL:** solo a internet pública. Se rechazan localhost, la LAN, Tailscale (100.64/10), link-local/metadatos y esquemas no http(s), también tras redirecciones. La descarga va en streaming a disco con el tope de `upload_limit_mb`
+- **Links compartidos:** cada link tiene dueño; un usuario solo ve y revoca los suyos (el admin, todos). La descarga es en streaming (antes cargaba el archivo entero en RAM) y los vencidos se purgan. La URL ahora usa el origen con que se entró (antes `http://IP:3001` fijo)
+- **Telegram `/cmd`:** ya no se cae al truncar salidas con tildes o emoji
+
 ## [3.0.0] — 2026-09-25
 
 Desde v2.8.2. Instalación:

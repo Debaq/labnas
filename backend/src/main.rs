@@ -10,6 +10,7 @@ mod storage;
 mod tls;
 mod totp;
 mod updater;
+mod netguard;
 
 use axum::{
     http::Method,

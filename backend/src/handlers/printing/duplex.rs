@@ -31,10 +31,11 @@ pub async fn duplex_prepare(
     {
         let name = field.name().unwrap_or("").to_string();
         if name == "file" {
+            // Solo el nombre base (sin "../")
             file_name = field
                 .file_name()
-                .unwrap_or("document")
-                .to_string();
+                .and_then(crate::storage::sanitize_filename)
+                .unwrap_or_else(|| "document".to_string());
             file_data = Some(
                 field
                     .bytes()

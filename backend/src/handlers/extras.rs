@@ -1,5 +1,6 @@
 use axum::{
     extract::{Path, State},
+    Extension,
     http::{header, HeaderMap, StatusCode},
     response::IntoResponse,
     Json,
@@ -10,6 +11,7 @@ use serde::Deserialize;
 use std::time::Instant;
 
 use crate::models::notes::Note;
+use crate::models::notifications::UserRole;
 use crate::state::AppState;
 
 fn get_session_user(
@@ -23,21 +25,6 @@ fn get_session_user(
         .and_then(|v| v.strip_prefix("Bearer "))?;
     let _ = state;
     sessions.get(token).map(|s| s.username.clone())
-}
-
-async fn session_of(state: &AppState, headers: &HeaderMap) -> Result<crate::state::SessionInfo, (StatusCode, String)> {
-    let token = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
-    state
-        .sessions
-        .lock()
-        .await
-        .get(token)
-        .cloned()
-        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))
 }
 
 // =====================
@@ -64,15 +51,9 @@ pub struct ShareResponse {
 
 pub async fn create_share(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(session): Extension<crate::state::SessionInfo>,
     Json(req): Json<ShareRequest>,
 ) -> Result<Json<ShareResponse>, (StatusCode, String)> {
-    let sessions = state.sessions.lock().await;
-    let username = get_session_user(&state, &sessions, &headers)
-        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
-    drop(sessions);
-
-    let session = session_of(&state, &headers).await?;
     let st = crate::storage::Storage::load(&state.db).await?;
     let path = st.resolve_existing_for(&session, &req.path, crate::storage::Op::Read)?;
     if path.is_dir() {
@@ -88,85 +69,103 @@ pub async fn create_share(
     let token = uuid::Uuid::new_v4().to_string();
     let hours = req.expires_hours.clamp(1, 168); // 1h to 7 days
 
-    let mut shares = state.share_links.lock().await;
-    shares.insert(
-        token.clone(),
-        crate::state::ShareLink {
-            file_path: path.to_string_lossy().to_string(),
-            file_name: file_name.clone(),
-            created_at: Instant::now(),
-            expires_secs: (hours as u64) * 3600,
-        },
-    );
-
-    let local_ip = local_ip_address::local_ip()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|_| "localhost".to_string());
+    {
+        let mut shares = state.share_links.lock().await;
+        // Purga los vencidos (antes solo se borraban al intentar descargarlos)
+        shares.retain(|_, s| !s.is_expired());
+        shares.insert(
+            token.clone(),
+            crate::state::ShareLink {
+                owner: session.username.clone(),
+                file_path: path.to_string_lossy().to_string(),
+                file_name: file_name.clone(),
+                created_at: Instant::now(),
+                expires_secs: (hours as u64) * 3600,
+            },
+        );
+    }
 
     state
-        .log_activity("Compartido", &format!("{} ({}h)", file_name, hours), &username)
+        .log_activity("Compartido", &format!("{} ({}h)", file_name, hours), &session.username)
         .await;
 
     Ok(Json(ShareResponse {
-        url: format!("http://{}:3001/api/share/{}", local_ip, token),
+        // Relativa: el cliente le antepone el origen con que entro (http/https, IP, .local, puerto)
+        url: share_path(&token),
         token,
         expires_hours: hours,
     }))
+}
+
+fn share_path(token: &str) -> String {
+    format!("/api/share/{}", token)
 }
 
 pub async fn download_share(
     State(state): State<AppState>,
     Path(token): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let mut shares = state.share_links.lock().await;
+    let share = {
+        let mut shares = state.share_links.lock().await;
+        let share = shares
+            .get(&token)
+            .cloned()
+            .ok_or((StatusCode::NOT_FOUND, "Link no encontrado o expirado".to_string()))?;
+        if share.is_expired() {
+            shares.remove(&token);
+            return Err((StatusCode::GONE, "Link expirado".to_string()));
+        }
+        share
+    };
 
-    let share = shares
-        .get(&token)
-        .ok_or((StatusCode::NOT_FOUND, "Link no encontrado o expirado".to_string()))?;
-
-    // Check expiration
-    if share.created_at.elapsed().as_secs() > share.expires_secs {
-        shares.remove(&token);
-        return Err((StatusCode::GONE, "Link expirado".to_string()));
-    }
-
-    let file_path = share.file_path.clone();
-    let file_name = share.file_name.clone();
-    drop(shares);
-
-    let data = tokio::fs::read(&file_path)
+    let file = tokio::fs::File::open(&share.file_path)
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "Archivo no disponible".to_string()))?;
+    let len = file.metadata().await.map(|m| m.len()).ok();
+    // En streaming: antes se leia el archivo completo a memoria
+    let body = axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(file));
 
-    let headers = [
-        (header::CONTENT_TYPE, "application/octet-stream".to_string()),
-        (
-            header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"{}\"", file_name),
-        ),
-    ];
+    // Nombre ASCII de respaldo; el real va en filename* (RFC 5987)
+    let ascii_name: String = share
+        .file_name
+        .chars()
+        .map(|c| if (c.is_ascii_graphic() || c == ' ') && c != '"' && c != '\\' { c } else { '_' })
+        .collect();
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, header::HeaderValue::from_static("application/octet-stream"));
+    if let Ok(v) = header::HeaderValue::from_str(&format!(
+        "attachment; filename=\"{}\"; filename*=UTF-8''{}",
+        ascii_name,
+        urlencoding::encode(&share.file_name)
+    )) {
+        headers.insert(header::CONTENT_DISPOSITION, v);
+    }
+    if let Some(len) = len {
+        headers.insert(header::CONTENT_LENGTH, header::HeaderValue::from(len));
+    }
 
-    Ok((headers, data))
+    Ok((headers, body))
 }
 
+/// Links vigentes: los propios, o todos si es admin
 pub async fn list_shares(
     State(state): State<AppState>,
+    Extension(session): Extension<crate::state::SessionInfo>,
 ) -> Json<Vec<serde_json::Value>> {
+    let is_admin = session.role == UserRole::Admin;
     let shares = state.share_links.lock().await;
-    let local_ip = local_ip_address::local_ip()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|_| "localhost".to_string());
 
     let list: Vec<serde_json::Value> = shares
         .iter()
-        .filter(|(_, s)| s.created_at.elapsed().as_secs() <= s.expires_secs)
+        .filter(|(_, s)| !s.is_expired() && (is_admin || s.owner == session.username))
         .map(|(token, s)| {
             let remaining = s.expires_secs.saturating_sub(s.created_at.elapsed().as_secs());
             serde_json::json!({
                 "token": token,
                 "file_name": s.file_name,
                 "file_path": s.file_path,
-                "url": format!("http://{}:3001/api/share/{}", local_ip, token),
+                "owner": s.owner,
+                "url": share_path(token),
                 "remaining_minutes": remaining / 60,
             })
         })
@@ -175,13 +174,21 @@ pub async fn list_shares(
     Json(list)
 }
 
+/// Solo el dueño o un admin pueden revocar un link
 pub async fn delete_share(
     State(state): State<AppState>,
+    Extension(session): Extension<crate::state::SessionInfo>,
     Path(token): Path<String>,
 ) -> StatusCode {
     let mut shares = state.share_links.lock().await;
-    shares.remove(&token);
-    StatusCode::NO_CONTENT
+    match shares.get(&token) {
+        Some(s) if s.owner == session.username || session.role == UserRole::Admin => {
+            shares.remove(&token);
+            StatusCode::NO_CONTENT
+        }
+        // Igual que inexistente: no revela tokens ajenos
+        _ => StatusCode::NOT_FOUND,
+    }
 }
 
 // =====================
@@ -196,68 +203,95 @@ pub struct DownloadUrlRequest {
 
 pub async fn download_url(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(session): Extension<crate::state::SessionInfo>,
     Json(req): Json<DownloadUrlRequest>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
-    let sessions = state.sessions.lock().await;
-    let username = get_session_user(&state, &sessions, &headers)
-        .ok_or((StatusCode::UNAUTHORIZED, "No autorizado".to_string()))?;
-    drop(sessions);
-
-    let session = session_of(&state, &headers).await?;
     let st = crate::storage::Storage::load(&state.db).await?;
     let dest = st.resolve_for(&session, &req.destination, crate::storage::Op::Write)?;
 
-    let lower = req.url.to_ascii_lowercase();
-    if !lower.starts_with("http://") && !lower.starts_with("https://") {
-        return Err((StatusCode::BAD_REQUEST, "Solo se permiten URLs http(s)".to_string()));
-    }
+    let url = reqwest::Url::parse(req.url.trim())
+        .map_err(|_| (StatusCode::BAD_REQUEST, "URL invalida".to_string()))?;
+    crate::netguard::check_url(&url).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
-    // Extract filename from URL
-    let url_parsed = req.url.split(['?', '#']).next().unwrap_or(&req.url);
-    let file_name = url_parsed
-        .rsplit('/')
-        .next()
-        .and_then(crate::storage::sanitize_filename)
+    let file_name = url
+        .path_segments()
+        .and_then(|mut s| s.next_back())
+        .and_then(|seg| urlencoding::decode(seg).ok().map(|c| c.into_owned()))
+        .and_then(|n| crate::storage::sanitize_filename(&n))
         .unwrap_or_else(|| "descarga".to_string());
-    let file_name = file_name.as_str();
 
-    let file_path = dest.join(file_name);
+    // Mismo tope que una subida (setting upload_limit_mb)
+    let limit_mb = crate::db::db_op(&state.db, |conn| {
+        Ok(crate::db::get_setting_u32(conn, "upload_limit_mb", 50))
+    })
+    .await?;
+    let max_bytes = (limit_mb as u64) * 1024 * 1024;
 
-    // Download
-    let response = state
-        .http_client
-        .get(&req.url)
+    // Solo internet publica (ver netguard): nada de localhost, LAN ni Tailscale
+    let mut response = crate::netguard::public_client()
+        .get(url)
         .timeout(std::time::Duration::from_secs(300))
         .send()
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Error descargando: {}", e)))?;
 
     if !response.status().is_success() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!("URL respondio con {}", response.status()),
-        ));
+        return Err((StatusCode::BAD_REQUEST, format!("URL respondio con {}", response.status())));
+    }
+    if response.content_length().is_some_and(|n| n > max_bytes) {
+        return Err((StatusCode::PAYLOAD_TOO_LARGE, format!("El archivo supera el limite de {} MB", limit_mb)));
     }
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error leyendo datos: {}", e)))?;
-
-    // Ensure directory exists
     tokio::fs::create_dir_all(&dest)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    tokio::fs::write(&file_path, &bytes)
+    // Se escribe a un temporal nuevo (create_new no sigue symlinks) y se renombra al final
+    let file_path = dest.join(&file_name);
+    let part_path = dest.join(format!(".{}.{}.part", file_name, uuid::Uuid::new_v4().simple()));
+    let mut part = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&part_path)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let size = bytes.len();
-    let msg = format!("{} ({} bytes)", file_name, size);
+    let result: Result<u64, (StatusCode, String)> = async {
+        use tokio::io::AsyncWriteExt;
+        let mut size: u64 = 0;
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Error leyendo datos: {}", e)))?
+        {
+            size += chunk.len() as u64;
+            if size > max_bytes {
+                return Err((StatusCode::PAYLOAD_TOO_LARGE, format!("El archivo supera el limite de {} MB", limit_mb)));
+            }
+            part.write_all(&chunk)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        }
+        part.flush().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        Ok(size)
+    }
+    .await;
+    drop(part);
 
-    state.log_activity("Descarga", &msg, &username).await;
+    let size = match result {
+        Ok(size) => size,
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&part_path).await;
+            return Err(e);
+        }
+    };
+    if let Err(e) = tokio::fs::rename(&part_path, &file_path).await {
+        let _ = tokio::fs::remove_file(&part_path).await;
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
+    }
+
+    let msg = format!("{} ({} bytes)", file_name, size);
+    state.log_activity("Descarga", &msg, &session.username).await;
 
     Ok((StatusCode::OK, format!("Descargado: {} ({} bytes)", file_name, size)))
 }

@@ -22,10 +22,11 @@ pub async fn upload_gcode(
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?
     {
         if field.name() == Some("file") {
+            // Solo el nombre base (sin "../")
             file_name = field
                 .file_name()
-                .unwrap_or("upload.gcode")
-                .to_string();
+                .and_then(crate::storage::sanitize_filename)
+                .unwrap_or_else(|| "upload.gcode".to_string());
             file_data = Some(
                 field
                     .bytes()

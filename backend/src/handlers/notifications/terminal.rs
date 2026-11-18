@@ -125,7 +125,7 @@ pub(super) async fn collect_output(
     if !lines.is_empty() {
         let output = lines.join("\n");
         let output = if output.len() > 3500 {
-            format!("{}...(truncado)", &output[..3500])
+            format!("{}...(truncado)", truncate_utf8(&output, 3500))
         } else {
             output
         };
@@ -194,7 +194,7 @@ pub(super) async fn pipe_terminal_input(state: &AppState, chat_id: i64, input: &
     if !lines.is_empty() {
         let output = lines.join("\n");
         let output = if output.len() > 3500 {
-            format!("{}...(truncado)", &output[..3500])
+            format!("{}...(truncado)", truncate_utf8(&output, 3500))
         } else {
             output
         };
@@ -217,4 +217,33 @@ pub(super) async fn pipe_terminal_input(state: &AppState, chat_id: i64, input: &
     }
 
     Some(msg)
+}
+
+/// Corta `s` a lo mas `max` bytes sin partir un caracter UTF-8
+/// (`&s[..max]` hace panic si cae dentro de una tilde o un emoji)
+fn truncate_utf8(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_utf8;
+
+    #[test]
+    fn no_parte_caracteres_multibyte() {
+        let s = "á".repeat(2000); // 2 bytes c/u: el byte 3500 cae justo en un borde
+        assert_eq!(truncate_utf8(&s, 3500).len(), 3500);
+        let s = format!("x{}", "á".repeat(2000)); // ahora el byte 3500 cae dentro de una "á"
+        assert_eq!(truncate_utf8(&s, 3500).len(), 3499);
+        let s = "🙂".repeat(1000);
+        assert!(truncate_utf8(&s, 3500).len() <= 3500);
+        assert_eq!(truncate_utf8("hola", 3500), "hola");
+    }
 }

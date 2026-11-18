@@ -101,10 +101,18 @@ pub struct TgTerminal {
 
 #[derive(Debug, Clone)]
 pub struct ShareLink {
+    /// Usuario que lo creo: solo el (o un admin) lo ve y lo revoca
+    pub owner: String,
     pub file_path: String,
     pub file_name: String,
     pub created_at: Instant,
     pub expires_secs: u64,
+}
+
+impl ShareLink {
+    pub fn is_expired(&self) -> bool {
+        self.created_at.elapsed().as_secs() > self.expires_secs
+    }
 }
 
 #[derive(Debug, Clone)]
