@@ -54,7 +54,10 @@ async fn migracion_cifra_secretos_en_claro() {
             "ALTER TABLE web_users DROP COLUMN totp_secret;
              ALTER TABLE web_users DROP COLUMN totp_last_step;
              ALTER TABLE web_users DROP COLUMN app_password_hash;
-             DROP TABLE totp_recovery;",
+             DROP TABLE totp_recovery;
+             ALTER TABLE email_accounts DROP COLUMN auth;
+             ALTER TABLE email_accounts DROP COLUMN last_error;
+             ALTER TABLE email_accounts DROP COLUMN last_check;",
         )
         .unwrap();
         conn.pragma_update(None, "user_version", 4).unwrap();

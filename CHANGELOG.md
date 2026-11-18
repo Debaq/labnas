@@ -7,6 +7,8 @@
 - **Proveedor de IA genérico** compatible con OpenAI (URL, modelo y clave cifrada; solo admin): DeepSeek por defecto, también Groq, OpenAI u Ollama local. Reemplaza la clave de Groq (se migra sola). Endpoints `/api/ai/config` y `/api/ai/test`; se elimina `/api/email/groq-key`
 - **Propuestas de agenda**: la IA detecta eventos y tareas en cada correo nuevo y crea propuestas que el usuario aprueba (con edición), o descarta, desde la web o Telegram (`/propuestas`, `/aprobar ID`, `/descartar ID`). Las invitaciones `.ics` se leen sin IA. Nada se agenda sin aprobación
 - **Correo persistente** en SQLite (antes en RAM: se perdía al reiniciar y la IA volvía a clasificar los mismos correos cada 5 minutos). Solo se descargan y analizan correos nuevos; retención de 90 días (`email_retention_days`)
+- **Cuentas Microsoft (Outlook, Hotmail, Microsoft 365) con OAuth2**: inicio de sesión por código de dispositivo (sin URL pública), refresh token cifrado, IMAP con XOAUTH2. El admin registra una app gratuita en Microsoft Entra y guarda su Client ID (`/api/email/oauth/microsoft/*`). Microsoft ya no acepta contraseñas por IMAP/POP
+- La bandeja muestra el error de la última revisión (p. ej. login rechazado) con opción de reconectar; `GET /api/email/account`. Corrige que la página creyera que siempre había cuenta configurada
 - IMAP y POP3 asíncronos (ya no ocupan hilos del runtime), con timeouts, y sin cortes que hacían caer el proceso con tildes o emoji en asuntos y cuerpos
 
 ### Build

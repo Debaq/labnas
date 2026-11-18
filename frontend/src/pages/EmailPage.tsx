@@ -6,14 +6,19 @@ import {
 } from 'lucide-react'
 import ProposalsPanel from '../components/ProposalsPanel'
 import AiProviderSection from '../components/AiProviderSection'
+import MicrosoftConnect from '../components/MicrosoftConnect'
+import MicrosoftOAuthSection from '../components/MicrosoftOAuthSection'
 import { useEvent } from '../events/useEvents'
 import { useAuth } from '../auth/AuthContext'
 import {
   configureEmailAccount, deleteEmailAccount, fetchInbox, checkEmailNow,
   classifyEmail, emailToTask, fetchEmailFilters, addEmailFilter,
-  deleteEmailFilter,
-  type EmailMessage, type EmailFilter,
+  deleteEmailFilter, fetchEmailAccount,
+  type EmailMessage, type EmailFilter, type EmailAccountInfo,
 } from '../api'
+
+// Dominios de cuentas personales de Microsoft (las de organizacion, como @uach.cl, se eligen a mano)
+const MS_DOMAINS = ['outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'outlook.es', 'hotmail.es', 'live.cl']
 
 const actionColors: Record<string, { bg: string; color: string; label: string; icon: typeof Bell }> = {
   prioritario: { bg: 'var(--danger)', color: '#fff', label: 'Prioritario', icon: AlertTriangle },
@@ -35,6 +40,9 @@ export default function EmailPage() {
   const [configuring, setConfiguring] = useState(false)
   const [configMsg, setConfigMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [hasAccount, setHasAccount] = useState(false)
+  const [account, setAccount] = useState<EmailAccountInfo | null>(null)
+  const [accountKind, setAccountKind] = useState<'microsoft' | 'password'>('microsoft')
+  const [reconnecting, setReconnecting] = useState(false)
 
   // Inbox
   const [emails, setEmails] = useState<EmailMessage[]>([])
@@ -52,25 +60,50 @@ export default function EmailPage() {
 
   // Load inbox on mount
   useEffect(() => {
+    loadAccount()
     loadInbox()
     loadFilters()
   }, [])
 
+  async function loadAccount() {
+    try {
+      const a = await fetchEmailAccount()
+      setAccount(a)
+      setHasAccount(a !== null)
+      if (a) {
+        setAccountKind(a.auth === 'microsoft' ? 'microsoft' : 'password')
+        setEmailAddr(a.email)
+        if (a.auth === 'password') {
+          setHost(a.host)
+          setPort(a.port)
+          setProtocol(a.protocol)
+        }
+      }
+    } catch {
+      setHasAccount(false)
+    }
+  }
+
   async function loadInbox() {
     setLoadingInbox(true)
     try {
-      const data = await fetchInbox()
-      setEmails(data)
-      setHasAccount(true)
+      setEmails(await fetchInbox())
     } catch {
-      setHasAccount(false)
       setEmails([])
     } finally {
       setLoadingInbox(false)
     }
   }
 
-  useEvent('email.inbox', () => { void loadInbox() }, () => { void loadInbox() })
+  async function onMicrosoftConnected() {
+    setReconnecting(false)
+    setConfigMsg(null)
+    await loadAccount()
+    await loadInbox()
+  }
+
+  useEvent('email.inbox', () => { void loadInbox() }, () => { void loadInbox(); void loadAccount() })
+  useEvent('email.status', () => { void loadAccount() })
 
   async function loadFilters() {
     try {
@@ -86,8 +119,8 @@ export default function EmailPage() {
     try {
       const msg = await configureEmailAccount({ host, port, protocol, email: emailAddr, password: emailPw })
       setConfigMsg({ ok: true, text: msg })
-      setHasAccount(true)
       setEmailPw('')
+      await loadAccount()
       await loadInbox()
     } catch (e) {
       setConfigMsg({ ok: false, text: errorMessage(e) })
@@ -101,6 +134,7 @@ export default function EmailPage() {
     try {
       await deleteEmailAccount()
       setHasAccount(false)
+      setAccount(null)
       setEmails([])
       setHost('')
       setEmailAddr('')
@@ -113,7 +147,8 @@ export default function EmailPage() {
     try {
       await checkEmailNow()
       await loadInbox()
-    } catch {} finally {
+    } catch { /* el error queda en la cuenta (last_error) */ } finally {
+      await loadAccount()
       setChecking(false)
     }
   }
@@ -197,6 +232,24 @@ export default function EmailPage() {
             </div>
           ) : (
             <>
+              {account?.last_error && (
+                <div className="rounded-xl p-4 flex items-start gap-3" style={{ border: '1px solid var(--danger)', backgroundColor: 'var(--card-bg)' }}>
+                  <AlertTriangle size={18} className="shrink-0 mt-0.5" style={{ color: 'var(--danger)' }} />
+                  <div className="flex-1 min-w-0 text-xs space-y-2">
+                    <p style={{ color: 'var(--text-primary)' }}>No se pudo revisar el correo: {account.last_error}</p>
+                    {account.last_check && (
+                      <p style={{ color: 'var(--text-secondary)' }}>Último intento: {new Date(account.last_check).toLocaleString()}</p>
+                    )}
+                    {account.auth === 'microsoft' && /vuelve a conectar/i.test(account.last_error) && (
+                      <button onClick={() => { setTab('config'); setAccountKind('microsoft'); setReconnecting(true) }}
+                        className="px-3 py-1.5 rounded-lg font-medium" style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
+                        Reconectar con Microsoft
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <ProposalsPanel />
 
               {/* Toolbar */}
@@ -336,6 +389,41 @@ export default function EmailPage() {
               <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Cuenta de correo</h2>
             </div>
             <div className="rounded-xl p-6 space-y-4" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Tipo de cuenta</label>
+                <select value={accountKind} onChange={e => setAccountKind(e.target.value as 'microsoft' | 'password')}
+                  className="w-full sm:w-auto px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
+                  style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}>
+                  <option value="microsoft">Microsoft (Outlook, Hotmail, Microsoft 365)</option>
+                  <option value="password">Otro con contraseña (Gmail, servidor propio)</option>
+                </select>
+              </div>
+
+              {accountKind === 'microsoft' ? (
+                account?.auth === 'microsoft' && !reconnecting ? (
+                  <div className="space-y-3">
+                    <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
+                      Conectada con Microsoft: <strong>{account.email}</strong>
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <button onClick={() => setReconnecting(true)}
+                        className="px-4 py-2 rounded-lg text-sm font-medium"
+                        style={{ color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
+                        Reconectar
+                      </button>
+                      <button onClick={handleDeleteAccount}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:opacity-80"
+                        style={{ color: 'var(--danger)', border: '1px solid var(--danger)' }}>
+                        <Trash2 size={16} />
+                        Eliminar cuenta
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <MicrosoftConnect initialEmail={emailAddr} onConnected={onMicrosoftConnected} />
+                )
+              ) : (
+              <>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Protocolo</label>
@@ -353,7 +441,7 @@ export default function EmailPage() {
                 <div>
                   <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Servidor</label>
                   <input value={host} onChange={e => setHost(e.target.value)}
-                    placeholder={protocol === 'pop3' ? 'outlook.office365.com' : 'imap.gmail.com'} className="w-full px-3 py-2 rounded-lg text-sm outline-none font-mono"
+                    placeholder={protocol === 'pop3' ? 'pop.gmail.com' : 'imap.gmail.com'} className="w-full px-3 py-2 rounded-lg text-sm outline-none font-mono"
                     style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
                 </div>
                 <div>
@@ -364,7 +452,11 @@ export default function EmailPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Email</label>
-                  <input type="email" value={emailAddr} onChange={e => setEmailAddr(e.target.value)}
+                  <input type="email" value={emailAddr} onChange={e => {
+                    setEmailAddr(e.target.value)
+                    const domain = e.target.value.split('@')[1]?.toLowerCase()
+                    if (domain && MS_DOMAINS.includes(domain)) setAccountKind('microsoft')
+                  }}
                     placeholder="usuario@gmail.com" className="w-full px-3 py-2 rounded-lg text-sm outline-none"
                     style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }} />
                 </div>
@@ -402,8 +494,11 @@ export default function EmailPage() {
               <p className="text-xs" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>
                 {protocol === 'imap'
                   ? 'Para Gmail usa imap.gmail.com:993 con una App Password.'
-                  : 'Para Outlook usa outlook.office365.com:995 con una Contrasena de aplicacion.'}
+                  : 'POP3 descarga los ultimos correos del servidor sin marcarlos.'}
+                {' '}Outlook, Hotmail y Microsoft 365 ya no aceptan contraseña: usa el tipo «Microsoft».
               </p>
+              </>
+              )}
             </div>
           </section>
 
@@ -512,6 +607,7 @@ export default function EmailPage() {
             </div>
           </section>
 
+          {isAdmin && <MicrosoftOAuthSection />}
           {isAdmin && <AiProviderSection />}
         </div>
       )}

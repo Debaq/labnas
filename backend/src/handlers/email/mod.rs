@@ -21,13 +21,14 @@ mod fetch;
 mod filters;
 mod ics;
 mod monitor;
+mod oauth;
 mod proposals;
 mod store;
 mod telegram;
 
 // API publica (handlers y loops) y visibilidad entre submodulos (`use super::*`)
 #[allow(unused_imports)]
-pub use {api::*, fetch::*, filters::*, monitor::*, proposals::*, telegram::*};
+pub use {api::*, fetch::*, filters::*, monitor::*, oauth::*, proposals::*, telegram::*};
 
 // =====================
 // Request types

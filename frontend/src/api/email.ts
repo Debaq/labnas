@@ -164,3 +164,68 @@ export async function deleteEmailFilter(pattern: string): Promise<void> {
   const res = await api(`/api/email/filters/${encodeURIComponent(pattern)}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar filtro')
 }
+
+// --- Cuenta y OAuth de Microsoft ---
+
+export interface EmailAccountInfo {
+  email: string
+  host: string
+  port: number
+  protocol: 'imap' | 'pop3'
+  auth: 'password' | 'microsoft'
+  last_error: string | null
+  last_check: string | null
+}
+
+/** null si el usuario no tiene cuenta */
+export async function fetchEmailAccount(): Promise<EmailAccountInfo | null> {
+  const res = await api('/api/email/account')
+  if (res.status === 404) return null
+  if (!res.ok) return failText(res, 'Error al obtener la cuenta')
+  return res.json()
+}
+
+export interface MsOAuthConfig {
+  configured: boolean
+  client_id: string
+  tenant: string
+}
+
+export interface MsFlowStatus {
+  status: 'ninguno' | 'pendiente' | 'conectado' | 'error'
+  message: string
+  user_code?: string | null
+  verification_uri?: string | null
+}
+
+export async function fetchMsOAuthConfig(): Promise<MsOAuthConfig> {
+  const res = await api('/api/email/oauth/microsoft/config')
+  if (!res.ok) return failText(res, 'Error al obtener la configuracion de Microsoft')
+  return res.json()
+}
+
+export async function saveMsOAuthConfig(cfg: { client_id: string; tenant?: string }): Promise<MsOAuthConfig> {
+  const res = await api('/api/email/oauth/microsoft/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cfg),
+  })
+  if (!res.ok) return failText(res, 'Error al guardar')
+  return res.json()
+}
+
+export async function startMsOAuth(email: string): Promise<MsFlowStatus> {
+  const res = await api('/api/email/oauth/microsoft/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  })
+  if (!res.ok) return failText(res, 'No se pudo iniciar la conexion con Microsoft')
+  return res.json()
+}
+
+export async function fetchMsOAuthStatus(): Promise<MsFlowStatus> {
+  const res = await api('/api/email/oauth/microsoft/status')
+  if (!res.ok) return failText(res, 'Error al consultar el estado')
+  return res.json()
+}

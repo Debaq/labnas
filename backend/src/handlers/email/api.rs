@@ -30,6 +30,7 @@ pub async fn configure_account(
         email: req.email.trim().to_string(),
         password: req.password,
         filters: Vec::new(),
+        auth: crate::models::email::MailAuth::Password,
     };
 
     test_login(&account).await.map_err(|e| {
@@ -53,8 +54,8 @@ pub async fn configure_account(
             .optional()
             .map_err(|e| e.to_string())?;
         conn.execute(
-            "INSERT OR REPLACE INTO email_accounts (username, host, port, protocol, email, password, filters)
-             VALUES (?1, ?2, ?3, ?4, ?5, labnas_encrypt(?6), ?7)",
+            "INSERT OR REPLACE INTO email_accounts (username, host, port, protocol, email, password, filters, auth)
+             VALUES (?1, ?2, ?3, ?4, ?5, labnas_encrypt(?6), ?7, 'password')",
             params![
                 acct.username,
                 acct.host,
@@ -99,9 +100,22 @@ pub async fn delete_account(
     if deleted == 0 {
         return Err((StatusCode::NOT_FOUND, "No tienes cuenta de correo configurada".to_string()));
     }
+    super::oauth::forget_tokens(&session.username);
 
     state.log_activity("email_eliminado", "Cuenta de correo eliminada", &session.username).await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// GET /api/email/account - Mi cuenta (sin contraseña) y el resultado de la ultima revision
+pub async fn get_account(
+    State(state): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
+) -> Result<Json<store::AccountView>, (StatusCode, String)> {
+    let u = session.username.clone();
+    db_op(&state.db, move |conn| store::account_view(conn, &u))
+        .await?
+        .map(Json)
+        .ok_or((StatusCode::NOT_FOUND, "No tienes cuenta de correo configurada".to_string()))
 }
 
 /// GET /api/email/inbox - Ver mi bandeja (ultimos correos procesados)
@@ -124,10 +138,9 @@ pub async fn check_now(
         .await?
         .ok_or((StatusCode::NOT_FOUND, "No tienes cuenta de correo configurada".to_string()))?;
 
-    let r = check_account(&state, &account)
+    let r = run_check(&state, &account)
         .await
         .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Error obteniendo correos: {}", e)))?;
-    announce(&state, &username, &r).await;
 
     let msg = match (r.new_emails, r.proposals.len()) {
         (0, _) => "Sin correos nuevos".to_string(),

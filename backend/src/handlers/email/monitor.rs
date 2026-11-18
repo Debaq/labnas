@@ -22,6 +22,7 @@ pub struct CheckResult {
 
 /// Revisa una cuenta y guarda lo nuevo. Usado por el loop y por "Revisar ahora".
 pub async fn check_account(state: &AppState, account: &EmailAccount) -> Result<CheckResult, String> {
+    let account = &super::oauth::with_credentials(state, account).await?;
     let user = account.username.clone();
     let (known, ai_cfg) = db_op(&state.db, move |conn| {
         Ok((store::known_uids(conn, &user)?, crate::ai::AiConfig::load(conn)))
@@ -146,6 +147,26 @@ async fn process_mail(
     (msg, proposals)
 }
 
+/// Revisa, guarda el resultado (ultimo error) y avisa. Lo usan el loop, "Revisar ahora" y OAuth.
+pub async fn run_check(state: &AppState, account: &EmailAccount) -> Result<CheckResult, String> {
+    let result = check_account(state, account).await;
+    let (u, err) = (account.username.clone(), result.as_ref().err().cloned());
+    let failed = err.is_some();
+    let _ = db_op(&state.db, move |conn| store::set_check_result(conn, &u, err.as_deref())).await;
+    // La UI muestra (o quita) el aviso de error de la cuenta
+    state.events.publish(
+        "email.status",
+        serde_json::json!({ "error": failed }),
+        Audience::User(account.username.clone()),
+        Some("email"),
+    );
+    match &result {
+        Ok(r) => announce(state, &account.username, r).await,
+        Err(e) => eprintln!("[Email] Error {:?} para {}: {}", account.protocol, account.email, e),
+    }
+    result
+}
+
 /// Avisos tras una revision: bus en vivo (web/visor) y Telegram
 pub async fn announce(state: &AppState, username: &str, r: &CheckResult) {
     if r.new_emails > 0 {
@@ -242,10 +263,7 @@ pub async fn email_check_loop(state: AppState) {
         });
 
         for account in &accounts {
-            match check_account(&state, account).await {
-                Ok(r) => announce(&state, &account.username, &r).await,
-                Err(e) => eprintln!("[Email] Error {:?} para {}: {}", account.protocol, account.email, e),
-            }
+            let _ = run_check(&state, account).await;
         }
 
         if last_purge.elapsed() >= Duration::from_secs(86_400) {

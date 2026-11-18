@@ -87,7 +87,7 @@ Módulos disponibles:
 
 ### Correo (IMAP y POP3)
 - IMAP y POP3 con selector de protocolo por cuenta
-- Compatible con Gmail (IMAP), Outlook (POP3 + app password), y cualquier servidor estándar
+- Gmail y servidores estándar con contraseña (o contraseña de aplicación); **Outlook, Hotmail y Microsoft 365 con OAuth2** (inicio de sesión de Microsoft por código de dispositivo: LabNAS nunca ve la contraseña)
 - Clasificación IA (cualquier API compatible con OpenAI: DeepSeek, Groq, OpenAI u Ollama local): urgente, tarea, informativo, spam
 - Resumen y acciones sugeridas por correo
 - **Propuestas de agenda**: la IA detecta reuniones y tareas en cada correo nuevo y las propone; se aprueban (con edición) desde la web o Telegram. Las invitaciones `.ics` se leen sin IA. Nada se agenda solo
@@ -440,9 +440,10 @@ Config persiste en `~/.labnas/` (SQLite + assets). Override con `LABNAS_CONFIG`.
    - **Privacidad**: con un proveedor en la nube el texto de los correos se envía a ese servicio. Con Ollama (`http://IP:11434/v1`) no sale de tu red
    - Si antes había una key de Groq, se migra sola al nuevo ajuste
 2. La IA nunca agenda sola: crea propuestas que cada usuario aprueba, edita o descarta (web o Telegram). El texto del correo se le pasa como dato y la salida se valida; aun así, revisa lo que apruebas
-3. Cada usuario configura su cuenta:
-   - **Gmail**: IMAP, `imap.gmail.com:993`, app password
-   - **Outlook**: POP3, `outlook.office365.com:995`, app password
+3. Cada usuario configura su cuenta en **Correo > Configuración**:
+   - **Gmail**: tipo «Otro con contraseña», IMAP, `imap.gmail.com:993`, con verificación en 2 pasos y una contraseña de aplicación. En Google Workspace el admin puede tenerlas bloqueadas
+   - **Outlook / Hotmail / Microsoft 365** (p. ej. correos institucionales en Microsoft): tipo «Microsoft». Microsoft ya no acepta contraseña por IMAP/POP desde 2024. LabNAS muestra un código, lo ingresas en microsoft.com/devicelogin y listo
+4. **Solo para Microsoft, una vez (admin):** registrar una app gratuita en [Microsoft Entra](https://entra.microsoft.com) > Registros de aplicaciones > Nuevo registro (cuentas de cualquier organización y personales, sin URI de redirección); en *Autenticación* activar «Permitir flujos de clientes públicos»; en *Permisos de API* agregar Office 365 Exchange Online > delegado `IMAP.AccessAsUser.All`. Pegar el «Id. de aplicación (cliente)» en **Correo > Configuración > Conexión con Microsoft**. Si la institución bloquea apps de terceros, TI debe aprobar la app la primera vez. Alternativa sin TI: reenviar el correo institucional a un Gmail
 
 ### Video en pantallas externas
 Corriendo como servicio systemd, LabNAS:

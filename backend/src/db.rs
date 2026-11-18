@@ -195,6 +195,10 @@ const MIGRATIONS: &[&str] = &[
     INSERT OR IGNORE INTO settings (key, value)
         SELECT 'ai_model', 'llama-3.3-70b-versatile' FROM settings WHERE key = 'groq_api_key' AND value != '';
     DELETE FROM settings WHERE key = 'groq_api_key';",
+    // 11: cuentas Microsoft con OAuth2 (password guarda el refresh token) y estado de la ultima revision
+    "ALTER TABLE email_accounts ADD COLUMN auth TEXT NOT NULL DEFAULT 'password';
+    ALTER TABLE email_accounts ADD COLUMN last_error TEXT;
+    ALTER TABLE email_accounts ADD COLUMN last_check TEXT;",
 ];
 
 fn run_migrations(conn: &Connection) {

@@ -102,10 +102,39 @@ async fn imap_session(account: &EmailAccount) -> Result<async_imap::Session<Tls>
         .await
         .ok_or("El servidor IMAP cerro la conexion")?
         .map_err(|e| format!("Error leyendo saludo IMAP: {}", e))?;
-    client
-        .login(&account.email, &account.password)
-        .await
-        .map_err(|(e, _)| format!("Error de login IMAP: {}", e))
+    match account.auth {
+        crate::models::email::MailAuth::Password => client
+            .login(&account.email, &account.password)
+            .await
+            .map_err(|(e, _)| format!("El servidor rechazo el login IMAP: {}", imap_err(e))),
+        // `password` ya trae el access token (ver oauth::with_credentials)
+        crate::models::email::MailAuth::Microsoft => client
+            .authenticate(
+                "XOAUTH2",
+                super::oauth::XOAuth2 { user: account.email.clone(), token: account.password.clone() },
+            )
+            .await
+            .map_err(|(e, _)| {
+                format!(
+                    "Microsoft rechazo el acceso IMAP ({}). Revisa que IMAP este habilitado para tu buzon (en Microsoft 365 lo decide TI) o vuelve a conectar la cuenta",
+                    imap_err(e)
+                )
+            }),
+    }
+}
+
+/// Texto del servidor en un NO/BAD de IMAP, sin el envoltorio de depuracion
+fn imap_err(e: async_imap::error::Error) -> String {
+    use async_imap::error::Error;
+    match &e {
+        Error::No(s) | Error::Bad(s) => s
+            .split("info: Some(\"")
+            .nth(1)
+            .and_then(|r| r.split("\")").next())
+            .map(|x| x.trim_end_matches('.').to_string())
+            .unwrap_or_else(|| s.clone()),
+        _ => e.to_string(),
+    }
 }
 
 async fn fetch_imap(account: &EmailAccount, known: &HashSet<u32>) -> Result<Vec<FetchedMail>, String> {
@@ -213,6 +242,9 @@ fn pop3_uid(uidl: &str) -> u32 {
 }
 
 async fn fetch_pop3(account: &EmailAccount, known: &HashSet<u32>) -> Result<Vec<FetchedMail>, String> {
+    if account.auth != crate::models::email::MailAuth::Password {
+        return Err("Las cuentas Microsoft se leen por IMAP".into());
+    }
     let mut p = pop3_login(account).await?;
 
     p.cmd("UIDL").await?;
@@ -358,6 +390,12 @@ mod tests {
     fn html_sin_estilos() {
         let t = strip_html_tags("<html><style>p{color:red}</style><p>Hola&nbsp;mundo</p><script>x()</script><br>chao &amp; adios</html>");
         assert_eq!(t, "Hola mundo\nchao & adios");
+    }
+
+    #[test]
+    fn error_imap_legible() {
+        let e = async_imap::error::Error::No("code: None, info: Some(\"Login failed.\")".into());
+        assert_eq!(imap_err(e), "Login failed");
     }
 
     #[test]

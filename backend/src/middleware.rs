@@ -136,6 +136,7 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         (_, ["notes", ..]) | (_, ["portfolio", ..]) | (_, ["inventory", ..]) => User,
 
         // --- Correo (cuenta propia de cada usuario) ---
+        ("PUT", ["email", "oauth", "microsoft", "config"]) => Admin,
         (_, ["email", ..]) => User,
 
         // --- Reportes ---
@@ -269,6 +270,7 @@ mod tests {
         assert_eq!(acc(Method::GET, "/api/ai/config"), Admin);
         assert_eq!(acc(Method::PUT, "/api/ai/config"), Admin);
         assert_eq!(acc(Method::POST, "/api/ai/test"), Admin);
+        assert_eq!(acc(Method::PUT, "/api/email/oauth/microsoft/config"), Admin);
         // ruta inventada: denegada por defecto
         assert_eq!(acc(Method::GET, "/api/nueva/ruta"), Admin);
     }
@@ -301,6 +303,8 @@ mod tests {
         assert_eq!(acc(Method::POST, "/api/auth/password"), User);
         assert_eq!(acc(Method::POST, "/api/music/play"), User);
         assert_eq!(acc(Method::GET, "/api/email/proposals"), User);
+        assert_eq!(acc(Method::POST, "/api/email/oauth/microsoft/start"), User);
+        assert_eq!(acc(Method::GET, "/api/email/oauth/microsoft/config"), User);
         assert_eq!(acc(Method::POST, "/api/email/proposals/abc/approve"), User);
         assert_eq!(acc(Method::GET, "/api/terminal"), PermTerminal);
         assert_eq!(acc(Method::POST, "/api/live/ticket"), User);

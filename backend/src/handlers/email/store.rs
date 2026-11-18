@@ -14,7 +14,7 @@ pub const PREVIEW_CHARS: usize = 500;
 
 pub fn load_account(conn: &Connection, username: &str) -> Result<Option<EmailAccount>, String> {
     conn.query_row(
-        "SELECT username, host, port, protocol, email, labnas_decrypt(password), filters FROM email_accounts WHERE username = ?1",
+        "SELECT username, host, port, protocol, email, labnas_decrypt(password), filters, auth FROM email_accounts WHERE username = ?1",
         params![username],
         row_to_account,
     )
@@ -24,7 +24,7 @@ pub fn load_account(conn: &Connection, username: &str) -> Result<Option<EmailAcc
 
 pub fn load_accounts(conn: &Connection) -> Result<Vec<EmailAccount>, String> {
     let mut stmt = conn
-        .prepare("SELECT username, host, port, protocol, email, labnas_decrypt(password), filters FROM email_accounts")
+        .prepare("SELECT username, host, port, protocol, email, labnas_decrypt(password), filters, auth FROM email_accounts")
         .map_err(|e| e.to_string())?;
     let rows = stmt.query_map([], row_to_account).map_err(|e| e.to_string())?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -41,7 +41,54 @@ fn row_to_account(row: &rusqlite::Row) -> rusqlite::Result<EmailAccount> {
         email: row.get(4)?,
         password: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
         filters: serde_json::from_str(&filters).unwrap_or_default(),
+        auth: if row.get::<_, String>(7)? == "microsoft" {
+            crate::models::email::MailAuth::Microsoft
+        } else {
+            crate::models::email::MailAuth::Password
+        },
     })
+}
+
+/// Datos de la cuenta para la UI (sin secretos)
+#[derive(Debug, Serialize)]
+pub struct AccountView {
+    pub email: String,
+    pub host: String,
+    pub port: u16,
+    pub protocol: String,
+    pub auth: String,
+    pub last_error: Option<String>,
+    pub last_check: Option<String>,
+}
+
+pub fn account_view(conn: &Connection, username: &str) -> Result<Option<AccountView>, String> {
+    conn.query_row(
+        "SELECT email, host, port, protocol, auth, last_error, last_check FROM email_accounts WHERE username = ?1",
+        params![username],
+        |r| {
+            Ok(AccountView {
+                email: r.get(0)?,
+                host: r.get(1)?,
+                port: r.get::<_, i64>(2)? as u16,
+                protocol: r.get(3)?,
+                auth: r.get(4)?,
+                last_error: r.get(5)?,
+                last_check: r.get(6)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// Resultado de la ultima revision (None = sin error)
+pub fn set_check_result(conn: &Connection, username: &str, error: Option<&str>) -> Result<(), String> {
+    conn.execute(
+        "UPDATE email_accounts SET last_error = ?2, last_check = ?3 WHERE username = ?1",
+        params![username, error, Utc::now().to_rfc3339()],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 pub fn known_uids(conn: &Connection, username: &str) -> Result<HashSet<u32>, String> {

@@ -9,6 +9,17 @@ pub enum MailProtocol {
     Pop3,
 }
 
+/// Como se autentica la cuenta
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MailAuth {
+    /// Usuario + contraseña (o contraseña de aplicacion)
+    #[default]
+    Password,
+    /// OAuth2 de Microsoft (Outlook.com, Microsoft 365): `password` guarda el refresh token
+    Microsoft,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 #[derive(Default)]
@@ -43,6 +54,8 @@ pub struct EmailAccount {
     pub password: String,
     #[serde(default)]
     pub filters: Vec<EmailFilter>,
+    #[serde(default)]
+    pub auth: MailAuth,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
