@@ -1,6 +1,8 @@
 # Changelog
 
-## [Sin publicar]
+## [3.3.0] — 2026-11-19
+
+Desde v3.2.2.
 
 ### Detección con IA en cámaras
 
