@@ -1,6 +1,8 @@
 # Changelog
 
-## [Sin publicar]
+## [3.2.0] — 2026-11-19
+
+Desde v3.1.0.
 
 ### Bitácora inalterable
 
