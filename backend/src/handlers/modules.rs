@@ -44,6 +44,13 @@ pub async fn toggle_module(
         }
     }
 
+    // Tareas de fondo del modulo, sin reiniciar
+    if enabled {
+        crate::module_tasks::start(&state, &id);
+    } else {
+        crate::module_tasks::stop(&state, &id).await;
+    }
+
     // Apagar la terminal corta tambien las sesiones abiertas desde Telegram
     if id == "terminal" && !enabled {
         let sessions: Vec<_> = state.tg_terminals.lock().await.drain().map(|(_, s)| s).collect();

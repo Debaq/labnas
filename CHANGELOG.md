@@ -50,6 +50,7 @@
 
 ### Seguridad
 
+- **Tareas de fondo en vivo**: encender o apagar un módulo inicia o detiene al momento su revisión de correo, monitor de impresoras 3D, receptor de sensores, música o escaneo de red; antes solo se aplicaba al reiniciar LabNAS. Apagar Música detiene la reproducción
 - **Módulos apagados también por Telegram**: antes el bot seguía respondiendo comandos de módulos desactivados (incluido `/cmd` con el módulo Terminal apagado). Ahora responde que el módulo está desactivado, `/ayuda` oculta sus comandos y apagar la Terminal cierra las sesiones abiertas desde Telegram
 - **Impresión:** el nombre del archivo subido se reduce a su nombre base; antes un nombre con `../` escribía fuera de `/tmp` (impresión normal, dúplex y subida de G-code)
 - **Descargar desde URL:** solo a internet pública. Se rechazan localhost, la LAN, Tailscale (100.64/10), link-local/metadatos y esquemas no http(s), también tras redirecciones. La descarga va en streaming a disco con el tope de `upload_limit_mb`

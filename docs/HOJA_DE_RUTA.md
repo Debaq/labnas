@@ -99,7 +99,7 @@ una sola página `SettingsPage.tsx` de ~1.850 líneas con 9 pestañas.
       pasa con `/imprimir`, `/impresoras`, `/tareas`, `/propuestas` y `/musica`.
       Quien apaga un módulo espera que quede apagado del todo. **Prioridad alta**
       en el caso de la terminal.
-- [ ] **Las tareas de fondo solo miran el estado al arrancar.** Encender el módulo
+- [x] **Las tareas de fondo solo miran el estado al arrancar.** *(corregido)* Encender el módulo
       Correo no inicia la revisión hasta reiniciar, y apagarlo no la detiene.
 - [ ] **No hay forma de que un módulo venga apagado por defecto** (lo necesita
       `transparencia`).
@@ -121,7 +121,7 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
 - [ ] **Dependencias entre módulos:** `transparencia` necesita `finanzas`, y
       `finanzas` usa `inventory` y `portfolio`. No se puede apagar uno del que otro
       depende sin avisar.
-- [ ] **Tareas de fondo que se encienden y apagan en vivo** junto con su módulo.
+- [x] **Tareas de fondo que se encienden y apagan en vivo** junto con su módulo.
 - [x] **Comandos de Telegram ligados a su módulo** (arregla la falla de arriba).
 - [ ] **Ajustes propios de cada módulo:** cada módulo trae su sección de
       configuración, que solo aparece si está encendido. De paso se parte

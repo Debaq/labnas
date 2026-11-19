@@ -14,6 +14,7 @@ mod netguard;
 mod bridge;
 mod ai;
 mod textutil;
+mod module_tasks;
 
 use axum::{
     http::Method,
@@ -91,28 +92,8 @@ async fn main() {
     tokio::spawn(handlers::smart::smart_monitor_loop(state.clone()));
     tokio::spawn(handlers::snapshots::snapshot_loop(state.clone()));
 
-    // Background tasks: condicionales por modulo
-    {
-        let mods = state.enabled_modules.lock().await;
-        if mods.contains("email") {
-            tokio::spawn(handlers::email::email_check_loop(state.clone()));
-        }
-        if mods.contains("printers3d") {
-            tokio::spawn(handlers::printers3d::printer_monitor_loop(state.clone()));
-        }
-        if mods.contains("music") {
-            tokio::spawn(handlers::music::ensure_x_access());
-            tokio::spawn(handlers::music::music_monitor_loop(state.clone()));
-            tokio::spawn(handlers::music::music_events_loop(state.clone()));
-        }
-        if mods.contains("sensors") {
-            tokio::spawn(handlers::sensors::serial_listener_loop(state.clone()));
-            tokio::spawn(handlers::sensors::sensor_monitor_loop(state.clone()));
-        }
-        if mods.contains("network") {
-            tokio::spawn(handlers::network::network_scan_loop(state.clone()));
-        }
-    }
+    // Background tasks por modulo: se inician y detienen al encender o apagar el modulo
+    module_tasks::start_enabled(&state).await;
 
     // Static files
     let static_dir = static_dir();
@@ -411,6 +392,7 @@ fn new_state(pool: db::DbPool) -> AppState {
         login_failures: Arc::new(Mutex::new(std::collections::HashMap::new())),
         restart_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         events: events::EventBus::default(),
+        module_tasks: module_tasks::ModuleTasks::default(),
     }
 }
 

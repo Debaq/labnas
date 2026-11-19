@@ -59,6 +59,26 @@ async fn sensores_y_modulos() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tareas_de_fondo_siguen_al_modulo() {
+    let s = Server::start().await;
+    let admin = s.admin().await;
+    crate::module_tasks::testing::activate(&s.state);
+    let running = || s.state.module_tasks.running();
+
+    // Apagar y encender el correo inicia su revision sin reiniciar
+    assert_eq!(s.put("/api/modules/email", &admin, json!({ "enabled": false })).await.status, 200);
+    assert!(!running().contains(&"email".to_string()));
+    assert_eq!(s.put("/api/modules/email", &admin, json!({ "enabled": true })).await.status, 200);
+    assert_eq!(running(), vec!["email".to_string()]);
+    // Encender dos veces no duplica tareas
+    s.put("/api/modules/email", &admin, json!({ "enabled": true })).await;
+    assert_eq!(running(), vec!["email".to_string()]);
+    // Apagar la detiene
+    s.put("/api/modules/email", &admin, json!({ "enabled": false })).await;
+    assert!(running().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn musica_por_interes() {
     let s = Server::start().await;
     let admin = s.admin().await;

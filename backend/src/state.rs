@@ -72,6 +72,8 @@ pub struct AppState {
     pub restart_requested: Arc<AtomicBool>,
     /// Bus de eventos en tiempo real (WebSocket /api/live)
     pub events: crate::events::EventBus,
+    /// Tareas de fondo de los modulos encendidos
+    pub module_tasks: crate::module_tasks::ModuleTasks,
 }
 
 #[derive(Debug, Clone, Default)]
