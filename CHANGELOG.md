@@ -1,5 +1,11 @@
 # Changelog
 
+## [Sin publicar]
+
+### Cámaras
+
+- **La vista en vivo ya no se corta con «Error writing trailer: Broken pipe»**: cuando alguien entraba o salía de mirar (la grilla refresca cada segundo), LabNAS podía cortar la lectura a mitad de un cuadro, perdía la sincronía con ffmpeg y cerraba la conexión. Ahora el lector corre aparte, se resincroniza si hace falta y vacía la salida de ffmpeg hasta el final
+
 ## [3.2.1] — 2026-11-19
 
 Desde v3.2.0. **Actualización de seguridad recomendada.**

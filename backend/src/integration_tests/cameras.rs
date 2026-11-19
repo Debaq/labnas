@@ -82,6 +82,23 @@ async fn camaras_de_punta_a_punta() {
     let head = String::from_utf8_lossy(&seen[..200.min(seen.len())]).to_string();
     assert!(head.contains("--frame") && head.contains("image/jpeg"), "{}", head);
 
+    // Muchas vistas que entran y salen (la grilla refresca cada segundo) mientras otra
+    // sigue mirando: antes cada aviso podia cortar una lectura a mitad de cuadro, el
+    // flujo se desincronizaba y ffmpeg moria con "Broken pipe"
+    for _ in 0..40 {
+        let v = s.client().get(format!("{}/api/cameras/{}/stream", s.base, cam)).bearer_auth(&op).send().await.unwrap();
+        drop(v);
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let mut more = 0;
+    while more < 20_000 {
+        let chunk = tokio::time::timeout(Duration::from_secs(10), live.chunk()).await.unwrap().unwrap().expect("la vista sigue recibiendo cuadros");
+        more += chunk.len();
+    }
+    let list = s.get("/api/cameras", &op).await.json();
+    let me = list["cameras"].as_array().unwrap().iter().find(|c| c["id"] == cam.as_str()).unwrap().clone();
+    assert!(me["error"].is_null(), "sin error de ffmpeg: {}", me["error"]);
+
     // Grabar: todos ven el aviso; no se puede grabar dos veces a la vez
     let r = s.post(&format!("/api/cameras/{}/record", cam), &op, json!({})).await;
     assert_eq!(r.status, 200, "{}", r.text);

@@ -225,7 +225,9 @@ fn input_args(spec: &CamSpec) -> Vec<String> {
     let s = |v: &str| v.to_string();
     #[cfg(test)]
     if TEST_INPUT.load(Ordering::SeqCst) {
-        return vec![s("-f"), s("lavfi"), s("-i"), s("testsrc=size=320x240:rate=10")];
+        // Ruido: cuadros JPEG de mas de 64 KB (el buffer de un pipe), como una camara real;
+        // asi un cuadro llega en varias lecturas
+        return vec![s("-f"), s("lavfi"), s("-i"), s("testsrc2=size=1280x720:rate=10,noise=alls=80:allf=t")];
     }
     match &spec.input {
         Input::V4l2 { device, size } => {
@@ -304,38 +306,46 @@ impl<R: tokio::io::AsyncRead + Unpin> MjpegReader<R> {
         Self { r: BufReader::new(r) }
     }
 
+    /// Siguiente cuadro, o `None` solo cuando la salida termina (o falla la lectura).
+    /// Lee bytes, no texto: si quedara a mitad de un JPEG, se resincroniza en el
+    /// siguiente separador en vez de rendirse. No es cancelable a mitad de camino:
+    /// usarla desde una tarea propia, no dentro de un `select!`.
     pub async fn next_frame(&mut self) -> Option<Bytes> {
-        let mut line = String::new();
-        // Buscar el separador "--..."
+        let mut line = Vec::new();
         loop {
-            line.clear();
-            if self.r.read_line(&mut line).await.ok()? == 0 {
-                return None;
-            }
-            if line.starts_with("--") {
-                break;
-            }
-        }
-        let mut len: Option<usize> = None;
-        loop {
-            line.clear();
-            if self.r.read_line(&mut line).await.ok()? == 0 {
-                return None;
-            }
-            let l = line.trim();
-            if l.is_empty() {
-                break;
-            }
-            if let Some((k, v)) = l.split_once(':') {
-                if k.trim().eq_ignore_ascii_case("content-length") {
-                    len = v.trim().parse().ok();
+            // Buscar el separador "--..."
+            loop {
+                line.clear();
+                if self.r.read_until(b'\n', &mut line).await.ok()? == 0 {
+                    return None;
+                }
+                if line.starts_with(b"--") {
+                    break;
                 }
             }
+            let mut len: Option<usize> = None;
+            loop {
+                line.clear();
+                if self.r.read_until(b'\n', &mut line).await.ok()? == 0 {
+                    return None;
+                }
+                let l = String::from_utf8_lossy(&line);
+                let l = l.trim();
+                if l.is_empty() {
+                    break;
+                }
+                if let Some((k, v)) = l.split_once(':') {
+                    if k.trim().eq_ignore_ascii_case("content-length") {
+                        len = v.trim().parse().ok();
+                    }
+                }
+            }
+            // Parte sin largo valido: saltarla y seguir con la proxima
+            let Some(len) = len.filter(|n| *n > 0 && *n <= MAX_FRAME) else { continue };
+            let mut buf = vec![0u8; len];
+            self.r.read_exact(&mut buf).await.ok()?;
+            return Some(Bytes::from(buf));
         }
-        let len = len.filter(|n| *n > 0 && *n <= MAX_FRAME)?;
-        let mut buf = vec![0u8; len];
-        self.r.read_exact(&mut buf).await.ok()?;
-        Some(Bytes::from(buf))
     }
 }
 
@@ -414,12 +424,29 @@ async fn supervise(state: AppState, hub: Arc<Hub>, id: String) {
         let deadline = rec.as_ref().map(|r| r.started + r.max);
         let mut got_frame = false;
         let mut exited_alone = false;
-        if let Some(out) = stdout {
-            let mut reader = MjpegReader::new(out);
+        // El lector va en su propia tarea: dentro del select! una lectura cancelada a mitad
+        // de un cuadro desincronizaba el flujo, LabNAS cerraba el pipe y ffmpeg moria con
+        // "Broken pipe". Ademas vacia la salida hasta el final aunque nadie reciba (cuadros
+        // de mas se descartan), asi ffmpeg tampoco ve el pipe roto al detenerse
+        let reader_task = stdout.map(|out| {
+            let (tx, rx) = tokio::sync::mpsc::channel::<Bytes>(4);
+            let task = tokio::spawn(async move {
+                let mut reader = MjpegReader::new(out);
+                while let Some(f) = reader.next_frame().await {
+                    let _ = tx.try_send(f);
+                }
+            });
+            (task, rx)
+        });
+        let (read_handle, mut frames_rx) = match reader_task {
+            Some((t, rx)) => (Some(t), Some(rx)),
+            None => (None, None),
+        };
+        if let Some(frames) = frames_rx.as_mut() {
             loop {
                 let sleep_until = deadline.map(tokio::time::Instant::from_std);
                 tokio::select! {
-                    frame = reader.next_frame() => match frame {
+                    frame = frames.recv() => match frame {
                         Some(f) => {
                             if !got_frame {
                                 got_frame = true;
@@ -450,8 +477,13 @@ async fn supervise(state: AppState, hub: Arc<Hub>, id: String) {
             let _ = i.write_all(b"q").await;
             let _ = i.flush().await;
         }
+        drop(frames_rx);
         if tokio::time::timeout(Duration::from_secs(6), child.wait()).await.is_err() {
             let _ = child.kill().await;
+        }
+        if let Some(h) = read_handle {
+            // Termina al llegar al fin de la salida (ffmpeg ya salio o fue matado)
+            let _ = tokio::time::timeout(Duration::from_secs(2), h).await;
         }
         let stderr_text = err_task.await.unwrap_or_default();
 
@@ -500,6 +532,15 @@ mod tests {
         let mut r = MjpegReader::new(std::io::Cursor::new(data));
         assert_eq!(r.next_frame().await.as_deref(), Some(&b"ABC"[..]));
         assert_eq!(r.next_frame().await.as_deref(), Some(&b"XY"[..]));
+        assert_eq!(r.next_frame().await, None);
+
+        // Empezar a mitad de un JPEG (bytes no UTF-8, sin saltos) o con una parte sin
+        // largo: se resincroniza en el siguiente separador en vez de rendirse
+        let mut data = vec![0xFF, 0xD8, 0x00, 0xC3, 0x28, 0xFE, b'\n', 0x80, 0x81];
+        data.extend_from_slice(b"\r\n--ffmpeg\r\nContent-type: image/jpeg\r\n\r\n\xff\xd8\r\n");
+        data.extend_from_slice(b"--ffmpeg\r\nContent-length: 2\r\n\r\nOK\r\n");
+        let mut r = MjpegReader::new(std::io::Cursor::new(data));
+        assert_eq!(r.next_frame().await.as_deref(), Some(&b"OK"[..]));
         assert_eq!(r.next_frame().await, None);
     }
 
