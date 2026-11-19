@@ -22,6 +22,7 @@ const MODULE_ROUTE_PREFIXES: &[(&str, &[&str])] = &[
     ("sensors",    &["/api/sensors"]),
     ("terminal",   &["/api/terminal"]),
     ("music",      &["/api/music"]),
+    ("cameras",    &["/api/cameras"]),
 ];
 
 fn resolve_module_for_path(path: &str) -> Option<&'static str> {
@@ -82,6 +83,10 @@ pub fn bridge_denied(method: &Method, path: &str) -> Option<&'static str> {
     }
     if path == "/api/auth/register" {
         return Some("El registro de cuentas no esta disponible por el puente");
+    }
+    // Camaras: solo en la red del laboratorio (el aviso de grabacion si se ve)
+    if path.starts_with("/api/cameras") && path != "/api/cameras/recording-now" {
+        return Some("Las camaras solo estan disponibles en la red del laboratorio (LAN o Tailscale)");
     }
     if !is_public(path) && required_access(method, path) == Access::Admin {
         return Some("La administracion no esta disponible por el puente: usa la LAN o Tailscale");
@@ -181,6 +186,12 @@ pub fn required_access(method: &Method, path: &str) -> Access {
 
         // --- Reportes ---
         ("GET", ["reports", "config"]) | ("GET", ["reports", "mine"]) | ("POST", ["reports"]) => User,
+
+        // --- Camaras: ver y grabar operadores; configurar y borrar, admin ---
+        ("GET", ["cameras", "recording-now"]) => User,
+        ("GET", ["cameras", "detect"]) => Admin,
+        ("GET", ["cameras", ..]) => Operator,
+        ("POST", ["cameras", _, "record" | "stop" | "photo"]) => Operator,
 
         // --- Sensores ---
         ("GET", ["sensors", ..]) => User,
@@ -380,6 +391,21 @@ mod tests {
         assert_eq!(acc(Method::GET, "/api/printing/scan/devices"), PermPrint);
         assert_eq!(acc(Method::GET, "/api/printing/scan/sessions/abc/pages/0"), PermPrint);
         assert_eq!(acc(Method::POST, "/api/printing/scan/pages"), PermPrint);
+    }
+
+    #[test]
+    fn camaras() {
+        assert_eq!(acc(Method::GET, "/api/cameras/recording-now"), User);
+        assert_eq!(acc(Method::GET, "/api/cameras"), Operator);
+        assert_eq!(acc(Method::GET, "/api/cameras/abc/stream"), Operator);
+        assert_eq!(acc(Method::POST, "/api/cameras/abc/record"), Operator);
+        assert_eq!(acc(Method::POST, "/api/cameras/abc/photo"), Operator);
+        assert_eq!(acc(Method::GET, "/api/cameras/detect"), Admin);
+        assert_eq!(acc(Method::POST, "/api/cameras"), Admin);
+        assert_eq!(acc(Method::PUT, "/api/cameras/settings"), Admin);
+        assert_eq!(acc(Method::DELETE, "/api/cameras/recordings/x"), Admin);
+        assert!(bridge_denied(&Method::GET, "/api/cameras/abc/stream").is_some());
+        assert!(bridge_denied(&Method::GET, "/api/cameras/recording-now").is_none());
         assert_eq!(acc(Method::PUT, "/api/printers3d/abc"), Operator);
         assert_eq!(acc(Method::GET, "/api/printers3d/abc/status"), User);
         assert_eq!(acc(Method::POST, "/api/printers3d/queue"), User);

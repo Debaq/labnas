@@ -125,6 +125,11 @@ Módulos disponibles:
 - **Impresora de red (IPP)**: cada usuario agrega las impresoras de LabNAS en Windows, Linux o macOS con una dirección personal (puerto 8631, solo LAN). Windows usa su driver genérico, sin instalar nada; el trabajo queda contado a nombre del usuario
 - **Escáner desde la web** (SANE en el servidor, USB o red): página por página con vista previa, se descarga o se guarda en una carpeta del NAS como PDF o JPG. Instalación y drivers en `docs/ESCANER.md`
 
+### Cámaras (módulo opcional, viene apagado)
+- Webcams USB del servidor, cámaras IP (RTSP/MJPEG) y las de las impresoras 3D
+- Vista en vivo, fotos y grabaciones con audio en una carpeta del NAS
+- Aviso «● Grabando» para todos los usuarios, auditoría de cada vista y grabación. Guía en `docs/CAMARAS.md`
+
 ### Tareas y Proyectos
 - Crear tareas con asignación (`@user`, `@all`), fecha límite, proyecto
 - Chips clickeables para asignar — lista todos los usuarios del sistema

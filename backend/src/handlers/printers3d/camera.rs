@@ -68,3 +68,26 @@ pub async fn camera_snapshot(
         bytes,
     ))
 }
+
+/// URL de video continuo (MJPEG) a partir de la de snapshot: mjpg-streamer, que usan
+/// OctoPrint y Moonraker, sirve el stream en `?action=stream`
+pub(crate) fn stream_url_from_snapshot(url: &str) -> String {
+    url.replace("action=snapshot", "action=stream")
+}
+
+/// Camaras de las impresoras 3D para el modulo de camaras: (id impresora, nombre, URL del stream)
+pub async fn printer_stream_cameras(state: &AppState) -> Vec<(String, String, String)> {
+    let printers = db_op(&state.db, |conn| {
+        let mut stmt = conn
+            .prepare("SELECT id, name, ip, port, printer_type, labnas_decrypt(api_key), camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d ORDER BY \"order\"")
+            .map_err(|e| format!("DB: {}", e))?;
+        let rows = stmt.query_map([], row_to_printer).map_err(|e| format!("DB: {}", e))?;
+        Ok(rows.filter_map(|r| r.ok()).collect::<Vec<_>>())
+    })
+    .await
+    .unwrap_or_default();
+    printers
+        .into_iter()
+        .filter_map(|p| camera_url_for(&p).map(|u| (p.id.clone(), p.name.clone(), stream_url_from_snapshot(&u))))
+        .collect()
+}

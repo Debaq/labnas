@@ -46,6 +46,8 @@ fn spawn_for(state: &AppState, id: &str) -> Vec<JoinHandle<()>> {
         "network" => vec![tokio::spawn(handlers::network::network_scan_loop(s()))],
         // Impresoras de red (IPP): el puerto se abre y cierra con el modulo
         "printing" => vec![tokio::spawn(handlers::printing::ipp_server_loop(s()))],
+        // Camaras: cerrar grabaciones que un corte dejo abiertas
+        "cameras" => vec![tokio::spawn(handlers::cameras::startup_cleanup(s()))],
         _ => Vec::new(),
     }
 }
@@ -77,6 +79,10 @@ pub fn start(state: &AppState, id: &str) {
 
 /// Detiene las tareas de un modulo y deja su estado coherente
 pub async fn stop(state: &AppState, id: &str) {
+    // Las camaras no dependen de una tarea propia: se cierran siempre
+    if id == "cameras" {
+        handlers::cameras::shutdown(state);
+    }
     let taken = state.module_tasks.handles.lock().ok().and_then(|mut h| h.remove(id));
     let Some(taken) = taken else { return };
     for h in taken {

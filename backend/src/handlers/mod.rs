@@ -6,6 +6,7 @@ pub mod snapshots;
 pub mod webdav;
 pub mod trash;
 pub mod backups;
+pub mod cameras;
 pub mod restic;
 pub mod audit;
 pub mod auth;

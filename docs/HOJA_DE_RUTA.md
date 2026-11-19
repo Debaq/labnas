@@ -101,8 +101,8 @@ una sola página `SettingsPage.tsx` de ~1.850 líneas con 9 pestañas.
       en el caso de la terminal.
 - [x] **Las tareas de fondo solo miran el estado al arrancar.** *(corregido)* Encender el módulo
       Correo no inicia la revisión hasta reiniciar, y apagarlo no la detiene.
-- [ ] **No hay forma de que un módulo venga apagado por defecto** (lo necesita
-      `transparencia`).
+- [x] **No hay forma de que un módulo venga apagado por defecto** *(corregido: `DEFAULT_MODULES`
+      lleva el estado inicial; lo usa `cameras` y lo usará `transparencia`)*.
 
 ---
 
@@ -117,7 +117,7 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       privadas y públicas, si viene encendido, de qué otros depende y sus tareas de
       fondo. El menú del frontend se arma desde `/api/modules` en vez de una lista fija.
       Agregar un módulo pasa de cuatro lugares a uno.
-- [ ] **Encendido por defecto configurable** (`transparencia` viene apagado).
+- [x] **Encendido por defecto configurable** (`cameras` ya viene apagado; `transparencia` también lo hará).
 - [ ] **Dependencias entre módulos:** `transparencia` necesita `finanzas`, y
       `finanzas` usa `inventory` y `portfolio`. No se puede apagar uno del que otro
       depende sin avisar.

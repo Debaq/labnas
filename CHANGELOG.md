@@ -1,5 +1,19 @@
 # Changelog
 
+## [Sin publicar]
+
+### Cámaras
+
+- **Módulo Cámaras** (viene apagado; se activa en Configuración > Laboratorio): webcams USB del servidor y cámaras IP (RTSP o MJPEG) de la red, más las cámaras de las impresoras 3D, que aparecen solas. Grilla con imagen cada segundo, vista en vivo, **fotos** y **grabaciones con audio** (MP4 fragmentado, reproducible aunque se corte) en una carpeta del NAS, con duración máxima configurable
+- Un solo ffmpeg por cámara alimenta a todos los que miran y a la grabación; el micrófono solo se abre mientras se graba
+- **Transparencia:** ven y graban operadores y admin; **todos los usuarios ven el aviso «● Grabando»** con quién graba; cada vista, foto, grabación, descarga y borrado queda en la auditoría; el registro de grabaciones no se borra (el archivo sí, y queda «borrado por …»). Las cámaras no se exponen por el puente de internet
+- URL de cámaras IP cifrada en la base (migración 15) y nunca mostrada con la clave. Guía y permisos (grupos `video` y `audio`) en `docs/CAMARAS.md`
+- **Los módulos pueden venir apagados por defecto** (lo usa Cámaras)
+
+### Escáner
+
+- La lista de escáneres ya no muestra las webcams (backend `v4l` de SANE)
+
 ## [3.1.0] — 2026-11-19
 
 Desde v3.0.0.

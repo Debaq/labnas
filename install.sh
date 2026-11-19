@@ -223,11 +223,11 @@ OPTIONAL="rsync restic ffmpeg mpv yt-dlp lp scanimage smartctl"
 if [ "$WITH_DEPS" -eq 1 ]; then
     info "Instalando dependencias opcionales"
     if command -v pacman > /dev/null; then
-        pacman -S --needed --noconfirm rsync restic ffmpeg mpv yt-dlp cups sane smartmontools
+        pacman -S --needed --noconfirm rsync restic ffmpeg mpv yt-dlp cups sane alsa-utils smartmontools
     elif command -v apt-get > /dev/null; then
-        apt-get update -qq && apt-get install -y rsync restic ffmpeg mpv yt-dlp cups sane-utils smartmontools
+        apt-get update -qq && apt-get install -y rsync restic ffmpeg mpv yt-dlp cups sane-utils alsa-utils smartmontools
     elif command -v dnf > /dev/null; then
-        dnf install -y rsync restic ffmpeg mpv yt-dlp cups sane-backends smartmontools
+        dnf install -y rsync restic ffmpeg mpv yt-dlp cups sane-backends alsa-utils smartmontools
     else
         warn "Gestor de paquetes no reconocido: instala a mano $OPTIONAL"
     fi

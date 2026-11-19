@@ -525,3 +525,67 @@ export interface UserReport {
   created_at: string
   responded_at: string | null
 }
+
+// --- Camaras ---
+
+export interface RecordingNow {
+  camera_id: string
+  camera: string
+  by: string
+  since: string
+}
+
+export interface CameraView {
+  id: string
+  name: string
+  kind: 'usb' | 'ip' | 'printer3d'
+  device: string
+  url: string
+  resolution: string
+  audio: string
+  editable: boolean
+  live: boolean
+  viewers: number
+  error: string | null
+  recording: RecordingNow | null
+}
+
+export interface CamerasResponse {
+  cameras: CameraView[]
+  folder: string
+  max_minutes: number
+  ffmpeg: boolean
+}
+
+export interface CameraBody {
+  name: string
+  kind: 'usb' | 'ip'
+  device?: string
+  url?: string
+  resolution?: string
+  audio?: string
+}
+
+export interface CameraDeviceOption {
+  id: string
+  name: string
+}
+
+export interface CameraDetect {
+  video: CameraDeviceOption[]
+  audio: CameraDeviceOption[]
+}
+
+export interface CameraRecording {
+  id: string
+  camera_id: string
+  camera_name: string
+  kind: 'video' | 'foto'
+  username: string
+  path: string
+  started_at: string
+  ended_at: string | null
+  size: number | null
+  status: 'grabando' | 'ok' | 'error' | 'interrumpida' | 'borrado'
+  deleted_by: string | null
+}

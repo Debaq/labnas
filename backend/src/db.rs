@@ -224,6 +224,33 @@ const MIGRATIONS: &[&str] = &[
         token_enc TEXT NOT NULL,
         created_at TEXT NOT NULL
     );",
+    // 15: camaras (USB del servidor e IP) y registro de fotos y grabaciones. La URL va
+    // cifrada (puede llevar usuario y clave); los registros no se borran (trazabilidad)
+    "CREATE TABLE IF NOT EXISTS cameras (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        device TEXT NOT NULL DEFAULT '',
+        url TEXT,
+        resolution TEXT NOT NULL DEFAULT '',
+        audio TEXT NOT NULL DEFAULT '',
+        display_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS camera_recordings (
+        id TEXT PRIMARY KEY,
+        camera_id TEXT NOT NULL,
+        camera_name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        username TEXT NOT NULL,
+        path TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        size INTEGER,
+        status TEXT NOT NULL,
+        deleted_by TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_camera_recordings_started ON camera_recordings(started_at);",
 ];
 
 fn run_migrations(conn: &Connection) {
@@ -821,27 +848,31 @@ pub fn get_setting_u32(conn: &Connection, key: &str, default: u32) -> u32 {
 // Module helpers
 // ═══════════════════════════════════════
 
-const DEFAULT_MODULES: &[(&str, i32)] = &[
-    ("dashboard", 0),
-    ("files", 1),
-    ("network", 2),
-    ("printing", 3),
-    ("printers3d", 4),
-    ("tasks", 5),
-    ("notes", 6),
-    ("email", 7),
-    ("inventory", 8),
-    ("portfolio", 9),
-    ("sensors", 10),
-    ("terminal", 11),
-    ("music", 12),
+/// (id, orden, encendido al instalarse). Un modulo nuevo se agrega con su estado por
+/// defecto la primera vez que arranca la version que lo trae; despues manda el admin.
+const DEFAULT_MODULES: &[(&str, i32, bool)] = &[
+    ("dashboard", 0, true),
+    ("files", 1, true),
+    ("network", 2, true),
+    ("printing", 3, true),
+    ("printers3d", 4, true),
+    ("tasks", 5, true),
+    ("notes", 6, true),
+    ("email", 7, true),
+    ("inventory", 8, true),
+    ("portfolio", 9, true),
+    ("sensors", 10, true),
+    ("terminal", 11, true),
+    ("music", 12, true),
+    // Camaras: apagado hasta que el admin lo active (privacidad)
+    ("cameras", 13, false),
 ];
 
 fn seed_modules(conn: &Connection) {
-    for (id, order) in DEFAULT_MODULES {
+    for (id, order, enabled) in DEFAULT_MODULES {
         conn.execute(
-            "INSERT OR IGNORE INTO modules (id, enabled, display_order) VALUES (?1, 1, ?2)",
-            params![id, order],
+            "INSERT OR IGNORE INTO modules (id, enabled, display_order) VALUES (?1, ?2, ?3)",
+            params![id, enabled, order],
         ).ok();
     }
 }

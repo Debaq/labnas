@@ -1,10 +1,11 @@
 import { Suspense, lazy, useState, useEffect } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight, Mail, Download, Package, GraduationCap, Thermometer, Loader2 } from 'lucide-react'
+import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight, Mail, Download, Package, GraduationCap, Thermometer, Loader2, Video } from 'lucide-react'
 import { useViaBridge } from '../lib/bridge'
 import { useAuth } from '../auth/AuthContext'
 import { shutdownServer, getBranding, fetchHealth, checkUpdate } from '../api'
 import MusicPanel from './MusicPanel'
+import RecordingBanner from './RecordingBanner'
 import type { IconComponent } from '../lib/icons'
 
 const pageTitles: Record<string, string> = {
@@ -127,6 +128,7 @@ export default function Layout() {
     portfolio:  { to: '/portfolio',  label: 'Portafolio',      icon: GraduationCap },
     sensors:    { to: '/sensors',    label: 'Sensores',        icon: Thermometer },
     terminal:   { to: '/terminal',   label: 'Terminal',        icon: TerminalSquare },
+    cameras:    { to: '/cameras',    label: 'Camaras',         icon: Video },
   }
 
   const viaBridge = useViaBridge()
@@ -138,6 +140,8 @@ export default function Layout() {
     .filter(m => {
       if (m.id === 'terminal') return can('terminal') && !viaBridge
       if (m.id === 'printing') return can('impresion')
+      // Camaras: solo operadores y admin (en la LAN)
+      if (m.id === 'cameras') return (user?.role === 'admin' || user?.role === 'operador') && !viaBridge
       return true
     })
     .map(m => ({ ...moduleNav[m.id], show: true }))
@@ -333,6 +337,8 @@ export default function Layout() {
             <span className="text-xs opacity-80">Click para actualizar</span>
           </div>
         )}
+
+        {!isPending && isModuleEnabled('cameras') && <RecordingBanner />}
 
         {/* Content */}
         <main className="flex-1 overflow-auto relative" style={{ backgroundColor: 'var(--bg-primary)' }}>
