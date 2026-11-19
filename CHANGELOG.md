@@ -1,6 +1,12 @@
 # Changelog
 
-## [Sin publicar]
+## [3.2.1] — 2026-11-19
+
+Desde v3.2.0. **Actualización de seguridad recomendada.**
+
+### Escáner
+
+- **Tamaño de hoja** (Carta, A4, Oficio, Legal; solo los que caben en el escáner), Carta por defecto. Antes se escaneaba el área máxima que declara el driver, y la Brother DCP-165C (brscan3 declara 215,9 × 355,6 mm con un vidrio A4) fallaba con `sane_start: Invalid argument`. Si el escáner rechaza el tamaño, el mensaje lo dice
 
 ### Seguridad
 
