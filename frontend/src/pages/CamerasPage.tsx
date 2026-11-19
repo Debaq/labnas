@@ -12,6 +12,7 @@ import { useAuth } from '../auth/AuthContext'
 import { useEvent } from '../events/useEvents'
 import { useToast } from '../components/ToastContext'
 import { errorMessage } from '../lib/errors'
+import DetectionSection from '../components/DetectionSection'
 
 const card = { backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }
 const input = { backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border)' }
@@ -350,6 +351,9 @@ export default function CamerasPage() {
           ))}
         </div>
       )}
+
+      {/* Deteccion con IA */}
+      <DetectionSection cameras={data.cameras} isAdmin={isAdmin} />
 
       {/* Fotos y grabaciones */}
       <div>

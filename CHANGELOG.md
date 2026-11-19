@@ -1,5 +1,15 @@
 # Changelog
 
+## [Sin publicar]
+
+### Detección con IA en cámaras
+
+- **Cámaras > Detección con IA**: reglas por cámara para detectar **personas**, **objetos** elegidos (80 tipos: notebook, mochila, celular, bicicleta…) o **movimiento**, con **horario** (también noches que cruzan la medianoche), confianza mínima y pausa entre avisos. «Probar ahora» muestra lo que detecta en la imagen actual
+- Al detectar: **foto con lo detectado marcado**, **aviso por Telegram con foto** a los admins y **clip de video**; todo queda en el registro de fotos y grabaciones, en el historial de detecciones (que no se borra) y en la auditoría
+- **Todo corre en el NAS**: YOLOX-nano (Apache-2.0, ~4 MB) con tract, sin servicios externos. El modelo se descarga verificado la primera vez que se usa
+- **Transparencia**: mientras una regla está activa, todos ven el aviso «Detección activa». Guía y privacidad en `docs/DETECCION.md`
+- Migración 17 (`camera_detectors`, `camera_detections`)
+
 ## [3.2.2] — 2026-11-19
 
 Desde v3.2.1.

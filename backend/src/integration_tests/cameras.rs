@@ -154,3 +154,106 @@ async fn camaras_de_punta_a_punta() {
 
     TEST_INPUT.store(false, Ordering::SeqCst);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn deteccion_con_ia() {
+    use crate::handlers::cameras::detect::TEST_DETECTIONS;
+    use crate::handlers::cameras::vision::Detection;
+
+    let s = Server::start().await;
+    let admin = s.admin().await;
+    let op = s.user(&admin, "op", "operador").await;
+    let obs = s.user(&admin, "obs", "observador").await;
+    assert_eq!(s.put("/api/modules/cameras", &admin, json!({ "enabled": true })).await.status, 200);
+    let r = s.post("/api/cameras", &admin, json!({ "name": "Sala", "kind": "usb", "device": "/dev/video0", "resolution": "640x480" })).await;
+    let cam = r.json()["id"].as_str().unwrap().to_string();
+
+    // Validacion y permisos
+    let regla = json!({
+        "camera_id": cam, "kind": "personas", "min_score": 0.5, "interval_s": 1, "cooldown_s": 30,
+        "schedule": null, "actions": { "photo": true, "telegram": false, "clip_s": 3 }, "enabled": true,
+    });
+    assert_eq!(s.post("/api/cameras/detectors", &op, regla.clone()).await.status, 403);
+    let mut mala = regla.clone();
+    mala["kind"] = json!("objetos");
+    assert_eq!(s.post("/api/cameras/detectors", &admin, mala).await.status, 400, "objetos sin clases");
+    let mut otra = regla.clone();
+    otra["camera_id"] = json!("no-existe");
+    assert_eq!(s.post("/api/cameras/detectors", &admin, otra).await.status, 404);
+    assert_eq!(s.get("/api/cameras/detectors", &obs).await.status, 403);
+
+    if !ffmpeg_ok() {
+        eprintln!("ffmpeg no instalado: se omite la parte de video");
+        return;
+    }
+    TEST_INPUT.store(true, Ordering::SeqCst);
+    std::fs::create_dir_all(s.home.join("Grabaciones")).unwrap();
+    assert_eq!(s.put("/api/cameras/settings", &admin, json!({ "folder": s.path("Grabaciones"), "max_minutes": 1 })).await.status, 200);
+    *TEST_DETECTIONS.lock().unwrap() =
+        Some(vec![Detection { label: "persona".into(), score: 0.87, x: 10.0, y: 10.0, w: 50.0, h: 80.0, class: 0 }]);
+    // El gestor de tareas queda inactivo en los tests: el supervisor se lanza a mano
+    let supervisor = tokio::spawn(crate::handlers::cameras::detect::detection_loop(s.state.clone()));
+
+    // Probar sin guardar: devuelve la foto marcada
+    let r = s.post("/api/cameras/detectors/test", &admin, regla.clone()).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    assert_eq!(r.json()["detections"][0]["label"], "persona");
+    assert!(r.json()["image"].as_str().unwrap().len() > 1000);
+
+    // Regla activa: todos ven el aviso y se dispara con sus acciones
+    let r = s.post("/api/cameras/detectors", &admin, regla.clone()).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    let rule_id = r.json()["id"].as_str().unwrap().to_string();
+    wait_until(15_000, || async {
+        let now = s.get("/api/cameras/detecting-now", &obs).await.json();
+        now.as_array().is_some_and(|v| v.len() == 1 && v[0]["camera"] == "Sala" && v[0]["kinds"][0] == "personas")
+    })
+    .await;
+    wait_until(20_000, || async { !s.get("/api/cameras/detections", &op).await.json().as_array().unwrap().is_empty() }).await;
+    let det = s.get("/api/cameras/detections", &op).await.json()[0].clone();
+    assert_eq!((det["camera_name"].as_str(), det["kind"].as_str()), (Some("Sala"), Some("personas")));
+    assert_eq!(det["labels"], "persona (87%)");
+    let recs = s.get("/api/cameras/recordings", &op).await.json();
+    let foto = recs.as_array().unwrap().iter().find(|r| r["id"] == det["photo_id"]).expect("foto registrada");
+    assert_eq!(foto["username"], "IA (personas)");
+    assert!(std::path::Path::new(foto["path"].as_str().unwrap()).exists());
+    assert!(recs.as_array().unwrap().iter().any(|r| r["id"] == det["clip_id"] && r["kind"] == "video"), "clip iniciado");
+    let audit = s.get("/api/audit?q=detecto", &admin).await.json();
+    assert!(audit[0]["details"].as_str().unwrap().contains("persona (87%)"));
+
+    // Pausa entre avisos: sigue viendo la persona, pero no repite en 30 s
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(s.get("/api/cameras/detections", &op).await.json().as_array().unwrap().len(), 1);
+    let rules = s.get("/api/cameras/detectors", &op).await.json();
+    assert_eq!(rules["rules"][0]["active_now"], true);
+    assert_eq!(rules["rules"][0]["last_labels"], "persona (87%)");
+
+    // Pausarla: deja de vigilar y el aviso desaparece
+    let mut pausada = regla.clone();
+    pausada["enabled"] = json!(false);
+    assert_eq!(s.put(&format!("/api/cameras/detectors/{}", rule_id), &admin, pausada).await.status, 200);
+    wait_until(10_000, || async { s.get("/api/cameras/detecting-now", &obs).await.json().as_array().unwrap().is_empty() }).await;
+
+    // Movimiento (sin IA): el video sintetico cambia en cada cuadro
+    *TEST_DETECTIONS.lock().unwrap() = None;
+    let mov = json!({
+        "camera_id": cam, "kind": "movimiento", "min_score": 0.02, "interval_s": 1, "cooldown_s": 60,
+        "schedule": null, "actions": { "photo": true, "telegram": false, "clip_s": 0 }, "enabled": true,
+    });
+    let r = s.post("/api/cameras/detectors/test", &admin, mov.clone()).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    assert_eq!(r.json()["detections"][0]["label"], "movimiento");
+    assert_eq!(s.post("/api/cameras/detectors", &admin, mov).await.status, 200);
+    wait_until(20_000, || async {
+        s.get("/api/cameras/detections", &op).await.json().as_array().unwrap().iter().any(|d| d["kind"] == "movimiento")
+    })
+    .await;
+
+    // Borrar la regla conserva el historial
+    assert_eq!(s.delete(&format!("/api/cameras/detectors/{}", rule_id), &admin).await.status, 204);
+    assert_eq!(s.get("/api/cameras/detections", &op).await.json().as_array().unwrap().len(), 2);
+
+    supervisor.abort();
+    assert_eq!(s.put("/api/modules/cameras", &admin, json!({ "enabled": false })).await.status, 200);
+    TEST_INPUT.store(false, Ordering::SeqCst);
+}

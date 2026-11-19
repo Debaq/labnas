@@ -47,7 +47,11 @@ fn spawn_for(state: &AppState, id: &str) -> Vec<JoinHandle<()>> {
         // Impresoras de red (IPP): el puerto se abre y cierra con el modulo
         "printing" => vec![tokio::spawn(handlers::printing::ipp_server_loop(s()))],
         // Camaras: cerrar grabaciones que un corte dejo abiertas
-        "cameras" => vec![tokio::spawn(handlers::cameras::startup_cleanup(s()))],
+        // y vigilar con las reglas de deteccion con IA
+        "cameras" => vec![
+            tokio::spawn(handlers::cameras::startup_cleanup(s())),
+            tokio::spawn(handlers::cameras::detect::detection_loop(s())),
+        ],
         _ => Vec::new(),
     }
 }

@@ -49,8 +49,9 @@ pub async fn notify_admins(state: &AppState, text: &str) -> usize {
     notify_chats_where(state, "role = 'admin'", text).await
 }
 
-pub(super) async fn notify_chats_where(state: &AppState, where_sql: &'static str, text: &str) -> usize {
-    let tg_data = crate::db::db_op(&state.db, move |conn| {
+/// Token del bot y chats que cumplen `where_sql` (None si no hay bot)
+async fn tg_targets(state: &AppState, where_sql: &'static str) -> Option<(String, Vec<i64>)> {
+    crate::db::db_op(&state.db, move |conn| {
         let token: Option<String> = conn
             .query_row("SELECT labnas_decrypt(bot_token) FROM notification_config WHERE id = 1", [], |row| row.get(0))
             .ok()
@@ -68,8 +69,39 @@ pub(super) async fn notify_chats_where(state: &AppState, where_sql: &'static str
     })
     .await
     .ok()
-    .flatten();
+    .flatten()
+}
 
+/// Envia una foto (JPEG) con texto a los chats de Telegram con rol admin.
+/// Devuelve a cuantos chats llego.
+pub async fn notify_admins_photo(state: &AppState, jpeg: Vec<u8>, caption: &str) -> usize {
+    let Some((token, chats)) = tg_targets(state, "role = 'admin'").await else { return 0 };
+    let url = format!("https://api.telegram.org/bot{}/sendPhoto", token);
+    let mut sent = 0;
+    for chat_id in chats {
+        let part = reqwest::multipart::Part::bytes(jpeg.clone()).file_name("foto.jpg").mime_str("image/jpeg");
+        let Ok(part) = part else { continue };
+        let form = reqwest::multipart::Form::new()
+            .text("chat_id", chat_id.to_string())
+            .text("caption", crate::textutil::take_chars(caption, 1000))
+            .part("photo", part);
+        let ok = state
+            .http_client
+            .post(&url)
+            .multipart(form)
+            .timeout(std::time::Duration::from_secs(30))
+            .send()
+            .await
+            .is_ok_and(|r| r.status().is_success());
+        if ok {
+            sent += 1;
+        }
+    }
+    sent
+}
+
+pub(super) async fn notify_chats_where(state: &AppState, where_sql: &'static str, text: &str) -> usize {
+    let tg_data = tg_targets(state, where_sql).await;
     let mut sent = 0;
     if let Some((token, chats)) = tg_data {
         for chat_id in chats {

@@ -6,6 +6,7 @@ import { useAuth } from '../auth/AuthContext'
 import { shutdownServer, getBranding, fetchHealth, checkUpdate } from '../api'
 import MusicPanel from './MusicPanel'
 import RecordingBanner from './RecordingBanner'
+import DetectionBanner from './DetectionBanner'
 import type { IconComponent } from '../lib/icons'
 
 const pageTitles: Record<string, string> = {
@@ -339,6 +340,7 @@ export default function Layout() {
         )}
 
         {!isPending && isModuleEnabled('cameras') && <RecordingBanner />}
+        {!isPending && isModuleEnabled('cameras') && <DetectionBanner />}
 
         {/* Content */}
         <main className="flex-1 overflow-auto relative" style={{ backgroundColor: 'var(--bg-primary)' }}>

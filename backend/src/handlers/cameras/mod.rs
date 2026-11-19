@@ -24,6 +24,8 @@ use crate::events::Audience;
 use crate::state::{AppState, SessionInfo};
 
 pub mod hub;
+pub mod vision;
+pub mod detect;
 use hub::{Audio, CamSpec, Input};
 
 type ApiError = (StatusCode, String);
@@ -667,31 +669,38 @@ pub async fn start_record(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let cam = find_camera(&state, &id).await?;
+    let (rid, path) = begin_recording(&state, &cam, &session.username, None).await?;
+    Ok(Json(serde_json::json!({ "id": rid, "path": path })))
+}
+
+/// Empieza a grabar (boton "Grabar" o un clip de la deteccion con IA). `max`: duracion
+/// propia; sin ella, la maxima configurada
+async fn begin_recording(state: &AppState, cam: &CameraRow, user: &str, max: Option<Duration>) -> Result<(String, PathBuf), ApiError> {
     if !ffmpeg_available().await {
         return Err(bad("ffmpeg no esta instalado en el servidor"));
     }
-    let (dir, max_minutes) = target_dir(&state, &cam).await?;
+    let (dir, max_minutes) = target_dir(state, cam).await?;
     let base = dir.parent().map(|p| p.to_path_buf()).unwrap_or(dir.clone());
     if free_bytes(&base).is_some_and(|f| f < MIN_FREE_BYTES) {
         return Err((StatusCode::INSUFFICIENT_STORAGE, "Queda menos de 1 GB libre en la carpeta de grabaciones".into()));
     }
-    let h = hub::ensure(&state, cam.spec());
+    let h = hub::ensure(state, cam.spec());
     let rid = uuid::Uuid::new_v4().simple().to_string();
-    let path = dir.join(format!("{}.mp4", file_stamp(&session.username)));
+    let path = dir.join(format!("{}.mp4", file_stamp(user)));
     let rec = hub::ActiveRecording {
         recording_id: rid.clone(),
         camera: cam.name.clone(),
         path: path.clone(),
-        username: session.username.clone(),
+        username: user.to_string(),
         started: Instant::now(),
         started_at: chrono::Local::now().to_rfc3339(),
-        max: Duration::from_secs(max_minutes as u64 * 60),
+        max: max.unwrap_or(Duration::from_secs(max_minutes as u64 * 60)),
     };
     hub::start_recording(&h, rec).map_err(|e| (StatusCode::CONFLICT, e))?;
-    insert_record(&state, &rid, &cam, "video", &session.username, &path, None).await?;
-    state.log_activity("Camara", &format!("Empezo a grabar con {} ({})", cam.name, path.display()), &session.username).await;
-    publish_recording_state(&state);
-    Ok(Json(serde_json::json!({ "id": rid, "path": path })))
+    insert_record(state, &rid, cam, "video", user, &path, None).await?;
+    state.log_activity("Camara", &format!("Empezo a grabar con {} ({})", cam.name, path.display()), user).await;
+    publish_recording_state(state);
+    Ok((rid, path))
 }
 
 /// POST /api/cameras/{id}/stop
@@ -878,6 +887,7 @@ pub async fn startup_cleanup(state: AppState) {
 
 /// Al apagar el modulo: cierra grabaciones y camaras
 pub fn shutdown(state: &AppState) {
+    detect::shutdown();
     hub::stop_all();
     publish_recording_state(state);
 }

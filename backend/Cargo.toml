@@ -54,6 +54,9 @@ ciborium = "0.2.2"
 rsa = { version = "0.10.0", default-features = false, features = ["std", "pkcs1v15"] }
 minisign-verify = "0.3.0"
 jpeg-encoder = "0.7"
+# Deteccion con IA en camaras: ONNX en Rust puro (sirve en el binario estatico musl)
+tract-onnx = "0.23"
+zune-jpeg = "0.4"
 
 [features]
 default = []

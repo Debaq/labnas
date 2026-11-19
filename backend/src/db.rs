@@ -253,6 +253,34 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_camera_recordings_started ON camera_recordings(started_at);",
     // 16: bitacora inalterable (ver ledger.rs)
     MIGRATION_LEDGER,
+    // 17: deteccion con IA en camaras (reglas y registro; el registro no se borra)
+    "CREATE TABLE IF NOT EXISTS camera_detectors (
+        id TEXT PRIMARY KEY,
+        camera_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        classes TEXT NOT NULL DEFAULT '[]',
+        min_score REAL NOT NULL,
+        interval_s INTEGER NOT NULL,
+        schedule TEXT,
+        actions TEXT NOT NULL,
+        cooldown_s INTEGER NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS camera_detections (
+        id TEXT PRIMARY KEY,
+        detector_id TEXT NOT NULL,
+        camera_id TEXT NOT NULL,
+        camera_name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        labels TEXT NOT NULL,
+        score REAL NOT NULL,
+        at TEXT NOT NULL,
+        photo_id TEXT,
+        clip_id TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_camera_detections_at ON camera_detections(at);",
 ];
 
 /// Migracion 16. Publicada: no modificar (ver `MIGRATIONS`).
