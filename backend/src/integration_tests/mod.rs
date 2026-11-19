@@ -21,5 +21,6 @@ mod setup;
 mod shares;
 mod twofa;
 mod smart;
+mod snapshots;
 mod timelapse;
 mod webdav;

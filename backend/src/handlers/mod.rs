@@ -2,6 +2,7 @@ pub mod twofa;
 pub mod passkeys;
 pub mod setup;
 pub mod smart;
+pub mod snapshots;
 pub mod webdav;
 pub mod trash;
 pub mod backups;

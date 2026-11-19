@@ -288,6 +288,7 @@ Opciones (tras `sudo bash -s --`, o descargando el script):
 | `--user NOMBRE` | Usuario del servicio (por defecto quien ejecutó `sudo`) |
 | `--version vX.Y.Z` | Versión concreta en vez de la última |
 | `--dir RUTA` | Directorio de instalación (por defecto `/opt/labnas`) |
+| `--no-hardening` | Servicio sin las restricciones de systemd (por si algo de la terminal las necesita) |
 | `--deps` | Instala dependencias opcionales (rsync, restic, ffmpeg, mpv, yt-dlp, cups, smartmontools) |
 | `--smart` | Configura el lector SMART (`setup-smart.sh`) |
 | `--tarball ARCHIVO` | Instala desde un tarball local (necesita `ARCHIVO.sha256` al lado) |
@@ -590,6 +591,8 @@ Borrar desde el explorador **mueve a la papelera** (`.labnas-trash/`, oculta, en
 - Además, `labnas.db` se copia sola cada día en `~/.labnas/backups/` (se conservan 7)
 
 Requiere `rsync` en el servidor.
+
+**Snapshots btrfs/ZFS:** si los datos están en un subvolumen btrfs o un dataset ZFS, LabNAS puede tomar snapshots instantáneos cada N horas (casi no ocupan espacio y protegen contra borrados y ransomware). Una vez: `sudo bash setup-snapshots.sh <usuario-del-servicio> /ruta/al/subvolumen`; después, frecuencia y retención en **Configuración > Respaldos > Snapshots**. Para recuperar algo, cópialo desde `<carpeta>/.snapshots/` (btrfs) o `<carpeta>/.zfs/snapshot/` (ZFS).
 
 **Repositorios restic (cifrados, fuera del laboratorio):** al crear la tarea, elige el tipo «restic». El destino puede ser una ruta local o un disco externo, `sftp:usuario@otro-equipo:/ruta`, `s3:...`, `b2:bucket:carpeta` o `rest:https://...`.
 - Los datos se cifran antes de salir y se deduplican: solo se sube lo nuevo

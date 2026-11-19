@@ -14,6 +14,7 @@
 #   --purge           con --uninstall: borrar tambien los datos (~/.labnas del usuario; pide confirmacion)
 #   --tarball ARCHIVO instalar desde un tarball local (sin descargar; requiere ARCHIVO.sha256)
 #   --no-systemd      no crear el servicio (solo instalar archivos)
+#   --no-hardening    servicio sin las restricciones de systemd (si algo de la terminal lo necesita)
 #   -h, --help        esta ayuda
 
 set -euo pipefail
@@ -28,6 +29,7 @@ SERVICE_USER="${SUDO_USER:-}"
 INSTALL_DIR="/opt/labnas"
 VERSION=""
 WITH_DEPS=0
+HARDENING=1
 WITH_SMART=0
 UNINSTALL=0
 PURGE=0
@@ -62,6 +64,7 @@ Instalador de LabNAS
   --purge           con --uninstall: borrar tambien los datos (~/.labnas del usuario; pide confirmacion)
   --tarball ARCHIVO instalar desde un tarball local (requiere ARCHIVO.sha256)
   --no-systemd      no crear el servicio (solo instalar archivos)
+  --no-hardening    servicio sin las restricciones de systemd (si algo de la terminal lo necesita)
   --yes             no preguntar (para --purge sin terminal)
   -h, --help        esta ayuda
 EOF
@@ -79,6 +82,7 @@ while [ $# -gt 0 ]; do
         --purge) PURGE=1; shift ;;
         --tarball) TARBALL="${2:?falta el archivo}"; shift 2 ;;
         --no-systemd) USE_SYSTEMD=0; shift ;;
+        --no-hardening) HARDENING=0; shift ;;
         --yes) ASSUME_YES=1; shift ;;
         -h | --help) usage ;;
         *) die "Opcion desconocida: $1 (usa --help)" ;;
@@ -235,6 +239,29 @@ fi
 
 # ─── Servicio systemd ───
 
+# Restricciones que no rompen nada de LabNAS (terminal con sudo, SMART, musica, CUPS, respaldos).
+# Se omiten a proposito NoNewPrivileges y CapabilityBoundingSet (romperian sudo en la terminal y
+# el lector de SMART) y ProtectSystem/ProtectHome (la terminal del admin debe poder editar el sistema).
+hardening_block() {
+    [ "$HARDENING" -eq 1 ] || return 0
+    cat << 'EOF'
+# Endurecimiento (desactivar con install.sh --no-hardening)
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictNamespaces=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
+EOF
+}
+
 write_unit() {
     cat << EOF
 [Unit]
@@ -251,6 +278,7 @@ Restart=on-failure
 RestartSec=5
 # Solo ping (escaner de red) y puertos 80/443; nada mas de root
 AmbientCapabilities=CAP_NET_RAW CAP_NET_BIND_SERVICE
+$(hardening_block)
 
 [Install]
 WantedBy=multi-user.target

@@ -89,6 +89,7 @@ async fn main() {
     tokio::spawn(handlers::backups::backup_scheduler_loop(state.clone()));
     tokio::spawn(handlers::trash::trash_cleanup_loop(state.clone()));
     tokio::spawn(handlers::smart::smart_monitor_loop(state.clone()));
+    tokio::spawn(handlers::snapshots::snapshot_loop(state.clone()));
 
     // Background tasks: condicionales por modulo
     {
@@ -544,6 +545,9 @@ fn api_routes() -> Router<AppState> {
         .route("/api/tls/cert.pem", get(tls::download_cert))
         .route("/api/setup", get(handlers::setup::get_setup))
         .route("/api/setup/done", post(handlers::setup::finish_setup))
+        .route("/api/snapshots", get(handlers::snapshots::get_snapshots))
+        .route("/api/snapshots/config", put(handlers::snapshots::set_config))
+        .route("/api/snapshots/now", post(handlers::snapshots::snapshot_now))
         .route("/api/system/smart", get(handlers::smart::get_smart))
         .route("/api/system/smart", put(handlers::smart::set_smart))
         .route("/api/system/rollback", get(handlers::system::rollback_status))

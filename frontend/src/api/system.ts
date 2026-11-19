@@ -387,3 +387,29 @@ export async function finishSetup(): Promise<void> {
   const res = await api('/api/setup/done', { method: 'POST' })
   if (!res.ok) throw new Error((await res.text()) || 'Error al terminar el asistente')
 }
+
+// --- Snapshots btrfs/ZFS (admin) ---
+
+export interface SnapshotsInfo {
+  ready: boolean
+  error: string | null
+  config: { interval_hours: number; keep: number }
+  paths: { path: string; snapshots: string[]; error: string | null }[]
+}
+
+export async function fetchSnapshots(): Promise<SnapshotsInfo> {
+  return jsonOrThrow(await api('/api/snapshots'), 'Error al obtener snapshots')
+}
+
+export async function saveSnapshotConfig(config: { interval_hours: number; keep: number }): Promise<void> {
+  const res = await api('/api/snapshots/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al guardar')
+}
+
+export async function snapshotNow(): Promise<{ created: string[]; errors: string[] }> {
+  return jsonOrThrow(await api('/api/snapshots/now', { method: 'POST' }), 'Error al crear snapshots')
+}

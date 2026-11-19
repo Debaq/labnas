@@ -1,0 +1,95 @@
+#!/bin/sh
+# labnas-snapshot: snapshots btrfs/ZFS para LabNAS.
+# Se instala como root en /usr/local/lib/labnas/snapshot y es lo unico que el
+# usuario del servicio puede ejecutar con sudo para esto (ver setup-snapshots.sh).
+# Solo actua sobre las rutas listadas en /etc/labnas/snapshot-paths (las elige el
+# admin al instalar) y solo crea, lista o borra snapshots llamados labnas-AAAAMMDD-HHMMSS.
+#
+#   labnas-snapshot paths
+#   labnas-snapshot create <ruta>
+#   labnas-snapshot list   <ruta>
+#   labnas-snapshot delete <ruta> <labnas-AAAAMMDD-HHMMSS>
+set -eu
+
+ALLOW=/etc/labnas/snapshot-paths
+
+die() { echo "$*" >&2; exit 2; }
+
+[ -r "$ALLOW" ] || die "sin rutas configuradas ($ALLOW)"
+
+allowed() {
+    # coincidencia exacta de linea (sin comodines)
+    grep -Fxq -- "$1" "$ALLOW"
+}
+
+fstype() {
+    stat -f -c %T "$1" 2> /dev/null
+}
+
+zfs_dataset() {
+    zfs list -H -o name -- "$1" 2> /dev/null
+}
+
+cmd="${1:-}"
+case "$cmd" in
+    paths)
+        grep -v '^[[:space:]]*\(#\|$\)' "$ALLOW" || true
+        exit 0
+        ;;
+    create | list | delete) ;;
+    *) die "uso: labnas-snapshot paths | create <ruta> | list <ruta> | delete <ruta> <nombre>" ;;
+esac
+
+path="${2:-}"
+case "$path" in /*) ;; *) die "ruta invalida" ;; esac
+allowed "$path" || die "ruta no habilitada para snapshots: $path"
+[ -d "$path" ] || die "no existe: $path"
+
+type="$(fstype "$path")"
+case "$type" in
+    btrfs)
+        btrfs subvolume show -- "$path" > /dev/null 2>&1 || die "$path no es un subvolumen btrfs"
+        snapdir="$path/.snapshots"
+        case "$cmd" in
+            create)
+                mkdir -p -- "$snapdir"
+                name="labnas-$(date +%Y%m%d-%H%M%S)"
+                btrfs subvolume snapshot -r -- "$path" "$snapdir/$name" > /dev/null
+                echo "$name"
+                ;;
+            list)
+                [ -d "$snapdir" ] || exit 0
+                for d in "$snapdir"/labnas-*; do
+                    [ -d "$d" ] && basename -- "$d"
+                done | sort
+                ;;
+            delete)
+                name="${3:-}"
+                echo "$name" | grep -Eqx 'labnas-[0-9]{8}-[0-9]{6}' || die "nombre de snapshot invalido"
+                [ -d "$snapdir/$name" ] || die "no existe: $name"
+                btrfs subvolume delete -- "$snapdir/$name" > /dev/null
+                ;;
+        esac
+        ;;
+    zfs)
+        ds="$(zfs_dataset "$path")"
+        [ -n "$ds" ] || die "$path no es un dataset ZFS"
+        case "$cmd" in
+            create)
+                name="labnas-$(date +%Y%m%d-%H%M%S)"
+                zfs snapshot -- "$ds@$name"
+                echo "$name"
+                ;;
+            list)
+                zfs list -H -t snapshot -o name -s creation -- "$ds" 2> /dev/null \
+                    | sed -n "s|^$ds@\(labnas-[0-9]\{8\}-[0-9]\{6\}\)$|\1|p"
+                ;;
+            delete)
+                name="${3:-}"
+                echo "$name" | grep -Eqx 'labnas-[0-9]{8}-[0-9]{6}' || die "nombre de snapshot invalido"
+                zfs destroy -- "$ds@$name"
+                ;;
+        esac
+        ;;
+    *) die "$path no esta en btrfs ni ZFS (es $type)" ;;
+esac

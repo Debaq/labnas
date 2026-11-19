@@ -325,6 +325,7 @@ mod tests {
         assert_eq!(acc(Method::PUT, "/api/files/webdav"), Admin);
         assert_eq!(acc(Method::POST, "/api/network/wake/aa:bb:cc:dd:ee:ff"), Operator);
         assert_eq!(acc(Method::GET, "/api/system/smart"), Admin);
+        assert_eq!(acc(Method::POST, "/api/snapshots/now"), Admin);
         assert_eq!(acc(Method::PUT, "/api/system/tls"), Admin);
         assert_eq!(acc(Method::GET, "/api/ai/config"), Admin);
         assert_eq!(acc(Method::PUT, "/api/ai/config"), Admin);

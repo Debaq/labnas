@@ -2,6 +2,11 @@
 
 ## [Sin publicar]
 
+### Snapshots btrfs/ZFS y servicio endurecido
+
+- **Snapshots programados** de subvolúmenes btrfs o datasets ZFS (Configuración > Respaldos > Snapshots): frecuencia, retención y botón «Ahora». Sin root: `setup-snapshots.sh` instala un wrapper que solo actúa sobre las rutas elegidas y solo toca snapshots `labnas-*`, con una regla de sudo limitada a él
+- **Servicio systemd endurecido** (`PrivateTmp`, `ProtectKernel*`, `ProtectClock`, `RestrictNamespaces`, `LockPersonality`, `RestrictAddressFamilies`…), elegido para no romper la terminal con sudo, SMART, música ni CUPS. `install.sh --no-hardening` lo desactiva
+
 ### Passkeys y releases firmados
 
 - **Passkeys (WebAuthn)**: iniciar sesión sin contraseña con huella, Face ID, Windows Hello o una llave de seguridad (Configuración > General). Verificación propia con criptografía pura en Rust (ES256 y RS256), sin OpenSSL; desafíos de un solo uso, control de origen y de contador de firmas. Requieren HTTPS y un nombre de dominio: funcionan por el puente o por `https://labnas.local` con el certificado instalado
