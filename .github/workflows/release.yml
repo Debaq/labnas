@@ -81,11 +81,16 @@ jobs:
           LABNAS_MINISIGN_PUBKEY: ${{ vars.MINISIGN_PUBKEY }}
         run: cargo build --release --locked --target ${{ matrix.target }}
 
+      # cross monta solo backend/ en el contenedor; el conector PHP (include_str! de
+      # ../bridge) se monta aparte, tanto si el proyecto queda en /project como en su ruta real
       - name: Build backend (cross)
         if: matrix.use_cross == true
         working-directory: backend
         env:
           LABNAS_MINISIGN_PUBKEY: ${{ vars.MINISIGN_PUBKEY }}
+          CROSS_CONTAINER_OPTS: >-
+            -v ${{ github.workspace }}/bridge:/bridge:ro
+            -v ${{ github.workspace }}/bridge:${{ github.workspace }}/bridge:ro
         run: cross build --release --locked --target ${{ matrix.target }}
 
       - name: Empaquetar release
