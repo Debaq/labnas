@@ -50,21 +50,104 @@ y transparencia, antes que cualquier función de fabricación.
 
 ---
 
+## Cómo es modular LabNAS hoy (revisión del código, noviembre 2026)
+
+**Módulos.** Hay 13: `dashboard` (fijo), `files`, `network`, `printing`, `printers3d`,
+`tasks`, `notes`, `email`, `inventory`, `portfolio`, `sensors`, `terminal`, `music`.
+Se encienden, apagan y reordenan en **Configuración > Laboratorio**. Un módulo se
+declara hoy en **cuatro lugares** que hay que mantener a mano:
+
+| Dónde | Qué define |
+|---|---|
+| `backend/src/db.rs` → `DEFAULT_MODULES` | id y orden; siempre se crea **encendido** |
+| `backend/src/middleware.rs` → `MODULE_ROUTE_PREFIXES` | rutas de la API; apagado responde 404 |
+| `backend/src/main.rs` | tareas de fondo (correo, monitor 3D, sensores, música, red) |
+| `frontend/src/components/Layout.tsx` → `moduleNav` | entrada del menú (ruta, nombre, ícono) |
+
+El bus de eventos en vivo y WebDAV ya respetan el estado del módulo.
+
+**Usuarios y permisos.** Cuatro roles globales (`Pendiente`, `Observador`, `Operador`,
+`Admin`), tres permisos sueltos (`terminal`, `impresion`, `archivos_escritura`) y
+permisos por carpeta en las raíces de almacenamiento. Cada ruta declara su nivel
+mínimo y el middleware niega por defecto. Los módulos son **globales**: no se puede
+encender un módulo solo para ciertos roles.
+
+**Ajustes.** Tabla clave/valor (`settings`, con variantes cifradas para secretos) y
+una sola página `SettingsPage.tsx` de ~1.850 líneas con 9 pestañas.
+
+**Piezas reutilizables que ya existen:**
+
+| Pieza | Dónde | Sirve de base para |
+|---|---|---|
+| Auditoría persistente (180 días, se purga) | `handlers/audit.rs`, `log_activity` | 72; la 57 necesita una cadena aparte que nunca se purgue |
+| Reportes y solicitudes con estado y respuesta | `handlers/reports.rs` | 71, 22 |
+| Proyectos con miembros y etiquetas, tareas con confirmación, calendario con recurrencia | módulo `tasks` | 2, 5, 16, 65 |
+| Portafolio: proyectos, cursos, diplomas, talleres con requisitos e hitos | módulo `portfolio` | 40, 52, 65 |
+| Inventario: costo, proveedor, ubicación, serie, fecha de compra, filamento | módulo `inventory` | 1/31/34, 36, 59 |
+| Sensores ESP-NOW con token, lecturas y reglas de alerta (umbral y espera) | módulo `sensors` | 6, 7, 19, 20 |
+| Impresoras 3D de varias marcas, cola, cámara, timelapse, detección de movimiento | módulo `printers3d` | 23, 25, 30 |
+| Estadísticas de páginas y costo por usuario e impresora | `printing/stats.rs` | 37, 49 |
+| Propuestas de la IA que una persona aprueba | `email/proposals.rs` | 14, 55 |
+| Bot de Telegram con roles y comandos | `notifications/bot.rs` | 6, 13, 30 |
+| Eventos en vivo con audiencias e intereses | `events.rs` | pantallas de estado (8/47) |
+| Marca del laboratorio y servicios | Configuración > Laboratorio | 70 |
+
+### Fallas encontradas en la revisión
+
+- [ ] **El bot de Telegram ignora los módulos apagados.** Con el módulo Terminal
+      apagado, `/cmd` sigue ejecutando comandos para quien tenga ese permiso. Lo mismo
+      pasa con `/imprimir`, `/impresoras`, `/tareas`, `/propuestas` y `/musica`.
+      Quien apaga un módulo espera que quede apagado del todo. **Prioridad alta**
+      en el caso de la terminal.
+- [ ] **Las tareas de fondo solo miran el estado al arrancar.** Encender el módulo
+      Correo no inicia la revisión hasta reiniciar, y apagarlo no la detiene.
+- [ ] **No hay forma de que un módulo venga apagado por defecto** (lo necesita
+      `transparencia`).
+
+---
+
 ## Etapa 0 · Base común
 
 Lo que usan todas las demás etapas.
 
-- [ ] **Personas y roles:** investigador responsable, administrativo, docente,
-      estudiante, usuario externo, auditor (solo lectura y con fecha de término).
+### Infraestructura de módulos
+Con 7 módulos nuevos en camino, conviene ordenar esto primero:
+
+- [ ] **Registro único de módulos en el backend:** id, nombre, ícono, rutas
+      privadas y públicas, si viene encendido, de qué otros depende y sus tareas de
+      fondo. El menú del frontend se arma desde `/api/modules` en vez de una lista fija.
+      Agregar un módulo pasa de cuatro lugares a uno.
+- [ ] **Encendido por defecto configurable** (`transparencia` viene apagado).
+- [ ] **Dependencias entre módulos:** `transparencia` necesita `finanzas`, y
+      `finanzas` usa `inventory` y `portfolio`. No se puede apagar uno del que otro
+      depende sin avisar.
+- [ ] **Tareas de fondo que se encienden y apagan en vivo** junto con su módulo.
+- [ ] **Comandos de Telegram ligados a su módulo** (arregla la falla de arriba).
+- [ ] **Ajustes propios de cada módulo:** cada módulo trae su sección de
+      configuración, que solo aparece si está encendido. De paso se parte
+      `SettingsPage.tsx`.
+- [ ] **Tarjetas del dashboard por módulo**, que aparecen solo si está encendido.
+
+### Personas y acceso
+- [ ] **Permisos por módulo y por rol:** cada rol tiene, en cada módulo, «sin
+      acceso», «lectura» o «escritura». Reemplaza los tres permisos sueltos de hoy
+      (`terminal`, `impresion`, `archivos_escritura`) por algo uniforme, y permite que
+      `finanzas` lo vean solo el responsable y el administrativo.
+- [ ] **Roles nuevos sobre los cuatro actuales:** investigador responsable,
+      administrativo, docente, estudiante, usuario externo, auditor (solo lectura y con
+      fecha de término).
 - [ ] **Niveles de acceso** privado / con autorización / público, aplicables a
       cualquier registro o archivo.
 - [ ] **Catálogo único de máquinas y bienes con QR:** cada equipo tiene una ficha
       a la que llevan las ideas de reservas, mantenimiento, inventario y uso.
+### Registro y catálogo
 - [ ] **57. Bitácora que no se puede alterar.** Cada movimiento queda encadenado al
       anterior con su huella digital (hash). Nada se borra ni se edita: un error se
       corrige con un registro nuevo que lo anula. Si alguien adulterara un registro,
       la cadena lo delataría.
-- [ ] **72. Registro de cada acceso:** quién vio o descargó qué y cuándo.
+- [ ] **72. Registro de cada acceso:** quién vio o descargó qué y cuándo. Amplía
+      la auditoría que ya existe (`audit.rs`), que hoy registra acciones pero no
+      lecturas.
 
 ## Etapa 1 · Administración y transparencia ⭐ urgente
 
@@ -118,7 +201,9 @@ Lo que usan todas las demás etapas.
         montos, bienes, horas de uso, informes) y ve una vista previa antes.
       - Cada activación, desactivación o cambio de secciones queda en la bitácora.
 - [ ] **71. Solicitudes de información con seguimiento:** folio, plazo,
-      responsable, respuesta y aviso cuando el plazo se acerca.
+      responsable, respuesta y aviso cuando el plazo se acerca. Parte de los reportes
+      que ya existen (tipo, estado y respuesta del administrador), abiertos al público
+      y con plazo.
 
 ### Más adelante en la etapa
 - [ ] **62. Horas dedicadas por persona y proyecto,** con boletas de honorarios y
@@ -136,16 +221,19 @@ Lo que usan todas las demás etapas.
 
 - [ ] **20. Seguridad de la cortadora láser:** sensor de llama o humo que corta la
       energía, enciende la alarma y avisa por Telegram. El extractor se prende solo
-      cuando la láser trabaja.
+      cuando la láser trabaja. Los sensores hoy solo envían lecturas: falta que LabNAS
+      pueda **mandar órdenes** a un relé (también lo necesita la idea 18).
 - [ ] **6. Alarmas críticas con escalamiento:** si un freezer, incubadora o sala se
       sale de rango, avisa por Telegram; si nadie responde en 10 minutos, avisa al
-      siguiente de la lista.
+      siguiente de la lista. Los sensores ya tienen reglas de alerta con umbral; falta
+      el escalamiento y la confirmación «lo vi».
 - [ ] **7. Historial de temperaturas exportable** para auditorías y certificaciones.
 - [ ] **19. Medidor de corriente en cada máquina** (ESP32 + sensor de pinza): sabe
       si la máquina trabaja de verdad, cuenta horas de uso y consumo eléctrico.
       Alimenta la idea 59.
 - [ ] **22. Máquina fuera de servicio:** se escanea el QR, se reporta la falla con
-      foto y se bloquean las reservas hasta la reparación.
+      foto y se bloquean las reservas hasta la reparación. Puede reutilizar los
+      reportes que ya existen.
 - [ ] **17. Seguridad laboral:** inducciones, capacitaciones vigentes, fichas de
       seguridad y registro de incidentes.
 
@@ -157,11 +245,13 @@ Lo que usan todas las demás etapas.
       habilita la máquina solo a quien tiene la certificación vigente y registra
       quién la usó y cuánto tiempo.
 - [ ] **2. Reserva de equipos** con calendario sin choques de horario, exigencia de
-      certificación y registro de horas.
+      certificación y registro de horas. Se construye sobre el calendario del módulo
+      Tareas, agregando el equipo como «recurso» del evento.
 - [ ] **5. Mantenimiento y calibración:** bitácora por equipo y recordatorios (por
       fecha o por horas de uso: boquilla tras X kg, lente láser tras X horas).
 - [ ] **23. Una sola cola para todas las máquinas** (3D, láser, CNC, vinilo) con
-      tiempo y costo estimados.
+      tiempo y costo estimados. Generaliza la cola que ya tiene el módulo de
+      impresoras 3D.
 - [ ] **8 + 47. Pantalla de estado** (tablet o TV): máquinas en uso, tiempo
       restante, cola del día, temperaturas, alertas y ocupación.
 - [ ] **48. Registro de entrada** con QR o tarjeta: cuántas personas vienen y de qué
@@ -180,11 +270,13 @@ Lo que usan todas las demás etapas.
 - [ ] **36. Reciclaje:** kilos triturados y filamento recuperado, para métricas de
       sostenibilidad.
 - [ ] **37. Cotizador automático:** gramos, superficie cortada, minutos de máquina y
-      energía → precio.
+      energía → precio. La impresión de papel ya calcula costo por usuario; se extiende
+      al resto de las máquinas.
 - [ ] **38. Formulario público de pedidos** de fabricación con cotización y
       seguimiento.
 - [ ] **39. Membresías y créditos de horas de máquina** para usuarios externos.
-- [ ] **40. Talleres** con inscripción, cupos, asistencia y certificados en PDF.
+- [ ] **40. Talleres** con inscripción, cupos, asistencia y certificados en PDF. El
+      Portafolio ya registra talleres; falta la inscripción.
 
 ## Etapa 5 · Fabricación
 
@@ -222,7 +314,7 @@ Lo que usan todas las demás etapas.
 
 - [ ] **12. Búsqueda por significado** en los documentos del NAS, citando los
       archivos.
-- [ ] **13. Asistente por Telegram:** «¿dónde está el reactivo X?», «¿quién reservó
+- [ ] **13. Asistente por Telegram** (sobre el bot que ya existe): «¿dónde está el reactivo X?», «¿quién reservó
       el microscopio mañana?».
 - [ ] **14. Transcripción y resumen de reuniones** con tareas propuestas para
       aprobar.
