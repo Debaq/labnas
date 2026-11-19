@@ -2,6 +2,10 @@
 
 ## [Sin publicar]
 
+### Actualizaciones
+
+- El aviso **«Nueva versión disponible · Click para actualizar»** ahora lleva directo a Configuración > Sistema, al botón de actualizar (antes abría la última pestaña usada y, si ya estabas en Configuración, no hacía nada)
+
 ### Puente PHP
 
 - **Descargas grandes más robustas por internet:** si el hosting falla de forma pasajera al recibir una parte (red, error 500/502/503/504 o cuerpo cortado), LabNAS la reenvía hasta 4 veces en vez de cortar la descarga. El conector distingue un cuerpo incompleto de una firma inválida

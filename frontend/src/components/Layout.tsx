@@ -328,7 +328,7 @@ export default function Layout() {
           <div
             className="flex items-center justify-between px-6 py-2 cursor-pointer hover:opacity-90 transition-opacity"
             style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
-            onClick={() => navigate('/settings')}
+            onClick={() => navigate('/settings?tab=system&seccion=actualizar')}
           >
             <div className="flex items-center gap-2 text-sm font-medium">
               <Download size={16} />

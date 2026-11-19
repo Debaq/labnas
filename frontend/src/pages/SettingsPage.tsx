@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine, Pencil, Music, Video, HelpCircle, X, RefreshCw, Shield, LayoutDashboard, FolderOpen, Network, Printer, Box, ClipboardList, FileText, Mail, Package, GraduationCap, Thermometer, ChevronUp, ChevronDown, AlertTriangle, Bell, Server, SlidersHorizontal, RotateCcw, Archive } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import SetupWizard from '../components/SetupWizard'
@@ -118,6 +118,19 @@ export default function SettingsPage() {
     const saved = localStorage.getItem('labnas-settings-tab') as TabId | null
     return saved && TABS.some(t => t.id === saved) ? saved : 'general'
   })
+  // Enlaces directos (p.ej. el aviso de actualizacion): ?tab=system&seccion=actualizar
+  const [searchParams, setSearchParams] = useSearchParams()
+  useEffect(() => {
+    const tab = searchParams.get('tab') as TabId | null
+    const section = searchParams.get('seccion')
+    if (!tab && !section) return
+    if (tab && TABS.some(t => t.id === tab)) setActiveTab(tab)
+    setSearchParams({}, { replace: true })
+    if (section) {
+      // Esperar a que se dibuje la pestaña
+      setTimeout(() => document.getElementById(section)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100)
+    }
+  }, [searchParams, setSearchParams])
   const [modules, setModules] = useState<ModuleInfo[]>([])
   const [modulesLoading, setModulesLoading] = useState(true)
   const [toggling, setToggling] = useState<string | null>(null)
@@ -1556,7 +1569,7 @@ export default function SettingsPage() {
       </section>}
 
       {/* About (admin only) */}
-      {activeTab === 'system' && isAdmin && <section>
+      {activeTab === 'system' && isAdmin && <section id="actualizar" className="scroll-mt-4">
         <div className="flex items-center gap-3 mb-4">
           <Info size={22} style={{ color: 'var(--accent)' }} />
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
