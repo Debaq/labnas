@@ -4,6 +4,11 @@ use super::*;
 
 /// Cuenta páginas reales de un archivo usando pdfinfo (para PDFs)
 pub(super) async fn count_file_pages(file_path: &str) -> u64 {
+    if file_path.to_lowercase().ends_with(".pwg") {
+        let path = std::path::PathBuf::from(file_path);
+        let n = tokio::task::spawn_blocking(move || count_pwg_pages(&path)).await.ok().flatten();
+        return n.unwrap_or(1).max(1);
+    }
     if file_path.to_lowercase().ends_with(".pdf") {
         if let Ok(output) = Command::new("pdfinfo")
             .arg(file_path)
@@ -377,3 +382,99 @@ pub async fn get_my_costs(
 }
 
 // ── Impresion duplex manual (asistente paso a paso) ──
+
+/// Paginas de un PWG raster (lo que manda el driver generico de Windows): cada
+/// pagina es una cabecera de 1796 bytes y lineas comprimidas con RLE, que hay
+/// que recorrer para saber donde empieza la siguiente.
+pub(super) fn count_pwg_pages(path: &std::path::Path) -> Option<u64> {
+    use std::io::{BufReader, Read};
+    let mut r = BufReader::new(std::fs::File::open(path).ok()?);
+    let mut sync = [0u8; 4];
+    r.read_exact(&mut sync).ok()?;
+    if &sync != b"RaS2" {
+        return None;
+    }
+    let skip = |r: &mut BufReader<std::fs::File>, n: u64| -> Option<()> {
+        (std::io::copy(&mut r.by_ref().take(n), &mut std::io::sink()).ok()? == n).then_some(())
+    };
+    let byte = |r: &mut BufReader<std::fs::File>| -> Option<u8> {
+        let mut b = [0u8; 1];
+        r.read_exact(&mut b).ok().map(|_| b[0])
+    };
+    let mut pages = 0u64;
+    let mut header = [0u8; 1796];
+    loop {
+        // Fin del archivo justo despues de una pagina: terminamos
+        match r.read(&mut header[..1]) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(_) => return None,
+        }
+        r.read_exact(&mut header[1..]).ok()?;
+        let be = |o: usize| u32::from_be_bytes([header[o], header[o + 1], header[o + 2], header[o + 3]]) as u64;
+        let (height, bits, bpl) = (be(376), be(388), be(392));
+        if height == 0 || bpl == 0 || height > 200_000 || bpl > 2_000_000 {
+            return None;
+        }
+        let bpp = bits.div_ceil(8).max(1);
+        let mut y = 0u64;
+        while y < height {
+            y += byte(&mut r)? as u64 + 1;
+            let mut x = 0u64;
+            while x < bpl {
+                let c = byte(&mut r)? as u64;
+                if c < 128 {
+                    skip(&mut r, bpp)?;
+                    x += (c + 1) * bpp;
+                } else {
+                    let n = (257 - c) * bpp;
+                    skip(&mut r, n)?;
+                    x += n;
+                }
+            }
+        }
+        pages += 1;
+    }
+    Some(pages)
+}
+
+#[cfg(test)]
+mod pwg_tests {
+    use super::count_pwg_pages;
+
+    fn page(height: u32, bpl: u32) -> Vec<u8> {
+        let mut h = vec![0u8; 1796];
+        h[..9].copy_from_slice(b"PwgRaster");
+        h[376..380].copy_from_slice(&height.to_be_bytes());
+        h[388..392].copy_from_slice(&24u32.to_be_bytes());
+        h[392..396].copy_from_slice(&bpl.to_be_bytes());
+        // 2 grupos de lineas: 1 linea blanca repetida (height-1) veces + 1 linea literal
+        let px = bpl / 3;
+        h.push((height - 2) as u8);
+        h.push((px - 1) as u8);
+        h.extend_from_slice(&[255, 255, 255]);
+        h.push(0);
+        h.push((257 - px) as u8);
+        h.extend(std::iter::repeat_n(7u8, bpl as usize));
+        h
+    }
+
+    #[test]
+    fn cuenta_paginas_pwg() {
+        let dir = std::env::temp_dir().join(format!("labnas-pwg-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.pwg");
+        let mut data = b"RaS2".to_vec();
+        for _ in 0..3 {
+            data.extend(page(10, 30));
+        }
+        std::fs::write(&f, &data).unwrap();
+        assert_eq!(count_pwg_pages(&f), Some(3));
+        // truncado: no se inventa un numero
+        std::fs::write(&f, &data[..data.len() - 5]).unwrap();
+        assert_eq!(count_pwg_pages(&f), None);
+        std::fs::write(&f, b"%PDF").unwrap();
+        assert_eq!(count_pwg_pages(&f), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

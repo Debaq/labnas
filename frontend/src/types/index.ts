@@ -178,6 +178,14 @@ export interface CupsPrinter {
   state: string
 }
 
+/** Impresora de red IPP: token propio para armar la URL de cada impresora */
+export interface IppInfo {
+  port: number
+  token: string | null
+  can_print: boolean
+  listen_error: string | null
+}
+
 export interface CupsPrintJob {
   id: string
   printer: string

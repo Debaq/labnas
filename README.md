@@ -122,6 +122,7 @@ Módulos disponibles:
 - Drag & drop
 - **Wizard doble cara manual**: para impresoras sin dúplex automático, guía al usuario paso a paso con lotes multi-impresora, intercalado correcto y configuración avanzada por trabajo
 - Conteo real de páginas PDF y límite de subida configurable
+- **Impresora de red (IPP)**: cada usuario agrega las impresoras de LabNAS en Windows, Linux o macOS con una dirección personal (puerto 8631, solo LAN). Windows usa su driver genérico, sin instalar nada; el trabajo queda contado a nombre del usuario
 
 ### Tareas y Proyectos
 - Crear tareas con asignación (`@user`, `@all`), fecha límite, proyecto

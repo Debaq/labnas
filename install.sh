@@ -298,8 +298,8 @@ fi
 # ─── Firewall ───
 
 if [ "$USE_SYSTEMD" -eq 1 ] && command -v ufw > /dev/null && ufw status 2> /dev/null | grep -q "Status: active"; then
-    for p in "$HTTP_PORT" "$HTTPS_PORT" 80 443; do ufw allow "$p/tcp" > /dev/null; done
-    ok "Firewall (ufw): abiertos ${HTTP_PORT}, ${HTTPS_PORT}, 80 y 443"
+    for p in "$HTTP_PORT" "$HTTPS_PORT" 80 443 8631; do ufw allow "$p/tcp" > /dev/null; done
+    ok "Firewall (ufw): abiertos ${HTTP_PORT}, ${HTTPS_PORT}, 80, 443 y 8631 (impresora de red)"
 fi
 
 # ─── SMART ───

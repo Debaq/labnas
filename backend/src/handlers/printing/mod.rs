@@ -24,10 +24,12 @@ mod printers;
 mod print;
 mod stats;
 mod duplex;
+pub(crate) mod ipp_codec;
+mod ipp;
 
 // API publica (handlers y loops) y visibilidad entre submodulos (`use super::*`)
 #[allow(unused_imports)]
-pub use {printers::*, print::*, stats::*, duplex::*};
+pub use {printers::*, print::*, stats::*, duplex::*, ipp::*};
 
 /// Extrae el username de la sesión a partir del header Authorization
 async fn extract_session(

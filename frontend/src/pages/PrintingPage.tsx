@@ -38,6 +38,7 @@ import {
 } from '../api'
 import { useAuth } from '../auth/AuthContext'
 import DuplexWizard from '../components/DuplexWizard'
+import NetworkPrinterPanel from '../components/NetworkPrinterPanel'
 import type { CupsPrinter, CupsPrintJob, PrinterOption, PrinterStatsResponse, AllUserCostsResponse } from '../types'
 import { errorMessage } from '../lib/errors'
 
@@ -542,6 +543,9 @@ export default function PrintingPage() {
           </div>
         )}
       </div>
+
+      {/* Impresora de red (IPP) */}
+      <NetworkPrinterPanel printers={printers} />
 
       {/* Drop zone */}
       <div

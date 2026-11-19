@@ -138,3 +138,22 @@ export async function duplexPrintStep(req: import('../types').DuplexPrintStepReq
 export async function duplexCleanup(tempId: string): Promise<void> {
   await api(`/api/printing/duplex/${encodeURIComponent(tempId)}`, { method: 'DELETE' })
 }
+
+// --- Impresora de red (IPP) ---
+
+export async function fetchIppInfo(): Promise<import('../types').IppInfo> {
+  const res = await api('/api/printing/ipp')
+  if (!res.ok) throw new Error('Error al obtener la impresora de red')
+  return res.json()
+}
+
+export async function regenerateIppToken(): Promise<import('../types').IppInfo> {
+  const res = await api('/api/printing/ipp/token', { method: 'POST' })
+  if (!res.ok) throw new Error((await res.text().catch(() => '')) || 'Error al generar la direccion')
+  return res.json()
+}
+
+export async function revokeIppToken(): Promise<void> {
+  const res = await api('/api/printing/ipp/token', { method: 'DELETE' })
+  if (!res.ok) throw new Error('Error al revocar la direccion')
+}

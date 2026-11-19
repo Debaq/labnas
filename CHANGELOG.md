@@ -2,6 +2,13 @@
 
 ## [Sin publicar]
 
+### Impresora de red (IPP)
+
+- **Imprimir desde Windows, Linux o macOS pasando por LabNAS**: con el módulo de impresión encendido, LabNAS actúa como impresora IPP en el puerto 8631 (HTTP, solo LAN). Cada usuario genera en Impresión su **dirección personal** por impresora y la agrega en Windows con «Seleccionar una impresora compartida por nombre»; Windows usa su driver genérico (IPP Class Driver), sin instalar drivers
+- El token de la dirección identifica al usuario: el trabajo respeta el permiso de impresión, queda en la auditoría (con la IP del equipo) y se cuenta en estadísticas y costos a su nombre. Se puede regenerar o revocar; se guarda como hash más una copia cifrada (migración 14)
+- Acepta PDF, PWG raster (lo que manda Windows), JPEG y PostScript; cuenta las páginas del PWG raster. Atributos IPP Everywhere (papel carta, oficio, A4…, color y dúplex según el PPD) validados con `ipptool`
+- `install.sh` abre el puerto 8631 en `ufw`; `LABNAS_IPP_PORT` lo cambia
+
 ### Snapshots btrfs/ZFS y servicio endurecido
 
 - **Snapshots programados** de subvolúmenes btrfs o datasets ZFS (Configuración > Respaldos > Snapshots): frecuencia, retención y botón «Ahora». Sin root: `setup-snapshots.sh` instala un wrapper que solo actúa sobre las rutas elegidas y solo toca snapshots `labnas-*`, con una regla de sudo limitada a él

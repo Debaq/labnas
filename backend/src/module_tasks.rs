@@ -1,5 +1,5 @@
 //! Tareas de fondo de cada modulo (revision de correo, monitor 3D, sensores,
-//! musica, escaneo de red): se inician y se detienen junto con su modulo, sin
+//! musica, escaneo de red, servidor IPP): se inician y se detienen junto con su modulo, sin
 //! reiniciar LabNAS.
 //!
 //! En los tests de integracion el gestor queda inactivo (nadie llama a
@@ -44,6 +44,8 @@ fn spawn_for(state: &AppState, id: &str) -> Vec<JoinHandle<()>> {
             tokio::spawn(handlers::sensors::sensor_monitor_loop(s())),
         ],
         "network" => vec![tokio::spawn(handlers::network::network_scan_loop(s()))],
+        // Impresoras de red (IPP): el puerto se abre y cierra con el modulo
+        "printing" => vec![tokio::spawn(handlers::printing::ipp_server_loop(s()))],
         _ => Vec::new(),
     }
 }

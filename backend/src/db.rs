@@ -216,6 +216,14 @@ const MIGRATIONS: &[&str] = &[
         last_used TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_webauthn_user ON webauthn_credentials(username, rp_id);",
+    // 14: token por usuario para la impresora de red (IPP): hash para buscarlo y
+    // copia cifrada para mostrarle su URL
+    "CREATE TABLE IF NOT EXISTS ipp_tokens (
+        username TEXT PRIMARY KEY REFERENCES web_users(username) ON DELETE CASCADE ON UPDATE CASCADE,
+        token_hash TEXT NOT NULL UNIQUE,
+        token_enc TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );",
 ];
 
 fn run_migrations(conn: &Connection) {

@@ -164,6 +164,8 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         ("POST", ["printing", "print"]) | ("POST", ["printing", "print-file"]) => PermPrint,
         ("DELETE", ["printing", "jobs", _]) => PermPrint,
         (_, ["printing", "duplex", ..]) => PermPrint,
+        // Token propio de la impresora de red (IPP)
+        ("POST", ["printing", "ipp", "token"]) | ("DELETE", ["printing", "ipp", "token"]) => PermPrint,
 
         // --- Tareas, proyectos, calendario (los handlers validan autoria) ---
         (_, ["tasks", ..]) | (_, ["projects", ..]) | (_, ["events", ..]) => User,
@@ -370,6 +372,9 @@ mod tests {
         assert_eq!(acc(Method::POST, "/api/printing/print-file"), PermPrint);
         assert_eq!(acc(Method::POST, "/api/printing/duplex/prepare"), PermPrint);
         assert_eq!(acc(Method::POST, "/api/printing/printers/hp/enable"), Admin);
+        assert_eq!(acc(Method::GET, "/api/printing/ipp"), User);
+        assert_eq!(acc(Method::POST, "/api/printing/ipp/token"), PermPrint);
+        assert_eq!(acc(Method::DELETE, "/api/printing/ipp/token"), PermPrint);
         assert_eq!(acc(Method::PUT, "/api/printers3d/abc"), Operator);
         assert_eq!(acc(Method::GET, "/api/printers3d/abc/status"), User);
         assert_eq!(acc(Method::POST, "/api/printers3d/queue"), User);

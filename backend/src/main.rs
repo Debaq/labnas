@@ -629,6 +629,8 @@ fn api_routes() -> Router<AppState> {
         .route("/api/printing/printers/{name}/stats/reset", post(handlers::printing::reset_printer_stats))
         .route("/api/printing/user-costs", get(handlers::printing::get_all_user_costs))
         .route("/api/printing/my-costs", get(handlers::printing::get_my_costs))
+        .route("/api/printing/ipp", get(handlers::printing::get_ipp_info))
+        .route("/api/printing/ipp/token", post(handlers::printing::regenerate_ipp_token).delete(handlers::printing::revoke_ipp_token))
         // Duplex manual
         .route("/api/printing/duplex/prepare", post(handlers::printing::duplex_prepare))
         .route("/api/printing/duplex/print", post(handlers::printing::duplex_print_step))

@@ -11,6 +11,7 @@ mod events;
 mod files;
 mod folders;
 mod https;
+mod ipp;
 mod network;
 mod passkeys;
 mod printers;
