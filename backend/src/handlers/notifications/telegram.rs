@@ -54,11 +54,13 @@ pub async fn notify_admins(state: &AppState, text: &str) -> usize {
 const ADMIN_CHATS: &str =
     "role = 'admin' OR linked_web_user IN (SELECT username FROM web_users WHERE role = 'admin')";
 
-/// Administradores y operadores (p.ej. avisos de camaras que tambien atiende un operador)
-const STAFF_CHATS: &str = "role IN ('admin', 'operador') OR linked_web_user IN (SELECT username FROM web_users WHERE role IN ('admin', 'operador'))";
-
 /// Token del bot y chats que cumplen `where_sql` (None si no hay bot)
 async fn tg_targets(state: &AppState, where_sql: &'static str) -> Option<(String, Vec<i64>)> {
+    tg_targets_with(state, where_sql.to_string(), Vec::new()).await
+}
+
+/// Igual, con parametros (`?1`, `?2`...) para el filtro
+async fn tg_targets_with(state: &AppState, where_sql: String, args: Vec<String>) -> Option<(String, Vec<i64>)> {
     crate::db::db_op(&state.db, move |conn| {
         let token: Option<String> = conn
             .query_row("SELECT labnas_decrypt(bot_token) FROM notification_config WHERE id = 1", [], |row| row.get(0))
@@ -69,7 +71,7 @@ async fn tg_targets(state: &AppState, where_sql: &'static str) -> Option<(String
             .prepare(&format!("SELECT chat_id FROM telegram_chats WHERE {}", where_sql))
             .map_err(|e| e.to_string())?;
         let chats: Vec<i64> = stmt
-            .query_map([], |row| row.get(0))
+            .query_map(rusqlite::params_from_iter(args.iter()), |row| row.get(0))
             .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
@@ -80,19 +82,19 @@ async fn tg_targets(state: &AppState, where_sql: &'static str) -> Option<(String
     .flatten()
 }
 
-/// Envia una foto (JPEG) con texto a los chats de los administradores (y de los
-/// operadores si `with_operators`). Devuelve a cuantos chats llego, o por que no llego.
-pub async fn notify_admins_photo(state: &AppState, jpeg: Vec<u8>, caption: &str, with_operators: bool) -> Result<usize, String> {
-    let filter = if with_operators { STAFF_CHATS } else { ADMIN_CHATS };
-    let Some((token, chats)) = tg_targets(state, filter).await else {
+/// Envia una foto (JPEG) con texto a los chats de los administradores y de los chats
+/// vinculados a `extra_users`. Devuelve a cuantos chats llego, o por que no llego.
+pub async fn notify_admins_photo(state: &AppState, jpeg: Vec<u8>, caption: &str, extra_users: &[String]) -> Result<usize, String> {
+    let mut filter = format!("({})", ADMIN_CHATS);
+    if !extra_users.is_empty() {
+        let marks: Vec<String> = (1..=extra_users.len()).map(|i| format!("?{}", i)).collect();
+        filter.push_str(&format!(" OR linked_web_user IN ({})", marks.join(", ")));
+    }
+    let Some((token, chats)) = tg_targets_with(state, filter, extra_users.to_vec()).await else {
         return Err("no hay bot de Telegram configurado (Configuracion > Notificaciones)".into());
     };
     if chats.is_empty() {
-        let who = if with_operators { "administrador ni operador" } else { "administrador" };
-        return Err(format!(
-            "ningun chat de {}: en Configuracion > Notificaciones vincula el chat a la cuenta (o avisa tambien a operadores en la regla)",
-            who
-        ));
+        return Err("ningun chat de destino: en Configuracion > Notificaciones vincula el chat de Telegram a la cuenta de la persona".into());
     }
     let url = format!("{}/bot{}/sendPhoto", telegram_base(), token);
     let (mut sent, mut last_err) = (0, String::new());

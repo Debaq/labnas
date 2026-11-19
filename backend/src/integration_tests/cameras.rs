@@ -180,7 +180,13 @@ async fn deteccion_con_ia() {
     let mut otra = regla.clone();
     otra["camera_id"] = json!("no-existe");
     assert_eq!(s.post("/api/cameras/detectors", &admin, otra).await.status, 404);
+    // Es vigilancia: solo el admin (y quien autorice) ve reglas e historial
     assert_eq!(s.get("/api/cameras/detectors", &obs).await.status, 403);
+    assert_eq!(s.get("/api/cameras/detectors", &op).await.status, 403);
+    assert_eq!(s.get("/api/cameras/detections", &op).await.status, 403);
+    assert_eq!(s.put("/api/cameras/detectors/watchers", &op, json!({ "users": ["op"] })).await.status, 403);
+    assert_eq!(s.put("/api/cameras/detectors/watchers", &admin, json!({ "users": ["nadie"] })).await.status, 400);
+    assert_ne!(s.get("/api/cameras/detecting-now", &admin).await.status, 200, "ya no hay aviso publico");
 
     if !ffmpeg_ok() {
         eprintln!("ffmpeg no instalado: se omite la parte de video");
@@ -204,15 +210,21 @@ async fn deteccion_con_ia() {
     let r = s.post("/api/cameras/detectors", &admin, regla.clone()).await;
     assert_eq!(r.status, 200, "{}", r.text);
     let rule_id = r.json()["id"].as_str().unwrap().to_string();
-    wait_until(15_000, || async {
-        let now = s.get("/api/cameras/detecting-now", &obs).await.json();
-        now.as_array().is_some_and(|v| v.len() == 1 && v[0]["camera"] == "Sala" && v[0]["kinds"][0] == "personas")
-    })
-    .await;
-    wait_until(20_000, || async { !s.get("/api/cameras/detections", &op).await.json().as_array().unwrap().is_empty() }).await;
-    let det = s.get("/api/cameras/detections", &op).await.json()[0].clone();
+    wait_until(20_000, || async { !s.get("/api/cameras/detections", &admin).await.json().as_array().unwrap().is_empty() }).await;
+    let det = s.get("/api/cameras/detections", &admin).await.json()[0].clone();
     assert_eq!((det["camera_name"].as_str(), det["kind"].as_str()), (Some("Sala"), Some("personas")));
     assert_eq!(det["labels"], "persona (87%)");
+    // El operador no ve ni descarga lo que hizo la IA
+    let recs_op = s.get("/api/cameras/recordings", &op).await.json();
+    assert!(recs_op.as_array().unwrap().iter().all(|r| !r["username"].as_str().unwrap().starts_with("IA (")));
+    let foto_id = det["photo_id"].as_str().unwrap().to_string();
+    assert_eq!(s.get(&format!("/api/cameras/recordings/{}/download", foto_id), &op).await.status, 403);
+    // Hasta que el admin lo autoriza
+    assert_eq!(s.put("/api/cameras/detectors/watchers", &admin, json!({ "users": ["op"] })).await.status, 200);
+    assert_eq!(s.get("/api/cameras/detections", &op).await.status, 200);
+    assert_eq!(s.get(&format!("/api/cameras/recordings/{}/download", foto_id), &op).await.status, 200);
+    assert!(s.get("/api/cameras/detectors", &op).await.json()["watchers"].as_array().unwrap().is_empty(), "la lista solo la ve el admin");
+    assert_eq!(s.get("/api/cameras/detectors", &admin).await.json()["watchers"], json!(["op"]));
     let recs = s.get("/api/cameras/recordings", &op).await.json();
     let foto = recs.as_array().unwrap().iter().find(|r| r["id"] == det["photo_id"]).expect("foto registrada");
     assert_eq!(foto["username"], "IA (personas)");
@@ -228,11 +240,12 @@ async fn deteccion_con_ia() {
     assert_eq!(rules["rules"][0]["active_now"], true);
     assert_eq!(rules["rules"][0]["last_labels"], "persona (87%)");
 
-    // Pausarla: deja de vigilar y el aviso desaparece
+    // Pausarla: deja de vigilar
     let mut pausada = regla.clone();
     pausada["enabled"] = json!(false);
     assert_eq!(s.put(&format!("/api/cameras/detectors/{}", rule_id), &admin, pausada).await.status, 200);
-    wait_until(10_000, || async { s.get("/api/cameras/detecting-now", &obs).await.json().as_array().unwrap().is_empty() }).await;
+    let rules = s.get("/api/cameras/detectors", &admin).await.json();
+    assert_eq!((rules["rules"][0]["enabled"].as_bool(), rules["rules"][0]["active_now"].as_bool()), (Some(false), Some(false)));
 
     // Movimiento (sin IA): el video sintetico cambia en cada cuadro
     *TEST_DETECTIONS.lock().unwrap() = None;

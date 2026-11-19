@@ -778,7 +778,12 @@ pub struct RecordingsQuery {
 }
 
 /// GET /api/cameras/recordings[?camera=id]
-pub async fn list_recordings(State(state): State<AppState>, Query(q): Query<RecordingsQuery>) -> Result<Json<Vec<RecordingRow>>, ApiError> {
+pub async fn list_recordings(
+    State(state): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
+    Query(q): Query<RecordingsQuery>,
+) -> Result<Json<Vec<RecordingRow>>, ApiError> {
+    let sees_ai = detect::can_view(&state, &session).await;
     let rows = db_op(&state.db, move |conn| {
         let mut stmt = conn
             .prepare(
@@ -803,16 +808,18 @@ pub async fn list_recordings(State(state): State<AppState>, Query(q): Query<Reco
                 })
             })
             .map_err(|e| e.to_string())?;
-        Ok(rows.filter_map(|r| r.ok()).collect())
+        Ok(rows.filter_map(|r| r.ok()).collect::<Vec<RecordingRow>>())
     })
     .await?;
+    // Lo que hizo la IA solo lo ven quienes ven la deteccion
+    let rows = rows.into_iter().filter(|r| sees_ai || !detect::is_ai_record(&r.username)).collect();
     Ok(Json(rows))
 }
 
-async fn recording_path(state: &AppState, id: &str) -> Result<(String, String, String), ApiError> {
+async fn recording_path(state: &AppState, id: &str) -> Result<(String, String, String, String), ApiError> {
     let id = id.to_string();
     db_op(&state.db, move |conn| {
-        conn.query_row("SELECT path, kind, status FROM camera_recordings WHERE id = ?1", params![id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        conn.query_row("SELECT path, kind, status, username FROM camera_recordings WHERE id = ?1", params![id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
             .optional()
             .map_err(|e| e.to_string())
     })
@@ -826,7 +833,16 @@ pub async fn download_recording(
     Extension(session): Extension<SessionInfo>,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let (path, kind, status) = recording_path(&state, &id).await?;
+    let (path, kind, status, user) = recording_path(&state, &id).await?;
+    // Las de la IA solo para quienes ven la deteccion; el resto, admin u operador
+    let allowed = if detect::is_ai_record(&user) {
+        detect::can_view(&state, &session).await
+    } else {
+        matches!(session.role, crate::models::notifications::UserRole::Admin | crate::models::notifications::UserRole::Operador)
+    };
+    if !allowed {
+        return Err((StatusCode::FORBIDDEN, "No tienes acceso a esta grabacion".into()));
+    }
     if status == "borrado" {
         return Err((StatusCode::GONE, "La grabacion fue borrada".into()));
     }
@@ -852,7 +868,7 @@ pub async fn delete_recording(
     Extension(session): Extension<SessionInfo>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let (path, _, status) = recording_path(&state, &id).await?;
+    let (path, _, status, _) = recording_path(&state, &id).await?;
     if status == "grabando" {
         return Err((StatusCode::CONFLICT, "La grabacion sigue en curso".into()));
     }

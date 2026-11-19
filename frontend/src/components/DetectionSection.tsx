@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ScanEye, Plus, Pencil, Trash2, Play, Pause, Loader2, X, Camera, Send, Video, AlertTriangle, Download } from 'lucide-react'
+import { ScanEye, Plus, Pencil, Trash2, Play, Pause, Loader2, X, Camera, Send, Video, AlertTriangle, Download, Lock } from 'lucide-react'
 import {
   fetchDetectors, saveDetector, deleteDetector, testDetector, prepareDetectionModel, fetchDetections, cameraRecordingUrl,
+  saveDetectionWatchers, fetchWebUsers,
   type DetectorsResponse, type DetectorInput, type DetectorRule, type DetectionRow,
 } from '../api'
 import type { CameraView } from '../types'
@@ -23,7 +24,7 @@ function newRule(cameraId: string): DetectorInput {
   return {
     camera_id: cameraId, kind: 'personas', classes: [], min_score: 0.5, interval_s: 2,
     schedule: { days: [0, 1, 2, 3, 4], from: '20:00', to: '07:00' },
-    actions: { photo: true, telegram: true, clip_s: 10, telegram_operators: false }, cooldown_s: 120, enabled: true,
+    actions: { photo: true, telegram: true, clip_s: 10, telegram_watchers: false }, cooldown_s: 120, enabled: true,
   }
 }
 
@@ -43,14 +44,18 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
   const [busy, setBusy] = useState(false)
   const [test, setTest] = useState<{ image: string; detections: { label: string; score: number }[] } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [users, setUsers] = useState<string[]>([])
+  const [editWatchers, setEditWatchers] = useState<string[] | null>(null)
 
   const load = useCallback(() => {
     fetchDetectors().then(setData).catch((e) => setError(errorMessage(e)))
     fetchDetections().then(setHistory).catch(() => {})
   }, [])
   useEffect(() => { load() }, [load])
+  useEffect(() => {
+    if (isAdmin) fetchWebUsers().then((u) => setUsers(u.filter((x) => x.role !== 'admin' && x.role !== 'pendiente').map((x) => x.username))).catch(() => {})
+  }, [isAdmin])
   useEvent('cameras.detection', load, load)
-  useEvent('cameras.detecting', load)
 
   const classNames = useMemo(() => new Map((data?.classes ?? []).map(([en, es]) => [en, es])), [data])
 
@@ -81,7 +86,8 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
   const set = (patch: Partial<DetectorInput>) => form && setForm({ ...form, rule: { ...form.rule, ...patch } })
   const ownCameras = cameras
 
-  if (!data) return error ? <p className="text-sm" style={{ color: 'var(--danger)' }}>{error}</p> : null
+  // Quien no esta autorizado no ve la seccion (es vigilancia)
+  if (!data) return isAdmin && error ? <p className="text-sm" style={{ color: 'var(--danger)' }}>{error}</p> : null
   const r = form?.rule
   const isMotion = r?.kind === 'movimiento'
 
@@ -104,9 +110,50 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
           </button>
         )}
       </div>
-      <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
-        El análisis corre en el NAS: las imágenes no salen del laboratorio. Mientras una regla está activa, todos los usuarios ven el aviso «Detección activa».
+      <p className="text-xs mb-3 flex items-start gap-1" style={{ color: 'var(--text-secondary)' }}>
+        <Lock size={12} className="mt-0.5 shrink-0" />
+        <span>
+          El análisis corre en el NAS: las imágenes no salen del laboratorio. Solo el administrador
+          {data.watchers.length > 0 ? ` y ${data.watchers.join(', ')}` : ''} ven esta sección y las fotos y clips de la IA.
+          {isAdmin && (
+            <button onClick={() => setEditWatchers(data.watchers)} className="ml-1 underline" style={{ color: 'var(--accent)' }}>
+              Quién puede ver
+            </button>
+          )}
+        </span>
       </p>
+
+      {isAdmin && editWatchers && (
+        <div className="rounded-xl p-4 mb-4 space-y-2" style={card}>
+          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+            Además de los administradores, pueden ver la detección (reglas, historial, fotos y clips de la IA):
+          </p>
+          <div className="flex flex-wrap gap-3 text-xs" style={{ color: 'var(--text-primary)' }}>
+            {users.length === 0 && <span style={{ color: 'var(--text-secondary)' }}>No hay otros usuarios aprobados.</span>}
+            {users.map((u) => (
+              <label key={u} className="flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={editWatchers.includes(u)}
+                  onChange={(e) => setEditWatchers(e.target.checked ? [...editWatchers, u] : editWatchers.filter((x) => x !== u))}
+                />
+                {u}
+              </label>
+            ))}
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setEditWatchers(null)} className="text-xs px-3 py-1.5 rounded-lg" style={btn}>Cancelar</button>
+            <button
+              onClick={() => run(() => saveDetectionWatchers(editWatchers), 'Guardado').then(() => setEditWatchers(null))}
+              disabled={busy}
+              className="text-xs px-3 py-1.5 rounded-lg disabled:opacity-50"
+              style={{ backgroundColor: 'var(--accent)', color: 'var(--bg-primary)' }}
+            >
+              Guardar
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Formulario */}
       {form && r && (
@@ -186,7 +233,7 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
               <label className="flex items-center gap-1"><input type="checkbox" checked={r.actions.telegram} onChange={(e) => set({ actions: { ...r.actions, telegram: e.target.checked } })} /> Telegram con foto</label>
               {r.actions.telegram && (
                 <label className="flex items-center gap-1 pl-4" title="Si no, solo a los administradores">
-                  <input type="checkbox" checked={r.actions.telegram_operators ?? false} onChange={(e) => set({ actions: { ...r.actions, telegram_operators: e.target.checked } })} /> también a operadores
+                  <input type="checkbox" checked={r.actions.telegram_watchers ?? false} onChange={(e) => set({ actions: { ...r.actions, telegram_watchers: e.target.checked } })} /> también a las personas autorizadas
                 </label>
               )}
             </div>

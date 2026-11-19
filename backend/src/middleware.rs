@@ -85,7 +85,7 @@ pub fn bridge_denied(method: &Method, path: &str) -> Option<&'static str> {
         return Some("El registro de cuentas no esta disponible por el puente");
     }
     // Camaras: solo en la red del laboratorio (el aviso de grabacion si se ve)
-    if path.starts_with("/api/cameras") && path != "/api/cameras/recording-now" && path != "/api/cameras/detecting-now" {
+    if path.starts_with("/api/cameras") && path != "/api/cameras/recording-now" {
         return Some("Las camaras solo estan disponibles en la red del laboratorio (LAN o Tailscale)");
     }
     if !is_public(path) && required_access(method, path) == Access::Admin {
@@ -189,7 +189,11 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         ("GET", ["reports", "config"]) | ("GET", ["reports", "mine"]) | ("POST", ["reports"]) => User,
 
         // --- Camaras: ver y grabar operadores; configurar y borrar, admin ---
-        ("GET", ["cameras", "recording-now"]) | ("GET", ["cameras", "detecting-now"]) => User,
+        ("GET", ["cameras", "recording-now"]) => User,
+        // Deteccion con IA: el handler permite solo al admin y a las personas autorizadas
+        ("GET", ["cameras", "detectors"]) | ("GET", ["cameras", "detections"]) => User,
+        // Descargas: el handler exige admin/operador, o estar autorizado si la hizo la IA
+        ("GET", ["cameras", "recordings", _, "download"]) => User,
         ("GET", ["cameras", "detect"]) => Admin,
         ("GET", ["cameras", ..]) => Operator,
         ("POST", ["cameras", _, "record" | "stop" | "photo"]) => Operator,
@@ -401,13 +405,12 @@ mod tests {
     #[test]
     fn camaras() {
         assert_eq!(acc(Method::GET, "/api/cameras/recording-now"), User);
-        assert_eq!(acc(Method::GET, "/api/cameras/detecting-now"), User);
-        assert_eq!(acc(Method::GET, "/api/cameras/detections"), Operator);
+        assert_eq!(acc(Method::GET, "/api/cameras/detections"), User);
+        assert_eq!(acc(Method::PUT, "/api/cameras/detectors/watchers"), Admin);
         assert_eq!(acc(Method::POST, "/api/cameras/detectors"), Admin);
         assert_eq!(acc(Method::POST, "/api/cameras/detectors/test"), Admin);
         assert_eq!(acc(Method::PUT, "/api/cameras/detectors/x"), Admin);
         assert_eq!(acc(Method::POST, "/api/cameras/ai/model"), Admin);
-        assert!(bridge_denied(&Method::GET, "/api/cameras/detecting-now").is_none());
         assert_eq!(acc(Method::GET, "/api/cameras"), Operator);
         assert_eq!(acc(Method::GET, "/api/cameras/abc/stream"), Operator);
         assert_eq!(acc(Method::POST, "/api/cameras/abc/record"), Operator);

@@ -8,7 +8,9 @@
 
 ### Detección con IA
 
-- Cada regla puede **avisar por Telegram también a los operadores** (no solo a los admins), sin tener que darles rol de administrador
+- **Privada**: como es vigilancia, solo la ven los administradores y las personas que un admin autorice («Quién puede ver»). Incluye reglas, historial y las fotos y clips de la IA, que los demás ya no ven en el registro de grabaciones ni pueden descargar
+- **Se quitó el aviso público «Detección activa»** (los demás usuarios no ven que una cámara está vigilando)
+- Cada regla puede **avisar por Telegram también a las personas autorizadas** (no solo a los admins), sin darles rol de administrador
 
 ### Telegram
 

@@ -14,8 +14,8 @@ export interface DetectionActions {
   telegram: boolean
   /** Segundos de video al detectar (0 = no grabar) */
   clip_s: number
-  /** El aviso de Telegram llega tambien a los operadores */
-  telegram_operators: boolean
+  /** El aviso de Telegram llega tambien a las personas autorizadas */
+  telegram_watchers: boolean
 }
 
 export interface DetectorInput {
@@ -47,6 +47,8 @@ export interface DetectorsResponse {
   /** [id en ingles, nombre en español] */
   classes: [string, string][]
   days: string[]
+  /** Personas autorizadas a ver la deteccion (solo la recibe el admin) */
+  watchers: string[]
 }
 
 export interface DetectionRow {
@@ -59,12 +61,6 @@ export interface DetectionRow {
   at: string
   photo_id: string | null
   clip_id: string | null
-}
-
-export interface DetectingNow {
-  camera_id: string
-  camera: string
-  kinds: string[]
 }
 
 async function failText(res: Response, fallback: string): Promise<never> {
@@ -112,8 +108,8 @@ export async function fetchDetections(): Promise<DetectionRow[]> {
   return res.json()
 }
 
-export async function fetchDetectingNow(): Promise<DetectingNow[]> {
-  const res = await api('/api/cameras/detecting-now')
-  if (!res.ok) return []
-  return res.json()
+/** Quienes, ademas de los admins, pueden ver la deteccion (admin) */
+export async function saveDetectionWatchers(users: string[]): Promise<void> {
+  const res = await api('/api/cameras/detectors/watchers', json('PUT', { users }))
+  if (!res.ok) return failText(res, 'No se pudo guardar quienes ven la deteccion')
 }

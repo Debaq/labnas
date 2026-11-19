@@ -4,7 +4,10 @@
 //! Todo corre en el NAS: las imagenes no salen del laboratorio. El modelo (YOLOX-nano,
 //! Apache-2.0) no viene en el binario: se descarga al activar una regla que lo usa, se
 //! verifica su huella y se guarda en ~/.labnas/models. Las detecciones no se borran
-//! (trazabilidad) y mientras una regla esta activa todos ven "Deteccion activa".
+//! (trazabilidad).
+//!
+//! Es vigilancia: solo la ven los admins y las personas que un admin autoriza (setting
+//! `cameras_watchers`). Eso incluye reglas, historial y las fotos y clips de la IA.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -57,9 +60,9 @@ pub struct Actions {
     /// Segundos de video al detectar (0 = no grabar)
     #[serde(default)]
     pub clip_s: u32,
-    /// El aviso de Telegram llega tambien a los operadores (si no, solo a los admins)
+    /// El aviso de Telegram llega tambien a las personas autorizadas (si no, solo a los admins)
     #[serde(default)]
-    pub telegram_operators: bool,
+    pub telegram_watchers: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -345,16 +348,6 @@ fn update_runtime(id: &str, f: impl FnOnce(&mut Runtime)) {
     }
 }
 
-/// Lo que se esta vigilando ahora (lo ven todos los usuarios)
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct DetectingNow {
-    pub camera_id: String,
-    pub camera: String,
-    pub kinds: Vec<String>,
-}
-
-static DETECTING_NOW: LazyLock<StdMutex<Vec<DetectingNow>>> = LazyLock::new(Default::default);
-
 fn kind_label(r: &RuleInput) -> String {
     match r.kind.as_str() {
         "personas" => "personas".into(),
@@ -390,7 +383,6 @@ pub async fn detection_loop(state: AppState) {
             .iter()
             .filter(|r| r.input.enabled && in_schedule(r.input.schedule.as_ref(), now) && cameras.contains_key(&r.input.camera_id))
             .collect();
-        publish_detecting_now(&state, &active, &cameras);
 
         for rule in active {
             let cam = &cameras[&rule.input.camera_id];
@@ -425,30 +417,6 @@ pub async fn detection_loop(state: AppState) {
             _ = tokio::time::sleep(Duration::from_secs(1)) => {}
             _ = RULES_CHANGED.notified() => { reload_at = Instant::now(); }
         }
-    }
-}
-
-fn publish_detecting_now(state: &AppState, active: &[&Rule], cameras: &HashMap<String, CameraRow>) {
-    let mut list: Vec<DetectingNow> = Vec::new();
-    for r in active {
-        let label = kind_label(&r.input);
-        match list.iter_mut().find(|d| d.camera_id == r.input.camera_id) {
-            Some(d) if !d.kinds.contains(&label) => d.kinds.push(label),
-            Some(_) => {}
-            None => list.push(DetectingNow {
-                camera_id: r.input.camera_id.clone(),
-                camera: cameras.get(&r.input.camera_id).map(|c| c.name.clone()).unwrap_or_default(),
-                kinds: vec![label],
-            }),
-        }
-    }
-    let changed = DETECTING_NOW.lock().map(|mut cur| {
-        let changed = *cur != list;
-        *cur = list.clone();
-        changed
-    });
-    if changed.unwrap_or(false) {
-        state.events.publish("cameras.detecting", serde_json::json!(list), Audience::All, Some("cameras"));
     }
 }
 
@@ -526,9 +494,11 @@ async fn fire(state: &AppState, rule: &Rule, cam: &CameraRow, frame: axum::body:
             }
         }
     }
+    let watchers = watchers(state).await;
     if rule.input.actions.telegram {
+        let extra: Vec<String> = if rule.input.actions.telegram_watchers { watchers.clone() } else { Vec::new() };
         let caption = format!("🔎 {} en {}: {}\n{}", kind_title(&rule.input.kind), cam.name, labels, at.format("%d-%m-%Y %H:%M:%S"));
-        if let Err(e) = crate::handlers::notifications::notify_admins_photo(state, marked, &caption, rule.input.actions.telegram_operators).await {
+        if let Err(e) = crate::handlers::notifications::notify_admins_photo(state, marked, &caption, &extra).await {
             errors.push(format!("telegram: {}", e));
         }
     }
@@ -559,20 +529,14 @@ async fn fire(state: &AppState, rule: &Rule, cam: &CameraRow, frame: axum::body:
         r.last_labels = Some(labels.clone());
         r.last_error = (!errors.is_empty()).then(|| errors.join("; "));
     });
-    state.events.publish(
-        "cameras.detection",
-        serde_json::json!({ "camera_id": cam.id, "camera": cam.name, "kind": rule.input.kind, "labels": labels }),
-        Audience::All,
-        Some("cameras"),
-    );
-    crate::events::notify(
-        state,
-        Audience::Admins,
-        Some("cameras"),
-        crate::events::Level::Warning,
-        &format!("{} en {}", kind_title(&rule.input.kind), cam.name),
-        &labels,
-    );
+    // Solo a quienes pueden ver la deteccion
+    let data = serde_json::json!({ "camera_id": cam.id, "camera": cam.name, "kind": rule.input.kind, "labels": labels });
+    let title = format!("{} en {}", kind_title(&rule.input.kind), cam.name);
+    let audiences = std::iter::once(Audience::Admins).chain(watchers.iter().map(|w| Audience::User(w.clone())));
+    for a in audiences {
+        state.events.publish("cameras.detection", data.clone(), a.clone(), Some("cameras"));
+        crate::events::notify(state, a, Some("cameras"), crate::events::Level::Warning, &title, &labels);
+    }
 }
 
 fn kind_title(kind: &str) -> &'static str {
@@ -581,6 +545,70 @@ fn kind_title(kind: &str) -> &'static str {
         "movimiento" => "Movimiento detectado",
         _ => "Objeto detectado",
     }
+}
+
+// ─── Quien puede ver ───
+
+const WATCHERS_SETTING: &str = "cameras_watchers";
+
+/// Personas (ademas de los admins) que pueden ver la deteccion
+pub(crate) async fn watchers(state: &AppState) -> Vec<String> {
+    db_op(&state.db, |conn| {
+        Ok(crate::db::get_setting(conn, WATCHERS_SETTING).and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default())
+    })
+    .await
+    .unwrap_or_default()
+}
+
+pub(crate) async fn can_view(state: &AppState, s: &SessionInfo) -> bool {
+    s.role == crate::models::notifications::UserRole::Admin || watchers(state).await.contains(&s.username)
+}
+
+async fn require_view(state: &AppState, s: &SessionInfo) -> Result<(), ApiError> {
+    if can_view(state, s).await {
+        Ok(())
+    } else {
+        Err((StatusCode::FORBIDDEN, "Solo el administrador y las personas autorizadas ven la deteccion".into()))
+    }
+}
+
+/// Fotos y clips hechos por la IA (usuario "IA (...)")
+pub(crate) fn is_ai_record(username: &str) -> bool {
+    username.starts_with("IA (")
+}
+
+#[derive(Deserialize)]
+pub struct WatchersInput {
+    pub users: Vec<String>,
+}
+
+/// PUT /api/cameras/detectors/watchers (admin)
+pub async fn set_watchers(
+    State(state): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
+    Json(input): Json<WatchersInput>,
+) -> Result<Json<Vec<String>>, ApiError> {
+    let mut users = input.users;
+    users.sort();
+    users.dedup();
+    let u2 = users.clone();
+    db_op(&state.db, move |conn| {
+        for u in &u2 {
+            let exists: bool = conn
+                .query_row("SELECT COUNT(*) FROM web_users WHERE username = ?1", [u], |r| r.get::<_, i64>(0))
+                .map_err(|e| e.to_string())?
+                > 0;
+            if !exists {
+                return Err(format!("Usuario desconocido: {}", u));
+            }
+        }
+        crate::db::set_setting(conn, WATCHERS_SETTING, &serde_json::to_string(&u2).map_err(|e| e.to_string())?)
+    })
+    .await
+    .map_err(|(_, e)| (StatusCode::BAD_REQUEST, e))?;
+    let list = if users.is_empty() { "solo administradores".to_string() } else { users.join(", ") };
+    state.log_activity("Camara", &format!("Quienes ven la deteccion: {}", list), &session.username).await;
+    Ok(Json(users))
 }
 
 // ─── API ───
@@ -604,10 +632,14 @@ pub struct DetectorsResponse {
     /// Objetos elegibles: (id en ingles, nombre en español)
     pub classes: Vec<(&'static str, &'static str)>,
     pub days: [&'static str; 7],
+    /// Personas autorizadas (solo lo ve el admin)
+    pub watchers: Vec<String>,
 }
 
 /// GET /api/cameras/detectors
-pub async fn list_detectors(State(state): State<AppState>) -> Result<Json<DetectorsResponse>, ApiError> {
+pub async fn list_detectors(State(state): State<AppState>, Extension(session): Extension<SessionInfo>) -> Result<Json<DetectorsResponse>, ApiError> {
+    require_view(&state, &session).await?;
+    let is_admin = session.role == crate::models::notifications::UserRole::Admin;
     let rules = load_rules(&state).await?;
     let cams: HashMap<String, String> = super::all_cameras(&state).await?.into_iter().map(|c| (c.id, c.name)).collect();
     let now = chrono::Local::now().naive_local();
@@ -626,6 +658,7 @@ pub async fn list_detectors(State(state): State<AppState>) -> Result<Json<Detect
         kinds: KINDS.to_vec(),
         classes: vision::COCO.to_vec(),
         days: DAY_NAMES,
+        watchers: if is_admin { watchers(&state).await } else { Vec::new() },
     }))
 }
 
@@ -778,7 +811,12 @@ pub struct DetectionsQuery {
 }
 
 /// GET /api/cameras/detections[?camera=id]
-pub async fn list_detections(State(state): State<AppState>, Query(q): Query<DetectionsQuery>) -> Result<Json<Vec<DetectionRow>>, ApiError> {
+pub async fn list_detections(
+    State(state): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
+    Query(q): Query<DetectionsQuery>,
+) -> Result<Json<Vec<DetectionRow>>, ApiError> {
+    require_view(&state, &session).await?;
     let rows = db_op(&state.db, move |conn| {
         let mut stmt = conn
             .prepare(
@@ -807,16 +845,8 @@ pub async fn list_detections(State(state): State<AppState>, Query(q): Query<Dete
     Ok(Json(rows))
 }
 
-/// GET /api/cameras/detecting-now (cualquier usuario: transparencia)
-pub async fn detecting_now() -> Json<Vec<DetectingNow>> {
-    Json(DETECTING_NOW.lock().map(|l| l.clone()).unwrap_or_default())
-}
-
-/// Al apagar el modulo: nadie esta vigilando
+/// Al apagar el modulo
 pub fn shutdown() {
-    if let Ok(mut l) = DETECTING_NOW.lock() {
-        l.clear();
-    }
     if let Ok(mut m) = RUNTIME.lock() {
         m.clear();
     }
@@ -858,7 +888,7 @@ mod tests {
             min_score: 0.5,
             interval_s: 2,
             schedule: None,
-            actions: Actions { photo: true, telegram: true, clip_s: 10, telegram_operators: false },
+            actions: Actions { photo: true, telegram: true, clip_s: 10, telegram_watchers: false },
             cooldown_s: 60,
             enabled: true,
         };
