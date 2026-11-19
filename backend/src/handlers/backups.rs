@@ -408,10 +408,10 @@ pub async fn restore_snapshot(
         .join(crate::handlers::restic::RESTORE_DIR)
         .join(format!("{}-{}", snap, Local::now().format("%Y%m%d-%H%M%S")));
     let msg = format!("Snapshot {} restaurado en {}", snap, target.display());
-    let (repo, t, s) = (job.destination.clone(), target.clone(), snap.clone());
+    let (repo, t, s, src) = (job.destination.clone(), target.clone(), snap.clone(), job.source.clone());
     tokio::task::spawn_blocking(move || {
         std::fs::create_dir_all(&t).map_err(|e| e.to_string())?;
-        crate::handlers::restic::Repo { repo: &repo, password: &creds.0, env: &creds.1 }.restore(&s, &t)
+        crate::handlers::restic::Repo { repo: &repo, password: &creds.0, env: &creds.1 }.restore(&s, &t, Path::new(&src))
     })
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
@@ -562,6 +562,12 @@ fn restic_snapshot(
         let conn = pool.get().map_err(|e| e.to_string())?;
         conn.execute("VACUUM INTO ?1", [db_dir.join("labnas.db").to_string_lossy().to_string()])
             .map_err(|e| format!("Error respaldando la base de datos: {}", e))?;
+        // Sin secret.key los secretos de la base no se pueden descifrar al restaurar.
+        // Solo en restic: el repositorio va cifrado (en rsync quedaria en claro).
+        let key = crate::db::data_dir().join("secret.key");
+        if key.exists() {
+            std::fs::copy(&key, db_dir.join("secret.key")).map_err(|e| format!("Error respaldando secret.key: {}", e))?;
+        }
         paths.push(&db_dir);
     }
     let trash = format!("{}/{}", source.display(), crate::handlers::trash::TRASH_DIR);

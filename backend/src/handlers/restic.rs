@@ -168,10 +168,13 @@ impl Repo<'_> {
         Ok(snaps.into_iter().map(|(_, s)| s).collect())
     }
 
-    /// Restaura un snapshot completo en `target` (carpeta nueva)
-    pub fn restore(&self, snapshot: &str, target: &Path) -> Result<(), String> {
+    /// Restaura de un snapshot solo `include` (la carpeta respaldada) en `target`.
+    /// La copia de la base y secret.key quedan fuera: `target` es visible para los
+    /// usuarios de esa carpeta. Se recuperan a mano (`restic restore`) ante un desastre.
+    pub fn restore(&self, snapshot: &str, target: &Path, include: &Path) -> Result<(), String> {
         let t = target.to_string_lossy().to_string();
-        let out = self.run(&["restore", snapshot, "--target", &t])?;
+        let inc = include.to_string_lossy().to_string();
+        let out = self.run(&["restore", snapshot, "--target", &t, "--include", &inc])?;
         if !out.status.success() {
             return Err(format!("No se pudo restaurar: {}", tail(&String::from_utf8_lossy(&out.stderr), 3)));
         }

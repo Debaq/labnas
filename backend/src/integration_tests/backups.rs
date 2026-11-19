@@ -169,6 +169,17 @@ async fn respaldo_restic_y_restauracion() {
     assert_eq!(r.status, 200, "{}", r.text);
     let restored: Vec<_> = walk(&s.home.join("Docs/.labnas-restore")).into_iter().filter(|p| p.ends_with("tesis.txt")).collect();
     assert_eq!(std::fs::read_to_string(&restored[0]).unwrap(), "capitulo 1");
+    // La restauracion web (visible en la carpeta) no trae la base ni secret.key...
+    let all = walk(&s.home.join("Docs/.labnas-restore"));
+    assert!(!all.iter().any(|p| p.ends_with("labnas.db") || p.ends_with("secret.key")), "{:?}", all);
+    // ...pero el repositorio si los tiene, para recuperar ante un desastre
+    let ls = std::process::Command::new("restic")
+        .args(["-r", &repo, "ls", "latest"])
+        .env("RESTIC_PASSWORD", "una-clave-larga")
+        .output()
+        .unwrap();
+    let ls = String::from_utf8_lossy(&ls.stdout);
+    assert!(ls.contains("/labnas.db") && ls.contains("/secret.key"), "{}", ls);
     assert_eq!(s.post(&format!("/api/backups/{}/restore", id), &admin, json!({ "snapshot": "--target=/" })).await.status, 400);
 }
 

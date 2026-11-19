@@ -22,6 +22,7 @@
 ### Respaldos con restic
 
 - Tareas de respaldo tipo **restic**: repositorio cifrado y deduplicado en disco local o remoto (SFTP, S3, B2, REST...). Contraseña y credenciales cifradas en la base (migración 12), retención diaria, **verificación** de integridad y **restauración** a `<origen>/.labnas-restore/` sin pisar archivos. Las tareas rsync siguen igual
+- Los snapshots restic con base de datos incluyen también `secret.key` (cifrada en el repositorio): sin ella los secretos de una base restaurada no se pueden descifrar. La restauración web trae solo la carpeta respaldada; la base y la llave se recuperan por terminal
 - `install.sh --deps` instala también `restic`
 
 ### Acceso remoto: puente PHP (etapas B1–B4)

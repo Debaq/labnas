@@ -598,11 +598,18 @@ Requiere `rsync` en el servidor.
 - Los datos se cifran antes de salir y se deduplican: solo se sube lo nuevo
 - Se conserva una copia por día de los últimos N días (`forget --keep-daily N --prune`)
 - La contraseña del repositorio y las credenciales del destino (`B2_ACCOUNT_ID=...`, `AWS_ACCESS_KEY_ID=...`, una por línea) se guardan cifradas. **Guarda la contraseña en otro lugar: sin ella no se puede restaurar**
-- **Verificar** revisa la integridad del repositorio (con una muestra del 5 % de los datos). **Restaurar** copia un snapshot a `<origen>/.labnas-restore/` sin pisar nada
+- **Verificar** revisa la integridad del repositorio (con una muestra del 5 % de los datos). **Restaurar** copia la carpeta respaldada de un snapshot a `<origen>/.labnas-restore/` sin pisar nada
+- Con «incluir base de datos», el snapshot lleva también `labnas.db` **y `secret.key`** (el repositorio va cifrado), así un desastre total se recupera solo con el repositorio y su contraseña. La restauración desde la web no los trae (quedarían visibles en la carpeta); se recuperan por terminal:
+  ```bash
+  restic -r <repositorio> ls latest | grep -E 'labnas.db|secret.key'   # muestra la carpeta .../restic-tmp-<id>
+  restic -r <repositorio> restore latest --target /tmp/rescate --include <esa carpeta>
+  # luego, con LabNAS detenido: copiar labnas.db y secret.key de /tmp/rescate/... a ~/.labnas/
+  ```
+- Backblaze B2: la documentación de restic recomienda su API S3: destino `s3:https://s3.<región>.backblazeb2.com/<bucket>/labnas` con `AWS_ACCESS_KEY_ID=<keyID>` y `AWS_SECRET_ACCESS_KEY=<applicationKey>`
 - Para SFTP, el usuario del servicio necesita una llave SSH autorizada en el otro equipo
 - Requiere `restic` (`sudo pacman -S restic` / `sudo apt install restic`, o `install.sh --deps`)
 
-> **Importante:** los secretos de la base van cifrados con `~/.labnas/secret.key`, que **no** se incluye en los respaldos (así una copia de la base sola no expone contraseñas ni tokens). Guarda ese archivo aparte: para restaurar la base en otra máquina hay que copiar también `secret.key` a `~/.labnas/`.
+> **Importante:** los secretos de la base van cifrados con `~/.labnas/secret.key`. Los respaldos **rsync** y las copias diarias de la base **no** la incluyen (así una copia de la base sola no expone contraseñas ni tokens): si solo usas rsync, guarda ese archivo aparte. Los respaldos **restic** con base de datos sí la incluyen, cifrada dentro del repositorio.
 
 ## Auditoría
 
