@@ -35,11 +35,21 @@ pub async fn toggle_module(
     }).await?;
 
     // Update in-memory cache
-    let mut cache = state.enabled_modules.lock().await;
-    if enabled {
-        cache.insert(id.clone());
-    } else {
-        cache.remove(&id);
+    {
+        let mut cache = state.enabled_modules.lock().await;
+        if enabled {
+            cache.insert(id.clone());
+        } else {
+            cache.remove(&id);
+        }
+    }
+
+    // Apagar la terminal corta tambien las sesiones abiertas desde Telegram
+    if id == "terminal" && !enabled {
+        let sessions: Vec<_> = state.tg_terminals.lock().await.drain().map(|(_, s)| s).collect();
+        for mut s in sessions {
+            let _ = s.child.kill().await;
+        }
     }
 
     Ok(Json(serde_json::json!({ "ok": true, "id": id, "enabled": enabled })))

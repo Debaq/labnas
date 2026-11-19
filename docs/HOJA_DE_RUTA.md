@@ -94,7 +94,7 @@ una sola página `SettingsPage.tsx` de ~1.850 líneas con 9 pestañas.
 
 ### Fallas encontradas en la revisión
 
-- [ ] **El bot de Telegram ignora los módulos apagados.** Con el módulo Terminal
+- [x] **El bot de Telegram ignora los módulos apagados.** *(corregido)* Con el módulo Terminal
       apagado, `/cmd` sigue ejecutando comandos para quien tenga ese permiso. Lo mismo
       pasa con `/imprimir`, `/impresoras`, `/tareas`, `/propuestas` y `/musica`.
       Quien apaga un módulo espera que quede apagado del todo. **Prioridad alta**
@@ -122,7 +122,7 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       `finanzas` usa `inventory` y `portfolio`. No se puede apagar uno del que otro
       depende sin avisar.
 - [ ] **Tareas de fondo que se encienden y apagan en vivo** junto con su módulo.
-- [ ] **Comandos de Telegram ligados a su módulo** (arregla la falla de arriba).
+- [x] **Comandos de Telegram ligados a su módulo** (arregla la falla de arriba).
 - [ ] **Ajustes propios de cada módulo:** cada módulo trae su sección de
       configuración, que solo aparece si está encendido. De paso se parte
       `SettingsPage.tsx`.

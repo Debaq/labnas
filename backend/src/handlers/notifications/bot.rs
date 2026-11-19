@@ -148,6 +148,14 @@ pub(super) async fn handle_message(state: &AppState, token: &str, msg: &TgMessag
     let has_terminal = is_admin || chat.permissions.terminal;
     let has_printer3d = is_admin || is_operator;
 
+    // Un modulo apagado lo esta tambien por Telegram (no solo en la web)
+    let modules = state.enabled_modules.lock().await.clone();
+    if let Some(off) = command_modules(text).iter().find(|m| !modules.contains(**m)) {
+        let msg = format!("El modulo *{}* esta desactivado.", module_label(off));
+        let _ = send_telegram_message(&state.http_client, token, chat_id, &msg).await;
+        return;
+    }
+
     let response = match text {
         s if s.starts_with("/cmd ") => {
             if !has_terminal {
@@ -268,10 +276,10 @@ pub(super) async fn handle_message(state: &AppState, token: &str, msg: &TgMessag
             };
             format!("{} Tu rol: *{}*", emoji, role_name)
         }
-        s if s.starts_with("/ayuda") | s.starts_with("/help") => build_help_message(&role, has_terminal, has_printer3d),
+        s if s.starts_with("/ayuda") | s.starts_with("/help") => build_help_message(&role, has_terminal, has_printer3d, &modules),
         _ => {
             // Check if user has active terminal session - pipe input
-            if has_terminal {
+            if has_terminal && modules.contains("terminal") {
                 if let Some(output) = pipe_terminal_input(state, chat_id, text).await {
                     output
                 } else {
@@ -458,58 +466,138 @@ pub(super) async fn handle_link_command(state: &AppState, chat_id: i64, _chat_na
 }
 
 
-pub(super) fn build_help_message(role: &UserRole, has_terminal: bool, has_printer3d: bool) -> String {
+/// Prefijos de comandos y los modulos que necesitan. Cubren al menos lo que
+/// acepta el `match` de `handle_message` (mismos prefijos o mas amplios).
+const COMMAND_MODULES: &[(&str, &[&str])] = &[
+    ("/cmd ", &["terminal"]),
+    ("/evento", &["tasks"]),
+    ("/aceptar ", &["tasks"]),
+    ("/declinar ", &["tasks"]),
+    ("/proyecto", &["tasks"]),
+    ("/tarea", &["tasks"]),
+    ("/avance", &["tasks"]),
+    ("/confirmar ", &["tasks"]),
+    ("/rechazar ", &["tasks"]),
+    ("/hecho ", &["tasks"]),
+    ("/correo2tarea ", &["email", "tasks"]),
+    ("/aprobar ", &["email", "tasks"]),
+    ("/leer ", &["email"]),
+    ("/propuestas", &["email"]),
+    ("/descartar ", &["email"]),
+    ("/correos", &["email"]),
+    ("/musica", &["music"]),
+    ("/music", &["music"]),
+    ("/play ", &["music"]),
+    ("/next", &["music"]),
+    ("/siguiente", &["music"]),
+    ("/stop", &["music"]),
+    ("/parar", &["music"]),
+    ("/pause", &["music"]),
+    ("/mix", &["music"]),
+    ("/vol ", &["music"]),
+    ("/pausar", &["printers3d"]),
+    ("/camara", &["printers3d"]),
+    ("/foto", &["printers3d"]),
+    ("/temp", &["printers3d"]),
+    ("/imprimir ", &["printers3d"]),
+    ("/cancelar3d", &["printers3d"]),
+    ("/impresoras", &["printers3d"]),
+    ("/red", &["network"]),
+];
+
+/// Modulos que necesita un comando (vacio = siempre disponible)
+pub(super) fn command_modules(text: &str) -> &'static [&'static str] {
+    // "/pausar" a secas pausa la musica; con argumento, una impresora 3D
+    if text == "/pausar" {
+        return &["music"];
+    }
+    COMMAND_MODULES.iter().find(|(p, _)| text.starts_with(p)).map(|(_, m)| *m).unwrap_or(&[])
+}
+
+fn module_label(id: &str) -> &str {
+    match id {
+        "terminal" => "Terminal",
+        "tasks" => "Tareas / Horario",
+        "email" => "Correo",
+        "music" => "Musica",
+        "printers3d" => "Impresoras 3D",
+        "network" => "Red",
+        other => other,
+    }
+}
+
+pub(super) fn build_help_message(
+    role: &UserRole,
+    has_terminal: bool,
+    has_printer3d: bool,
+    modules: &std::collections::HashSet<String>,
+) -> String {
+    let on = |m: &str| modules.contains(m);
     let mut msg = String::from("*LabNAS - Comandos*\n\n");
     msg.push_str("*Sistema*\n");
-    msg.push_str("/estado /discos /ram /cpu\n");
-    msg.push_str("/uptime /red /impresoras\n");
+    msg.push_str("/estado /discos /ram /cpu /uptime\n");
+    if on("network") {
+        msg.push_str("/red\n");
+    }
     msg.push_str("/actividad /horario /mirol\n");
     msg.push_str("/vincular CODIGO - Vincular con web\n");
-    if has_terminal {
+    if has_terminal && on("terminal") {
         msg.push_str("/cmd COMANDO - Ejecutar en terminal\n");
     }
     msg.push('\n');
-    msg.push_str("*Impresoras 3D*\n");
-    msg.push_str("/temp - Temperaturas\n");
-    msg.push_str("/camara - Foto de la impresora\n");
-    if has_printer3d {
-        msg.push_str("/imprimir NOMBRE - Iniciar impresion\n");
-        msg.push_str("/pausar NOMBRE - Pausar\n");
-        msg.push_str("/cancelar3d NOMBRE - Cancelar\n");
+    if on("printers3d") {
+        msg.push_str("*Impresoras 3D*\n");
+        msg.push_str("/impresoras - Estado\n");
+        msg.push_str("/temp - Temperaturas\n");
+        msg.push_str("/camara - Foto de la impresora\n");
+        if has_printer3d {
+            msg.push_str("/imprimir NOMBRE - Iniciar impresion\n");
+            msg.push_str("/pausar NOMBRE - Pausar\n");
+            msg.push_str("/cancelar3d NOMBRE - Cancelar\n");
+        }
+        msg.push('\n');
     }
-    msg.push('\n');
-    msg.push_str("*Correo*\n");
-    msg.push_str("/correos - Resumen de bandeja\n");
-    msg.push_str("/leer UID - Detalle de un correo\n");
-    msg.push_str("/correo2tarea UID - Email a tarea\n");
-    msg.push_str("/propuestas - Eventos y tareas que propone la IA\n");
-    msg.push_str("/aprobar ID - Agendar una propuesta\n");
-    msg.push_str("/descartar ID - Descartar una propuesta\n\n");
-    msg.push_str("*Calendario*\n");
-    msg.push_str("/evento FECHA HORA Titulo @persona\n");
-    msg.push_str("/eventos - Mis eventos\n");
-    msg.push_str("/aceptar ID - Aceptar invitacion\n");
-    msg.push_str("/declinar ID - Rechazar invitacion\n\n");
-    msg.push_str("*Tareas y Proyectos*\n");
-    msg.push_str("/tarea Titulo @persona - Crear tarea\n");
-    msg.push_str("/tarea Titulo @all !confirmar - Confirmar\n");
-    msg.push_str("/tarea Titulo !insistente - Cada 8min\n");
-    msg.push_str("/tarea Titulo !cada5 - Cada 5min\n");
-    msg.push_str("/tareas - Mis tareas pendientes\n");
-    msg.push_str("/confirmar ID - Confirmar tarea\n");
-    msg.push_str("/rechazar ID - Rechazar tarea\n");
-    msg.push_str("/hecho ID - Marcar completada\n");
-    msg.push_str("/proyecto Nombre - Crear proyecto\n");
-    msg.push_str("/proyectos - Ver proyectos\n");
-    msg.push_str("/avance Proyecto - Progreso\n\n");
-    msg.push_str("*Musica*\n");
-    msg.push_str("/musica - Que esta sonando\n");
-    msg.push_str("/play BUSQUEDA - Buscar y reproducir\n");
-    msg.push_str("/next - Siguiente cancion\n");
-    msg.push_str("/stop - Detener musica\n");
-    msg.push_str("/pause - Pausar/reanudar\n");
-    msg.push_str("/mix - Llenar cola con recomendaciones\n");
-    msg.push_str("/vol 0-100 - Ajustar volumen\n");
+    if on("email") {
+        msg.push_str("*Correo*\n");
+        msg.push_str("/correos - Resumen de bandeja\n");
+        msg.push_str("/leer UID - Detalle de un correo\n");
+        msg.push_str("/propuestas - Eventos y tareas que propone la IA\n");
+        msg.push_str("/descartar ID - Descartar una propuesta\n");
+        if on("tasks") {
+            msg.push_str("/correo2tarea UID - Email a tarea\n");
+            msg.push_str("/aprobar ID - Agendar una propuesta\n");
+        }
+        msg.push('\n');
+    }
+    if on("tasks") {
+        msg.push_str("*Calendario*\n");
+        msg.push_str("/evento FECHA HORA Titulo @persona\n");
+        msg.push_str("/eventos - Mis eventos\n");
+        msg.push_str("/aceptar ID - Aceptar invitacion\n");
+        msg.push_str("/declinar ID - Rechazar invitacion\n\n");
+        msg.push_str("*Tareas y Proyectos*\n");
+        msg.push_str("/tarea Titulo @persona - Crear tarea\n");
+        msg.push_str("/tarea Titulo @all !confirmar - Confirmar\n");
+        msg.push_str("/tarea Titulo !insistente - Cada 8min\n");
+        msg.push_str("/tarea Titulo !cada5 - Cada 5min\n");
+        msg.push_str("/tareas - Mis tareas pendientes\n");
+        msg.push_str("/confirmar ID - Confirmar tarea\n");
+        msg.push_str("/rechazar ID - Rechazar tarea\n");
+        msg.push_str("/hecho ID - Marcar completada\n");
+        msg.push_str("/proyecto Nombre - Crear proyecto\n");
+        msg.push_str("/proyectos - Ver proyectos\n");
+        msg.push_str("/avance Proyecto - Progreso\n\n");
+    }
+    if on("music") {
+        msg.push_str("*Musica*\n");
+        msg.push_str("/musica - Que esta sonando\n");
+        msg.push_str("/play BUSQUEDA - Buscar y reproducir\n");
+        msg.push_str("/next - Siguiente cancion\n");
+        msg.push_str("/stop - Detener musica\n");
+        msg.push_str("/pause - Pausar/reanudar\n");
+        msg.push_str("/mix - Llenar cola con recomendaciones\n");
+        msg.push_str("/vol 0-100 - Ajustar volumen\n");
+    }
 
     let role_name = match role {
         UserRole::Admin => "Admin",
@@ -587,5 +675,39 @@ pub(super) async fn handle_schedule_command(state: &AppState, chat_id: i64, text
         format!("Reporte diario activado a las *{:02}:{:02}*", hour, minute)
     } else {
         "No estas registrado. Envia /start primero.".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_help_message, command_modules};
+    use crate::models::notifications::UserRole;
+
+    #[test]
+    fn comandos_ligados_a_su_modulo() {
+        assert_eq!(command_modules("/cmd ls"), &["terminal"]);
+        assert_eq!(command_modules("/tareas"), &["tasks"]);
+        assert_eq!(command_modules("/eventos"), &["tasks"]);
+        assert_eq!(command_modules("/aprobar 3"), &["email", "tasks"]);
+        assert_eq!(command_modules("/propuestas"), &["email"]);
+        assert_eq!(command_modules("/pausar"), &["music"]);
+        assert_eq!(command_modules("/pausar Prusa"), &["printers3d"]);
+        assert_eq!(command_modules("/pausar3d"), &["printers3d"]);
+        assert_eq!(command_modules("/camara 1"), &["printers3d"]);
+        assert_eq!(command_modules("/red"), &["network"]);
+        assert!(command_modules("/estado").is_empty());
+        assert!(command_modules("/kill").is_empty());
+        assert!(command_modules("/ayuda").is_empty());
+    }
+
+    #[test]
+    fn ayuda_oculta_modulos_apagados() {
+        let mods: std::collections::HashSet<String> = ["tasks".to_string()].into();
+        let help = build_help_message(&UserRole::Admin, true, true, &mods);
+        assert!(help.contains("/tareas"));
+        assert!(!help.contains("/cmd"));
+        assert!(!help.contains("/propuestas"));
+        assert!(!help.contains("/imprimir"));
+        assert!(!help.contains("/play"));
     }
 }

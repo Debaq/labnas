@@ -50,6 +50,7 @@
 
 ### Seguridad
 
+- **Módulos apagados también por Telegram**: antes el bot seguía respondiendo comandos de módulos desactivados (incluido `/cmd` con el módulo Terminal apagado). Ahora responde que el módulo está desactivado, `/ayuda` oculta sus comandos y apagar la Terminal cierra las sesiones abiertas desde Telegram
 - **Impresión:** el nombre del archivo subido se reduce a su nombre base; antes un nombre con `../` escribía fuera de `/tmp` (impresión normal, dúplex y subida de G-code)
 - **Descargar desde URL:** solo a internet pública. Se rechazan localhost, la LAN, Tailscale (100.64/10), link-local/metadatos y esquemas no http(s), también tras redirecciones. La descarga va en streaming a disco con el tope de `upload_limit_mb`
 - **Links compartidos:** cada link tiene dueño; un usuario solo ve y revoca los suyos (el admin, todos). La descarga es en streaming (antes cargaba el archivo entero en RAM) y los vencidos se purgan. La URL ahora usa el origen con que se entró (antes `http://IP:3001` fijo)
