@@ -20,6 +20,8 @@ import {
   ChevronRight,
   DollarSign,
   BookOpen,
+  Eye,
+  EyeOff,
 } from 'lucide-react'
 import {
   fetchCupsPrinters,
@@ -35,6 +37,7 @@ import {
   wakePrinter,
   fetchAllUserCosts,
   fetchMyCosts,
+  setPrinterHidden,
 } from '../api'
 import { useAuth } from '../auth/AuthContext'
 import DuplexWizard from '../components/DuplexWizard'
@@ -46,6 +49,8 @@ import { errorMessage } from '../lib/errors'
 export default function PrintingPage() {
   const { isAdmin, can } = useAuth()
   const [printers, setPrinters] = useState<CupsPrinter[]>([])
+  // Las ocultas solo llegan al admin (para poder volver a mostrarlas); no se usan para imprimir
+  const usablePrinters = printers.filter((p) => !p.hidden)
   const [jobs, setJobs] = useState<CupsPrintJob[]>([])
   const [loading, setLoading] = useState(true)
   const [printing, setPrinting] = useState(false)
@@ -101,9 +106,10 @@ export default function PrintingPage() {
       const [p, j] = await Promise.allSettled([fetchCupsPrinters(), fetchPrintJobs()])
       if (p.status === 'fulfilled') {
         setPrinters(p.value)
-        if (p.value.length > 0 && !selectedPrinter) {
-          const def = p.value.find((pr) => pr.is_default)
-          setSelectedPrinter(def?.name || p.value[0].name)
+        const usable = p.value.filter((pr) => !pr.hidden)
+        if (usable.length > 0 && (!selectedPrinter || !usable.some((pr) => pr.name === selectedPrinter))) {
+          const def = usable.find((pr) => pr.is_default)
+          setSelectedPrinter(def?.name || usable[0].name)
         }
       } else {
         setError('No se pudo conectar con CUPS. Verifica que este instalado.')
@@ -365,7 +371,7 @@ export default function PrintingPage() {
               <div
                 key={p.name}
                 className="rounded-xl p-5 transition-all duration-200 hover:shadow-lg"
-                style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}
+                style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)', opacity: p.hidden ? 0.55 : 1 }}
               >
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
@@ -374,11 +380,22 @@ export default function PrintingPage() {
                       {p.description}
                     </span>
                   </div>
-                  {p.is_default && (
-                    <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}>
-                      Default
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1.5">
+                    {p.hidden && (
+                      <span
+                        className="text-xs px-2 py-0.5 rounded-full font-medium"
+                        style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}
+                        title="Nadie mas la ve: ni en esta lista, ni para imprimir, ni por la impresora de red (IPP)"
+                      >
+                        Oculta
+                      </span>
+                    )}
+                    {p.is_default && (
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: 'var(--accent-alpha)', color: 'var(--accent)' }}>
+                        Default
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 mt-2">
                   <span
@@ -434,6 +451,24 @@ export default function PrintingPage() {
                       title="Pausar impresora"
                     >
                       <Pause size={14} />
+                    </button>
+                  )}
+                  {isAdmin && (
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation()
+                        try {
+                          await setPrinterHidden(p.name, !p.hidden)
+                          await loadData()
+                        } catch (err) {
+                          setError(errorMessage(err))
+                        }
+                      }}
+                      className="p-1 rounded-lg transition-all duration-200 hover:opacity-80"
+                      style={{ color: 'var(--text-secondary)' }}
+                      title={p.hidden ? 'Mostrar a todos' : 'Ocultar a todos (lista, impresion e IPP)'}
+                    >
+                      {p.hidden ? <Eye size={14} /> : <EyeOff size={14} />}
                     </button>
                   )}
                   <button
@@ -546,7 +581,7 @@ export default function PrintingPage() {
       </div>
 
       {/* Impresora de red (IPP) */}
-      <NetworkPrinterPanel printers={printers} />
+      <NetworkPrinterPanel printers={usablePrinters} />
 
       {/* Escaner (SANE en el servidor) */}
       {can('impresion') && <ScanPanel />}
@@ -784,7 +819,7 @@ export default function PrintingPage() {
       {/* Duplex Wizard */}
       {showDuplexWizard && (
         <DuplexWizard
-          printers={printers}
+          printers={usablePrinters}
           defaultPrinter={selectedPrinter}
           onClose={() => setShowDuplexWizard(false)}
           onComplete={() => {
@@ -830,7 +865,7 @@ export default function PrintingPage() {
                   className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer"
                   style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
                 >
-                  {printers.map((p) => (
+                  {usablePrinters.map((p) => (
                     <option key={p.name} value={p.name}>
                       {p.description} {p.is_default ? '(default)' : ''}
                     </option>

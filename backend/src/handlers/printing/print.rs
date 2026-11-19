@@ -86,11 +86,17 @@ pub async fn print_upload(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    let session = extract_session(&state, &headers).await;
+    let is_admin = matches!(&session, Some((_, r)) if *r == crate::models::notifications::UserRole::Admin);
+    if let Err(e) = ensure_visible(&state, &printer_name, is_admin).await {
+        let _ = tokio::fs::remove_dir_all(&tmp_path).await;
+        return Err(e);
+    }
+
     let result = run_lp_command(&printer_name, &tmp_file, copies.clone(), pages.clone(), &lp_options).await;
 
     if result.is_ok() {
-        let username = extract_session(&state, &headers)
-            .await
+        let username = session
             .map(|(u, _)| u)
             .unwrap_or_else(|| "unknown".to_string());
         state.log_activity("Impresion", &format!("{} en {}", file_name, printer_name), &username).await;
@@ -132,6 +138,8 @@ pub async fn print_file_path(
             ),
         ));
     }
+
+    ensure_visible(&state, &req.printer, session.role == crate::models::notifications::UserRole::Admin).await?;
 
     run_lp_command(
         &req.printer,

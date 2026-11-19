@@ -64,6 +64,34 @@ fn is_printable_file(filename: &str) -> bool {
     PRINTABLE_EXTENSIONS.contains(&ext.as_str())
 }
 
+// ── Impresoras ocultas (el admin las esconde a todos: lista web, impresion e IPP) ──
+
+const HIDDEN_PRINTERS_KEY: &str = "printing_hidden_printers";
+
+async fn hidden_printers(state: &AppState) -> std::collections::HashSet<String> {
+    db_op(&state.db, |conn| {
+        Ok(crate::db::get_setting(conn, HIDDEN_PRINTERS_KEY)
+            .and_then(|v| serde_json::from_str::<Vec<String>>(&v).ok())
+            .unwrap_or_default())
+    })
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .collect()
+}
+
+async fn is_printer_hidden(state: &AppState, printer: &str) -> bool {
+    hidden_printers(state).await.contains(printer)
+}
+
+/// Rechaza una impresora oculta salvo para el admin (mismo error que si no existiera)
+async fn ensure_visible(state: &AppState, printer: &str, is_admin: bool) -> Result<(), (StatusCode, String)> {
+    if !is_admin && is_printer_hidden(state, printer).await {
+        return Err((StatusCode::NOT_FOUND, "Impresora no encontrada".to_string()));
+    }
+    Ok(())
+}
+
 fn validate_printer_name(name: &str) -> Result<(), (StatusCode, String)> {
     if !name
         .chars()

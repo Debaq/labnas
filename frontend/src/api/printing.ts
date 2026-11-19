@@ -19,6 +19,15 @@ export async function disablePrinter(name: string): Promise<void> {
   if (!res.ok) throw new Error('Error al deshabilitar impresora')
 }
 
+export async function setPrinterHidden(name: string, hidden: boolean): Promise<void> {
+  const res = await api(`/api/printing/printers/${encodeURIComponent(name)}/visibility`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hidden }),
+  })
+  if (!res.ok) throw new Error('Error al cambiar la visibilidad de la impresora')
+}
+
 export async function fetchPrinterOptions(name: string): Promise<import('../types').PrinterOption[]> {
   const res = await api(`/api/printing/printers/${encodeURIComponent(name)}/options`)
   if (!res.ok) throw new Error('Error al obtener opciones de impresora')

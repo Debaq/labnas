@@ -130,7 +130,8 @@ export default function FilesPage() {
         setCurrentPath(qa[0].path)
       }
     }).catch(() => {})
-    fetchCupsPrinters().then((p) => {
+    fetchCupsPrinters().then((all) => {
+      const p = all.filter((pr) => !pr.hidden)
       setCupsPrinters(p)
       const def = p.find((pr) => pr.is_default)
       if (def) setPrintPrinter(def.name)

@@ -164,6 +164,7 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         ("GET", ["printing", "user-costs"]) => Admin,
         ("POST", ["printing", "printers", _, "costs"]) | ("POST", ["printing", "printers", _, "stats", "reset"]) => Admin,
         ("POST", ["printing", "printers", _, "enable"]) | ("POST", ["printing", "printers", _, "disable"]) => Admin,
+        ("POST", ["printing", "printers", _, "visibility"]) => Admin,
         // Escaner: mismo permiso que imprimir (tambien para ver las paginas)
         (_, ["printing", "scan", ..]) => PermPrint,
         ("GET", ["printing", ..]) => User,
@@ -385,6 +386,7 @@ mod tests {
         assert_eq!(acc(Method::POST, "/api/printing/print-file"), PermPrint);
         assert_eq!(acc(Method::POST, "/api/printing/duplex/prepare"), PermPrint);
         assert_eq!(acc(Method::POST, "/api/printing/printers/hp/enable"), Admin);
+        assert_eq!(acc(Method::POST, "/api/printing/printers/hp/visibility"), Admin);
         assert_eq!(acc(Method::GET, "/api/printing/ipp"), User);
         assert_eq!(acc(Method::POST, "/api/printing/ipp/token"), PermPrint);
         assert_eq!(acc(Method::DELETE, "/api/printing/ipp/token"), PermPrint);

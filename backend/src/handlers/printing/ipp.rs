@@ -166,7 +166,11 @@ async fn ipp_handle(
     let Some((username, allowed)) = user_for_token(&state, &token).await else {
         return http_error(StatusCode::NOT_FOUND, "No encontrado");
     };
-    if validate_printer_name(&printer).is_err() || !printer_exists(&printer).await {
+    // Ocultas por el admin: invisibles por IPP para todos (incluido el admin)
+    if validate_printer_name(&printer).is_err()
+        || !printer_exists(&printer).await
+        || is_printer_hidden(&state, &printer).await
+    {
         return http_error(StatusCode::NOT_FOUND, "No encontrado");
     }
     if !matches!(req.version.0, 1 | 2) {

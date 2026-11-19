@@ -8,6 +8,8 @@ pub struct CupsPrinter {
     pub description: String,
     pub is_default: bool,
     pub state: String,
+    /// Oculta por el admin (solo el admin la recibe en la lista)
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

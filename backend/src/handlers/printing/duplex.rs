@@ -89,6 +89,8 @@ pub async fn duplex_print_step(
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
     validate_temp_id(&req.temp_id)?;
     validate_printer_name(&req.printer)?;
+    let is_admin = matches!(extract_session(&state, &headers).await, Some((_, r)) if r == crate::models::notifications::UserRole::Admin);
+    ensure_visible(&state, &req.printer, is_admin).await?;
 
     // Buscar archivo en el directorio temporal
     let tmp_path = format!("/tmp/labnas-duplex-{}", req.temp_id);

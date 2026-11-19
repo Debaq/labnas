@@ -619,6 +619,7 @@ fn api_routes() -> Router<AppState> {
         .route("/api/printing/printers/{name}/options", get(handlers::printing::printer_options))
         .route("/api/printing/printers/{name}/enable", post(handlers::printing::enable_printer))
         .route("/api/printing/printers/{name}/disable", post(handlers::printing::disable_printer))
+        .route("/api/printing/printers/{name}/visibility", post(handlers::printing::set_printer_visibility))
         .route("/api/printing/printers/{name}/wake", post(handlers::printing::wake_printer_endpoint))
         .route("/api/printing/print", post(handlers::printing::print_upload))
         .route("/api/printing/print-file", post(handlers::printing::print_file_path))

@@ -2,7 +2,13 @@
 
 use super::*;
 
-pub async fn list_printers() -> Result<Json<Vec<CupsPrinter>>, (StatusCode, String)> {
+pub async fn list_printers(
+    State(app): State<AppState>,
+    axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
+) -> Result<Json<Vec<CupsPrinter>>, (StatusCode, String)> {
+    let is_admin = session.role == crate::models::notifications::UserRole::Admin;
+    let hidden = hidden_printers(&app).await;
+
     let names_output = Command::new("lpstat")
         .arg("-e")
         .env("LANG", "C")
@@ -54,6 +60,11 @@ pub async fn list_printers() -> Result<Json<Vec<CupsPrinter>>, (StatusCode, Stri
     let mut printers = Vec::new();
 
     for name in &printer_names {
+        let is_hidden = hidden.contains(name);
+        // Ocultas: solo el admin las ve (marcadas) para poder volver a mostrarlas
+        if is_hidden && !is_admin {
+            continue;
+        }
         let state = status_text
             .lines()
             .find(|line| line.contains(name.as_str()))
@@ -80,6 +91,7 @@ pub async fn list_printers() -> Result<Json<Vec<CupsPrinter>>, (StatusCode, Stri
             description,
             is_default,
             state,
+            hidden: is_hidden,
         });
     }
 
@@ -89,9 +101,12 @@ pub async fn list_printers() -> Result<Json<Vec<CupsPrinter>>, (StatusCode, Stri
 // --- Printer options via lpoptions -p <name> -l ---
 
 pub async fn printer_options(
+    State(state): State<AppState>,
+    axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
     Path(name): Path<String>,
 ) -> Result<Json<Vec<PrinterOption>>, (StatusCode, String)> {
     validate_printer_name(&name)?;
+    ensure_visible(&state, &name, session.role == crate::models::notifications::UserRole::Admin).await?;
 
     let output = Command::new("lpoptions")
         .args(["-p", &name, "-l"])
@@ -213,14 +228,56 @@ pub async fn disable_printer(
 
 /// POST /api/printing/printers/{name}/wake - Despertar impresora y re-habilitarla
 pub async fn wake_printer_endpoint(
+    State(state): State<AppState>,
+    axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
     Path(name): Path<String>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
     validate_printer_name(&name)?;
+    ensure_visible(&state, &name, session.role == crate::models::notifications::UserRole::Admin).await?;
     ensure_printer_ready(&name).await;
     Ok((StatusCode::OK, "Impresora despertada y habilitada".to_string()))
 }
 
-pub async fn list_jobs() -> Result<Json<Vec<CupsPrintJob>>, (StatusCode, String)> {
+#[derive(serde::Deserialize)]
+pub struct PrinterVisibilityRequest {
+    pub hidden: bool,
+}
+
+/// POST /api/printing/printers/{name}/visibility (admin) — Oculta o muestra la impresora a todos
+pub async fn set_printer_visibility(
+    State(state): State<AppState>,
+    axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
+    Path(name): Path<String>,
+    Json(req): Json<PrinterVisibilityRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    validate_printer_name(&name)?;
+    let (n, hide) = (name.clone(), req.hidden);
+    db_op(&state.db, move |conn| {
+        let mut list: Vec<String> = crate::db::get_setting(conn, HIDDEN_PRINTERS_KEY)
+            .and_then(|v| serde_json::from_str(&v).ok())
+            .unwrap_or_default();
+        list.retain(|p| p != &n);
+        if hide {
+            list.push(n);
+        }
+        list.sort();
+        let json = serde_json::to_string(&list).map_err(|e| e.to_string())?;
+        crate::db::set_setting(conn, HIDDEN_PRINTERS_KEY, &json)
+    })
+    .await?;
+    let accion = if req.hidden { "Oculto" } else { "Mostro" };
+    state
+        .log_activity("Impresion", &format!("{} la impresora {}", accion, name), &session.username)
+        .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn list_jobs(
+    State(state): State<AppState>,
+    axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
+) -> Result<Json<Vec<CupsPrintJob>>, (StatusCode, String)> {
+    let is_admin = session.role == crate::models::notifications::UserRole::Admin;
+    let hidden = if is_admin { Default::default() } else { hidden_printers(&state).await };
     let output = Command::new("lpstat")
         .arg("-o")
         .env("LANG", "C")
@@ -248,6 +305,9 @@ pub async fn list_jobs() -> Result<Json<Vec<CupsPrintJob>>, (StatusCode, String)
                 .rfind('-')
                 .map(|i| job_id[..i].to_string())
                 .unwrap_or_else(|| job_id.clone());
+            if hidden.contains(&printer) {
+                continue;
+            }
 
             jobs.push(CupsPrintJob {
                 id: job_id,
@@ -262,7 +322,11 @@ pub async fn list_jobs() -> Result<Json<Vec<CupsPrintJob>>, (StatusCode, String)
     Ok(Json(jobs))
 }
 
-pub async fn cancel_job(Path(id): Path<String>) -> Result<StatusCode, (StatusCode, String)> {
+pub async fn cancel_job(
+    State(state): State<AppState>,
+    axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
     if !id
         .chars()
         .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
@@ -271,6 +335,10 @@ pub async fn cancel_job(Path(id): Path<String>) -> Result<StatusCode, (StatusCod
             StatusCode::BAD_REQUEST,
             "ID de trabajo invalido".to_string(),
         ));
+    }
+    // Trabajo de una impresora oculta: como si no existiera (salvo admin)
+    if let Some(i) = id.rfind('-') {
+        ensure_visible(&state, &id[..i], session.role == crate::models::notifications::UserRole::Admin).await?;
     }
 
     let output = Command::new("cancel")

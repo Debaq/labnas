@@ -150,6 +150,15 @@ async fn impresora_de_red_ipp() {
     assert_eq!(job_attr(&r.msg.unwrap(), "job-state"), Some(Value::Enum(7)));
     assert_eq!(ipp(&s, &path, request(codec::op::CANCEL_JOB, with_job)).await.status, codec::status::NOT_POSSIBLE);
 
+    // Impresora oculta por el admin: invisible por IPP para todos; solo el admin la oculta
+    let vis = format!("/api/printing/printers/{}/visibility", PRINTER);
+    assert_eq!(s.post(&vis, &op, json!({ "hidden": true })).await.status, 403);
+    assert_eq!(s.post(&vis, &admin, json!({ "hidden": true })).await.status, 204);
+    assert_eq!(ipp(&s, &path, request(codec::op::GET_PRINTER_ATTRIBUTES, |_| {})).await.http, 404);
+    assert_eq!(ipp(&s, &adm_path, request(codec::op::GET_PRINTER_ATTRIBUTES, |_| {})).await.http, 404);
+    assert_eq!(s.post(&vis, &admin, json!({ "hidden": false })).await.status, 204);
+    assert_eq!(ipp(&s, &path, request(codec::op::GET_PRINTER_ATTRIBUTES, |_| {})).await.http, 200);
+
     // Operacion desconocida
     assert_eq!(ipp(&s, &path, request(0x0010, |_| {})).await.status, codec::status::OPERATION_NOT_SUPPORTED);
 

@@ -176,6 +176,8 @@ export interface CupsPrinter {
   description: string
   is_default: boolean
   state: string
+  /** Oculta por el admin (solo el admin la recibe) */
+  hidden: boolean
 }
 
 /** Impresora de red IPP: token propio para armar la URL de cada impresora */
