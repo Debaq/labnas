@@ -637,7 +637,9 @@ fn snapshot(source: &Path, dest: &Path, keep: usize, db: Option<&DbPool>) -> Res
     let latest = dest.join(LATEST);
 
     let mut cmd = std::process::Command::new("rsync");
-    cmd.args(["-a", "--delete", "--numeric-ids"]);
+    // --timeout: corta si pasan 15 min sin transferir nada (disco o red colgados). Sin tope
+    // total: un respaldo grande puede durar horas
+    cmd.args(["-a", "--delete", "--numeric-ids", "--timeout=900"]);
     // La papelera no se respalda
     cmd.arg(format!("--exclude={}/", crate::handlers::trash::TRASH_DIR));
     cmd.arg(format!("--exclude={}/", crate::handlers::restic::RESTORE_DIR));

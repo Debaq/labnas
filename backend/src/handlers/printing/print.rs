@@ -293,10 +293,11 @@ pub(super) async fn run_lp_command(
 
     args.push(file_path.to_string());
 
-    let output = Command::new("lp")
-        .args(&args)
-        .output()
-        .await
+    let output = crate::proc::output_timeout(Command::new("lp")
+        .args(&args),
+        crate::proc::LP_TIMEOUT,
+    )
+    .await
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,

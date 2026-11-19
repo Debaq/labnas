@@ -16,6 +16,7 @@ mod ai;
 mod textutil;
 mod module_tasks;
 mod ledger;
+mod proc;
 
 use axum::{
     http::Method,

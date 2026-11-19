@@ -64,10 +64,11 @@ pub async fn recommend(
         let sid = seed_id.clone();
         handles.push(tokio::spawn(async move {
             let mix_url = format!("https://www.youtube.com/watch?v={}&list=RD{}", sid, sid);
-            let output = Command::new("yt-dlp")
-                .args(["--flat-playlist", "--dump-json", "--no-warnings", "--ignore-errors", &mix_url])
-                .output()
-                .await
+            let output = crate::proc::output_timeout(Command::new("yt-dlp")
+                .args(["--flat-playlist", "--dump-json", "--no-warnings", "--ignore-errors", &mix_url]),
+                crate::proc::YTDLP_TIMEOUT,
+            )
+            .await
                 .ok()?;
             Some(String::from_utf8_lossy(&output.stdout).to_string())
         }));
@@ -103,9 +104,11 @@ pub async fn recommend(
             let existing_clone = existing.clone();
             fb_handles.push(tokio::spawn(async move {
                 let search = format!("ytsearch8:{} mix", a);
-                let output = Command::new("yt-dlp")
-                    .args(["--flat-playlist", "--dump-json", "--no-warnings", "--ignore-errors", &search])
-                    .output().await.ok()?;
+                let output = crate::proc::output_timeout(Command::new("yt-dlp")
+                    .args(["--flat-playlist", "--dump-json", "--no-warnings", "--ignore-errors", &search]),
+                    crate::proc::YTDLP_TIMEOUT,
+                )
+                .await.ok()?;
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let mut tracks = Vec::new();
                 for line in stdout.lines() {
@@ -330,16 +333,17 @@ pub async fn radio(
         let user = username.clone();
         handles.push(tokio::spawn(async move {
             let search_term = format!("ytsearch1:{} {}", artist, name);
-            let output = Command::new("yt-dlp")
+            let output = crate::proc::output_timeout(Command::new("yt-dlp")
                 .args([
                     "--flat-playlist",
                     "--dump-json",
                     "--no-warnings",
                     "--ignore-errors",
                     &search_term,
-                ])
-                .output()
-                .await
+                ]),
+                crate::proc::YTDLP_TIMEOUT,
+            )
+            .await
                 .ok()?;
 
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -485,16 +489,17 @@ pub async fn lucky(
         }
 
         let search_term = format!("ytsearch1:{} {}", artist, name);
-        let output = Command::new("yt-dlp")
+        let output = crate::proc::output_timeout(Command::new("yt-dlp")
             .args([
                 "--flat-playlist",
                 "--dump-json",
                 "--no-warnings",
                 "--ignore-errors",
                 &search_term,
-            ])
-            .output()
-            .await
+            ]),
+            crate::proc::YTDLP_TIMEOUT,
+        )
+        .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("yt-dlp: {}", e)))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);

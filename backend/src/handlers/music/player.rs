@@ -166,13 +166,14 @@ pub(super) fn add_to_history(ms: &mut MusicState, track: &MusicTrack, played_by:
 }
 
 pub(super) async fn fetch_track_info(id: &str) -> Result<MusicTrack, (StatusCode, String)> {
-    let output = Command::new("yt-dlp")
+    let output = crate::proc::output_timeout(Command::new("yt-dlp")
         .args([
             "--flat-playlist", "--dump-json", "--no-warnings", "--no-playlist",
             &format!("https://www.youtube.com/watch?v={}", id),
-        ])
-        .output()
-        .await
+        ]),
+        crate::proc::YTDLP_TIMEOUT,
+    )
+    .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Error yt-dlp: {}", e)))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);

@@ -84,13 +84,15 @@ pub(super) fn frame_path(dir: &std::path::Path, n: u32) -> std::path::PathBuf {
 /// Arma timelapse.mp4 con los fotogramas y los borra si salio bien
 pub(super) fn assemble(dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
     let out = dir.join("timelapse.mp4");
-    let status = std::process::Command::new("ffmpeg")
-        .args(["-y", "-loglevel", "error", "-framerate", &FPS.to_string(), "-i"])
+    let mut cmd = std::process::Command::new("ffmpeg");
+    cmd.args(["-y", "-loglevel", "error", "-framerate", &FPS.to_string(), "-i"])
         .arg(dir.join("frame_%05d.jpg"))
         // ancho/alto pares (libx264) y formato compatible con cualquier reproductor
         .args(["-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-pix_fmt", "yuv420p"])
         .arg(&out)
-        .output()
+        // sin stdin: ffmpeg no se queda esperando una tecla
+        .stdin(std::process::Stdio::null());
+    let status = crate::proc::output_timeout_blocking(&mut cmd, crate::proc::FFMPEG_TIMELAPSE_TIMEOUT)
         .map_err(|e| format!("No se pudo ejecutar ffmpeg: {}", e))?;
     if !status.status.success() {
         return Err(String::from_utf8_lossy(&status.stderr).lines().last().unwrap_or("ffmpeg fallo").to_string());
