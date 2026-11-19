@@ -1,6 +1,8 @@
 # Changelog
 
-## [Sin publicar]
+## [3.1.0] — 2026-11-19
+
+Desde v3.0.0.
 
 ### Escáner desde la web
 
