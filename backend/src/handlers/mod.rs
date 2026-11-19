@@ -4,6 +4,7 @@ pub mod smart;
 pub mod webdav;
 pub mod trash;
 pub mod backups;
+pub mod restic;
 pub mod audit;
 pub mod auth;
 pub mod email;

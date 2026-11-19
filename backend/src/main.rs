@@ -495,6 +495,8 @@ fn api_routes() -> Router<AppState> {
         .route("/api/backups/{id}", delete(handlers::backups::delete_backup))
         .route("/api/backups/{id}/run", post(handlers::backups::run_backup_now))
         .route("/api/backups/{id}/snapshots", get(handlers::backups::list_snapshots))
+        .route("/api/backups/{id}/restore", post(handlers::backups::restore_snapshot))
+        .route("/api/backups/{id}/check", post(handlers::backups::check_repository))
         // Auditoria (admin)
         .route("/api/audit", get(handlers::audit::list_audit))
         // Health

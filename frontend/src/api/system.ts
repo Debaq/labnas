@@ -211,6 +211,9 @@ export async function fetchAudit(params: { user?: string; q?: string; before_id?
 
 export interface BackupJob {
   id: string
+  /** rsync: copias navegables en una carpeta; restic: repositorio cifrado (local o remoto) */
+  kind: 'rsync' | 'restic'
+  has_password: boolean
   name: string
   source: string
   destination: string
@@ -226,11 +229,17 @@ export interface BackupJob {
   running: boolean
 }
 
-export type BackupJobInput = Pick<BackupJob, 'name' | 'source' | 'destination' | 'hour' | 'minute' | 'keep' | 'include_db' | 'enabled'>
+export type BackupJobInput = Pick<BackupJob, 'name' | 'source' | 'destination' | 'hour' | 'minute' | 'keep' | 'include_db' | 'enabled' | 'kind'> & {
+  /** Solo restic; omitido al editar = conserva la guardada */
+  restic_password?: string
+  /** Solo restic: CLAVE=valor por linea; omitido = conserva */
+  restic_env?: string
+}
 
 export interface BackupsInfo {
   jobs: BackupJob[]
   rsync_available: boolean
+  restic_available: boolean
   db_backups: string[]
   db_backups_dir: string
 }
@@ -261,6 +270,25 @@ export async function runBackup(id: string): Promise<void> {
 
 export async function fetchBackupSnapshots(id: string): Promise<string[]> {
   return jsonOrThrow(await api(`/api/backups/${id}/snapshots`), 'Error al obtener snapshots')
+}
+
+/** Restaura un snapshot restic en <origen>/.labnas-restore/ */
+export async function restoreBackup(id: string, snapshot: string): Promise<string> {
+  const res = await api(`/api/backups/${id}/restore`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ snapshot }),
+  })
+  const text = await res.text()
+  if (!res.ok) throw new Error(text || 'Error al restaurar')
+  return text
+}
+
+export async function checkBackup(id: string): Promise<string> {
+  const res = await api(`/api/backups/${id}/check`, { method: 'POST' })
+  const text = await res.text()
+  if (!res.ok) throw new Error(text || 'Error al verificar')
+  return text
 }
 
 // --- Salud de discos (SMART, admin) ---

@@ -8,7 +8,7 @@
 #   --user USUARIO    usuario que corre el servicio (por defecto quien usa sudo; nunca root)
 #   --dir RUTA        carpeta de instalacion (por defecto /opt/labnas)
 #   --version vX.Y.Z  version a instalar (por defecto la ultima)
-#   --deps            instalar dependencias opcionales (rsync, ffmpeg, mpv, yt-dlp, cups, smartmontools)
+#   --deps            instalar dependencias opcionales (rsync, restic, ffmpeg, mpv, yt-dlp, cups, smartmontools)
 #   --smart           configurar la lectura de salud de discos (setup-smart.sh)
 #   --uninstall       quitar el servicio y la carpeta de instalacion (los datos quedan)
 #   --purge           con --uninstall: borrar tambien los datos (~/.labnas del usuario; pide confirmacion)
@@ -56,7 +56,7 @@ Instalador de LabNAS
   --user USUARIO    usuario que corre el servicio (por defecto quien usa sudo; nunca root)
   --dir RUTA        carpeta de instalacion (por defecto /opt/labnas)
   --version vX.Y.Z  version a instalar (por defecto la ultima)
-  --deps            instalar dependencias opcionales (rsync, ffmpeg, mpv, yt-dlp, cups, smartmontools)
+  --deps            instalar dependencias opcionales (rsync, restic, ffmpeg, mpv, yt-dlp, cups, smartmontools)
   --smart           configurar la lectura de salud de discos (setup-smart.sh)
   --uninstall       quitar el servicio y la carpeta de instalacion (los datos quedan)
   --purge           con --uninstall: borrar tambien los datos (~/.labnas del usuario; pide confirmacion)
@@ -196,15 +196,15 @@ ok "LabNAS ${NEW_VERSION} instalado en ${INSTALL_DIR} (dueño: ${SERVICE_USER}, 
 
 # ─── Dependencias opcionales ───
 
-OPTIONAL="rsync ffmpeg mpv yt-dlp lp smartctl"
+OPTIONAL="rsync restic ffmpeg mpv yt-dlp lp smartctl"
 if [ "$WITH_DEPS" -eq 1 ]; then
     info "Instalando dependencias opcionales"
     if command -v pacman > /dev/null; then
-        pacman -S --needed --noconfirm rsync ffmpeg mpv yt-dlp cups smartmontools
+        pacman -S --needed --noconfirm rsync restic ffmpeg mpv yt-dlp cups smartmontools
     elif command -v apt-get > /dev/null; then
-        apt-get update -qq && apt-get install -y rsync ffmpeg mpv yt-dlp cups smartmontools
+        apt-get update -qq && apt-get install -y rsync restic ffmpeg mpv yt-dlp cups smartmontools
     elif command -v dnf > /dev/null; then
-        dnf install -y rsync ffmpeg mpv yt-dlp cups smartmontools
+        dnf install -y rsync restic ffmpeg mpv yt-dlp cups smartmontools
     else
         warn "Gestor de paquetes no reconocido: instala a mano $OPTIONAL"
     fi

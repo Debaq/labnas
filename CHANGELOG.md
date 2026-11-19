@@ -2,6 +2,11 @@
 
 ## [Sin publicar]
 
+### Respaldos con restic
+
+- Tareas de respaldo tipo **restic**: repositorio cifrado y deduplicado en disco local o remoto (SFTP, S3, B2, REST...). Contraseña y credenciales cifradas en la base (migración 12), retención diaria, **verificación** de integridad y **restauración** a `<origen>/.labnas-restore/` sin pisar archivos. Las tareas rsync siguen igual
+- `install.sh --deps` instala también `restic`
+
 ### Acceso remoto: puente PHP (etapa B1)
 
 - **Conector PHP** para hosting compartido (PHP 7.0 a 8.x, Apache) que permite usar LabNAS desde internet **sin abrir puertos**: LabNAS sale hacia el hosting, recoge los pedidos (long-poll) y devuelve las respuestas; todo el canal va firmado con HMAC-SHA256. Diseño en `docs/PUENTE_PHP.md`

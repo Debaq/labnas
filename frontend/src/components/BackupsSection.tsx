@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useEvent, useEventsConnected } from '../events/useEvents'
-import { Archive, Plus, Play, Pencil, Trash2, Loader2, AlertTriangle, CheckCircle2, XCircle, Database, X } from 'lucide-react'
-import { fetchBackups, saveBackup, deleteBackup, runBackup, fetchBackupSnapshots, type BackupJob, type BackupJobInput, type BackupsInfo } from '../api'
+import { Archive, Plus, Play, Pencil, Trash2, Loader2, AlertTriangle, CheckCircle2, XCircle, Database, X, ShieldCheck } from 'lucide-react'
+import { fetchBackups, saveBackup, deleteBackup, runBackup, fetchBackupSnapshots, restoreBackup, checkBackup, type BackupJob, type BackupJobInput, type BackupsInfo } from '../api'
 
-const EMPTY: BackupJobInput = { name: '', source: '', destination: '', hour: 3, minute: 0, keep: 7, include_db: true, enabled: true }
+const EMPTY: BackupJobInput = { name: '', source: '', destination: '', hour: 3, minute: 0, keep: 7, include_db: true, enabled: true, kind: 'rsync' }
 
 const card = { backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }
 const input = { backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }
@@ -35,6 +35,7 @@ export default function BackupsSection() {
   const [snapshots, setSnapshots] = useState<{ job: BackupJob; list: string[] } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [restoreMsg, setRestoreMsg] = useState<string | null>(null)
 
   const load = useCallback(() => {
     fetchBackups().then(setInfo).catch((e) => setError(errMsg(e)))
@@ -93,6 +94,12 @@ export default function BackupsSection() {
         )}
       </div>
 
+      {info && editing?.job.kind === 'restic' && !info.restic_available && (
+        <div className="rounded-xl p-4 flex items-center gap-2 text-sm" style={{ ...card, color: 'var(--warning)' }}>
+          <AlertTriangle size={16} /> restic no esta instalado en el servidor (ej. <code>sudo pacman -S restic</code> o <code>sudo apt install restic</code>).
+        </div>
+      )}
+
       {info && !info.rsync_available && (
         <div className="rounded-xl p-4 flex items-center gap-2 text-sm" style={{ ...card, color: 'var(--warning)' }}>
           <AlertTriangle size={16} /> rsync no esta instalado en el servidor. Instalalo (ej. <code>sudo pacman -S rsync</code>) para usar respaldos.
@@ -107,6 +114,14 @@ export default function BackupsSection() {
             {editing.id ? 'Editar respaldo' : 'Nuevo respaldo'}
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label className="text-xs space-y-1 md:col-span-2" style={{ color: 'var(--text-secondary)' }}>
+              <span>Tipo</span>
+              <select value={editing.job.kind} onChange={(e) => set('kind', e.target.value as BackupJobInput['kind'])}
+                className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer" style={input}>
+                <option value="rsync">Copia navegable en un disco (rsync)</option>
+                <option value="restic">Repositorio cifrado y deduplicado, local o remoto (restic)</option>
+              </select>
+            </label>
             <label className="text-xs space-y-1" style={{ color: 'var(--text-secondary)' }}>
               <span>Nombre</span>
               <input value={editing.job.name} onChange={(e) => set('name', e.target.value)} placeholder="Documentos del lab"
@@ -124,10 +139,28 @@ export default function BackupsSection() {
                 className="w-full px-3 py-2 rounded-lg text-sm font-mono outline-none" style={input} />
             </label>
             <label className="text-xs space-y-1" style={{ color: 'var(--text-secondary)' }}>
-              <span>Destino (disco externo o carpeta de red montada)</span>
-              <input value={editing.job.destination} onChange={(e) => set('destination', e.target.value)} placeholder="/mnt/respaldo/documentos"
+              <span>{editing.job.kind === 'restic' ? 'Repositorio (ruta local, sftp:, s3:, b2:, rest:)' : 'Destino (disco externo o carpeta de red montada)'}</span>
+              <input value={editing.job.destination} onChange={(e) => set('destination', e.target.value)}
+                placeholder={editing.job.kind === 'restic' ? 'sftp:respaldo@otro-equipo:/srv/labnas' : '/mnt/respaldo/documentos'}
                 className="w-full px-3 py-2 rounded-lg text-sm font-mono outline-none" style={input} />
             </label>
+            {editing.job.kind === 'restic' && (
+              <>
+                <label className="text-xs space-y-1" style={{ color: 'var(--text-secondary)' }}>
+                  <span>Contraseña del repositorio (mín. 8)</span>
+                  <input type="password" autoComplete="new-password" value={editing.job.restic_password ?? ''}
+                    onChange={(e) => set('restic_password', e.target.value)}
+                    placeholder={editing.id && info?.jobs.find(j => j.id === editing.id)?.has_password ? '•••• guardada (vacío = no cambiar)' : ''}
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={input} />
+                </label>
+                <label className="text-xs space-y-1" style={{ color: 'var(--text-secondary)' }}>
+                  <span>Credenciales del destino (opcional, CLAVE=valor por línea)</span>
+                  <textarea rows={2} value={editing.job.restic_env ?? ''} onChange={(e) => set('restic_env', e.target.value)}
+                    placeholder={'B2_ACCOUNT_ID=...\nB2_ACCOUNT_KEY=...'}
+                    className="w-full px-3 py-2 rounded-lg text-xs font-mono outline-none" style={input} />
+                </label>
+              </>
+            )}
             <label className="text-xs space-y-1" style={{ color: 'var(--text-secondary)' }}>
               <span>Copias a conservar</span>
               <input type="number" min={1} max={365} value={editing.job.keep} onChange={(e) => set('keep', parseInt(e.target.value) || 1)}
@@ -145,7 +178,9 @@ export default function BackupsSection() {
             </div>
           </div>
           <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-            Cada copia es completa y navegable, pero los archivos sin cambios se comparten con la copia anterior (no ocupan espacio de nuevo).
+            {editing.job.kind === 'restic'
+              ? 'Los datos se cifran antes de salir y solo se guarda lo nuevo. Se conserva una copia por día de los últimos N días. Guarda la contraseña en otro lugar: sin ella no se puede restaurar. Para SFTP, el usuario del servicio necesita una llave SSH autorizada en el otro equipo.'
+              : 'Cada copia es completa y navegable, pero los archivos sin cambios se comparten con la copia anterior (no ocupan espacio de nuevo).'}
           </p>
           <div className="flex gap-2 justify-end">
             <button onClick={() => setEditing(null)} className="px-3 py-2 rounded-lg text-sm" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
@@ -165,6 +200,7 @@ export default function BackupsSection() {
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{job.name}</span>
+                {job.kind === 'restic' && <span className="text-xs px-2 rounded" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--accent)' }}>restic · cifrado</span>}
                 {!job.enabled && <span className="text-xs px-2 rounded" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>Pausado</span>}
               </div>
               <p className="text-xs font-mono truncate" style={{ color: 'var(--text-secondary)' }}>{job.source} → {job.destination}</p>
@@ -174,7 +210,11 @@ export default function BackupsSection() {
                 className="p-2 rounded-lg disabled:opacity-30" style={{ color: 'var(--accent)' }}><Play size={15} /></button>
               <button title="Ver copias" onClick={() => fetchBackupSnapshots(job.id).then((list) => setSnapshots({ job, list })).catch((e) => setError(errMsg(e)))}
                 className="p-2 rounded-lg" style={{ color: 'var(--text-secondary)' }}><Archive size={15} /></button>
-              <button title="Editar" onClick={() => setEditing({ id: job.id, job: { name: job.name, source: job.source, destination: job.destination, hour: job.hour, minute: job.minute, keep: job.keep, include_db: job.include_db, enabled: job.enabled } })}
+              {job.kind === 'restic' && (
+                <button title="Verificar repositorio" onClick={() => checkBackup(job.id).then(() => setError(null)).catch((e) => setError(errMsg(e)))}
+                  className="p-2 rounded-lg" style={{ color: 'var(--text-secondary)' }}><ShieldCheck size={15} /></button>
+              )}
+              <button title="Editar" onClick={() => setEditing({ id: job.id, job: { name: job.name, source: job.source, destination: job.destination, hour: job.hour, minute: job.minute, keep: job.keep, include_db: job.include_db, enabled: job.enabled, kind: job.kind } })}
                 className="p-2 rounded-lg" style={{ color: 'var(--text-secondary)' }}><Pencil size={15} /></button>
               <button title="Eliminar tarea (no borra las copias)" onClick={() => { if (confirm(`Eliminar la tarea "${job.name}"? Las copias ya hechas no se borran.`)) act(() => deleteBackup(job.id)) }}
                 className="p-2 rounded-lg" style={{ color: 'var(--danger)' }}><Trash2 size={15} /></button>
@@ -205,10 +245,20 @@ export default function BackupsSection() {
             <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Copias de "{snapshots.job.name}"</span>
             <button onClick={() => setSnapshots(null)} style={{ color: 'var(--text-secondary)' }}><X size={16} /></button>
           </div>
+          {restoreMsg && <p className="text-xs" style={{ color: 'var(--success)' }}>{restoreMsg}</p>}
           {snapshots.list.length === 0
             ? <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Todavia no hay copias.</p>
             : snapshots.list.map((s) => (
-              <p key={s} className="text-xs font-mono" style={{ color: 'var(--text-primary)' }}>{snapshots.job.destination}/{s}</p>
+              snapshots.job.kind === 'restic' ? (
+                <div key={s} className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-mono" style={{ color: 'var(--text-primary)' }}>{s}</span>
+                  <button disabled={busy}
+                    onClick={() => { if (confirm(`Restaurar ${s}? Se copia a una carpeta nueva (.labnas-restore) dentro del origen; no se pisa nada.`)) act(async () => { setRestoreMsg(await restoreBackup(snapshots.job.id, s)) }) }}
+                    className="text-xs px-2 py-1 rounded" style={{ color: 'var(--accent)', border: '1px solid var(--border)' }}>Restaurar</button>
+                </div>
+              ) : (
+                <p key={s} className="text-xs font-mono" style={{ color: 'var(--text-primary)' }}>{snapshots.job.destination}/{s}</p>
+              )
             ))}
         </div>
       )}

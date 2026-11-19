@@ -199,6 +199,10 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE email_accounts ADD COLUMN auth TEXT NOT NULL DEFAULT 'password';
     ALTER TABLE email_accounts ADD COLUMN last_error TEXT;
     ALTER TABLE email_accounts ADD COLUMN last_check TEXT;",
+    // 12: respaldos con restic (cifrados, a destinos remotos); secretos cifrados
+    "ALTER TABLE backup_jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'rsync';
+    ALTER TABLE backup_jobs ADD COLUMN restic_password TEXT;
+    ALTER TABLE backup_jobs ADD COLUMN restic_env TEXT;",
 ];
 
 fn run_migrations(conn: &Connection) {

@@ -4,6 +4,9 @@
 //! origen; los archivos sin cambios son hardlinks al snapshot anterior (`latest`),
 //! asi que solo ocupa espacio lo que cambio. Se conservan los ultimos `keep`.
 //!
+//! Las tareas `restic` (ver handlers::restic) guardan snapshots cifrados y
+//! deduplicados en un repositorio local o remoto (SFTP, S3, B2...).
+//!
 //! Aparte, la DB de LabNAS se respalda sola cada dia en `~/.labnas/backups/`.
 
 use axum::{
@@ -37,6 +40,10 @@ fn is_running(id: &str) -> bool {
 #[derive(Debug, Clone, Serialize)]
 pub struct BackupJob {
     pub id: String,
+    /// "rsync" | "restic"
+    pub kind: String,
+    /// Solo restic: si tiene contraseña guardada (nunca se devuelve)
+    pub has_password: bool,
     pub name: String,
     pub source: String,
     pub destination: String,
@@ -64,6 +71,18 @@ pub struct BackupJobRequest {
     pub include_db: bool,
     #[serde(default = "yes")]
     pub enabled: bool,
+    #[serde(default = "rsync_kind")]
+    pub kind: String,
+    /// Solo restic. `None` al editar: conserva la guardada
+    #[serde(default)]
+    pub restic_password: Option<String>,
+    /// Solo restic: credenciales del destino, "CLAVE=valor" por linea. `None`: conserva
+    #[serde(default)]
+    pub restic_env: Option<String>,
+}
+
+fn rsync_kind() -> String {
+    "rsync".to_string()
 }
 
 fn yes() -> bool {
@@ -74,13 +93,15 @@ fn yes() -> bool {
 pub struct BackupsResponse {
     pub jobs: Vec<BackupJob>,
     pub rsync_available: bool,
+    pub restic_available: bool,
     /// Copias automaticas de labnas.db (nombres, mas recientes primero)
     pub db_backups: Vec<String>,
     pub db_backups_dir: String,
 }
 
 const SELECT_JOB: &str = "SELECT id, name, source, destination, hour, minute, keep, include_db, enabled, \
-     last_run, last_status, last_message, created_at FROM backup_jobs";
+     last_run, last_status, last_message, created_at, kind, restic_password IS NOT NULL AND restic_password != '' \
+     FROM backup_jobs";
 
 fn row_to_job(row: &rusqlite::Row) -> rusqlite::Result<BackupJob> {
     let id: String = row.get(0)?;
@@ -99,6 +120,8 @@ fn row_to_job(row: &rusqlite::Row) -> rusqlite::Result<BackupJob> {
         last_status: row.get(10)?,
         last_message: row.get(11)?,
         created_at: row.get(12)?,
+        kind: row.get(13)?,
+        has_password: row.get(14)?,
     })
 }
 
@@ -149,7 +172,24 @@ fn validate(req: &BackupJobRequest, roots: &[PathBuf]) -> Result<(String, String
         return Err(bad("El origen debe ser una carpeta"));
     }
 
-    let raw_dest = Path::new(req.destination.trim());
+    if req.kind != "rsync" && req.kind != "restic" {
+        return Err(bad("Tipo de respaldo invalido"));
+    }
+    let raw = req.destination.trim();
+    if req.kind == "restic" {
+        crate::handlers::restic::validate_repo(raw).map_err(|e| bad(&e))?;
+        if let Some(env) = &req.restic_env {
+            crate::handlers::restic::parse_env(env).map_err(|e| bad(&e))?;
+        }
+        if req.restic_password.as_deref().is_some_and(|p| p.len() < 8) {
+            return Err(bad("La contraseña del repositorio debe tener al menos 8 caracteres"));
+        }
+        // Los remotos no se validan como ruta local
+        if crate::handlers::restic::is_remote(raw) {
+            return Ok((name, source.to_string_lossy().to_string(), raw.to_string()));
+        }
+    }
+    let raw_dest = Path::new(raw);
     if !raw_dest.is_absolute() || raw_dest.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
         return Err(bad("El destino debe ser una ruta absoluta"));
     }
@@ -186,6 +226,7 @@ pub async fn list_backups(State(state): State<AppState>) -> Result<Json<BackupsR
     Ok(Json(BackupsResponse {
         jobs,
         rsync_available: rsync_available(),
+        restic_available: crate::handlers::restic::available(),
         db_backups,
         db_backups_dir: dir.to_string_lossy().to_string(),
     }))
@@ -198,16 +239,20 @@ pub async fn create_backup(
 ) -> Result<Json<BackupJob>, ApiError> {
     let roots = crate::storage::load_roots(&state.db).await?;
     let (name, source, dest) = validate(&req, &roots)?;
+    if req.kind == "restic" && req.restic_password.as_deref().unwrap_or("").is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Falta la contraseña del repositorio (guárdala aparte: sin ella no se puede restaurar)".to_string()));
+    }
     let id = uuid::Uuid::new_v4().simple().to_string()[..12].to_string();
     let now = Local::now().to_rfc3339();
 
     let (id2, name2, src2, dest2) = (id.clone(), name.clone(), source.clone(), dest.clone());
     let (hour, minute, keep, include_db, enabled) = (req.hour, req.minute, req.keep, req.include_db, req.enabled);
+    let (kind, pass, env) = (req.kind.clone(), req.restic_password.clone(), req.restic_env.clone());
     let job = crate::db::db_op(&state.db, move |conn| {
         conn.execute(
-            "INSERT INTO backup_jobs (id, name, source, destination, hour, minute, keep, include_db, enabled, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![id2, name2, src2, dest2, hour, minute, keep, include_db, enabled, now],
+            "INSERT INTO backup_jobs (id, name, source, destination, hour, minute, keep, include_db, enabled, created_at, kind, restic_password, restic_env)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, labnas_encrypt(?12), labnas_encrypt(?13))",
+            params![id2, name2, src2, dest2, hour, minute, keep, include_db, enabled, now, kind, pass, env],
         )
         .map_err(|e| e.to_string())?;
         load_job(conn, &id2)?.ok_or_else(|| "No se pudo crear".to_string())
@@ -231,12 +276,15 @@ pub async fn update_backup(
 
     let (id2, name2, src2, dest2) = (id.clone(), name.clone(), source, dest);
     let (hour, minute, keep, include_db, enabled) = (req.hour, req.minute, req.keep, req.include_db, req.enabled);
+    let (kind, pass, env) = (req.kind.clone(), req.restic_password.clone(), req.restic_env.clone());
     let job = crate::db::db_op_status(&state.db, move |conn| {
         let n = conn
             .execute(
                 "UPDATE backup_jobs SET name=?1, source=?2, destination=?3, hour=?4, minute=?5, keep=?6,
-                 include_db=?7, enabled=?8 WHERE id=?9",
-                params![name2, src2, dest2, hour, minute, keep, include_db, enabled, id2],
+                 include_db=?7, enabled=?8, kind=?10,
+                 restic_password = COALESCE(labnas_encrypt(?11), restic_password),
+                 restic_env = COALESCE(labnas_encrypt(?12), restic_env) WHERE id=?9",
+                params![name2, src2, dest2, hour, minute, keep, include_db, enabled, id2, kind, pass, env],
             )
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         if n == 0 {
@@ -301,9 +349,105 @@ pub async fn list_snapshots(
     let job = crate::db::db_op(&state.db, move |conn| load_job(conn, &id))
         .await?
         .ok_or((StatusCode::NOT_FOUND, "Respaldo no encontrado".to_string()))?;
+    if job.kind == "restic" {
+        let creds = load_restic_creds(&state.db, &job.id).await?;
+        let repo = job.destination.clone();
+        let snaps = tokio::task::spawn_blocking(move || {
+            crate::handlers::restic::Repo { repo: &repo, password: &creds.0, env: &creds.1 }.snapshots()
+        })
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
+        return Ok(Json(snaps));
+    }
     let mut snaps = list_snapshot_dirs(Path::new(&job.destination));
     snaps.reverse();
     Ok(Json(snaps))
+}
+
+/// Contraseña y credenciales (descifradas) de una tarea restic
+async fn load_restic_creds(db: &DbPool, id: &str) -> Result<(String, Vec<(String, String)>), ApiError> {
+    let id = id.to_string();
+    let (pass, env): (Option<String>, Option<String>) = crate::db::db_op(db, move |conn| {
+        conn.query_row(
+            "SELECT labnas_decrypt(restic_password), labnas_decrypt(restic_env) FROM backup_jobs WHERE id = ?1",
+            [&id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| e.to_string())
+    })
+    .await?;
+    let pass = pass.filter(|p| !p.is_empty()).ok_or((StatusCode::BAD_REQUEST, "La tarea no tiene contraseña de repositorio".to_string()))?;
+    let env = crate::handlers::restic::parse_env(env.as_deref().unwrap_or("")).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    Ok((pass, env))
+}
+
+#[derive(Deserialize)]
+pub struct RestoreRequest {
+    pub snapshot: String,
+}
+
+/// POST /api/backups/{id}/restore: restaura un snapshot restic en `<origen>/.labnas-restore/<id>/`
+/// (carpeta nueva: nunca pisa archivos; se ve y se mueve desde el explorador)
+pub async fn restore_snapshot(
+    State(state): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
+    AxPath(id): AxPath<String>,
+    Json(req): Json<RestoreRequest>,
+) -> Result<(StatusCode, String), ApiError> {
+    let id2 = id.clone();
+    let job = crate::db::db_op(&state.db, move |conn| load_job(conn, &id2))
+        .await?
+        .ok_or((StatusCode::NOT_FOUND, "Respaldo no encontrado".to_string()))?;
+    if job.kind != "restic" {
+        return Err((StatusCode::BAD_REQUEST, "Los snapshots rsync son carpetas normales: copialas desde el explorador".to_string()));
+    }
+    let snap = crate::handlers::restic::snapshot_id(&req.snapshot).ok_or((StatusCode::BAD_REQUEST, "Snapshot invalido".to_string()))?;
+    let creds = load_restic_creds(&state.db, &job.id).await?;
+    let target = Path::new(&job.source)
+        .join(crate::handlers::restic::RESTORE_DIR)
+        .join(format!("{}-{}", snap, Local::now().format("%Y%m%d-%H%M%S")));
+    let msg = format!("Snapshot {} restaurado en {}", snap, target.display());
+    let (repo, t, s) = (job.destination.clone(), target.clone(), snap.clone());
+    tokio::task::spawn_blocking(move || {
+        std::fs::create_dir_all(&t).map_err(|e| e.to_string())?;
+        crate::handlers::restic::Repo { repo: &repo, password: &creds.0, env: &creds.1 }.restore(&s, &t)
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
+    state.log_activity("Respaldo restaurado", &format!("{}: {}", job.name, msg), &session.username).await;
+    Ok((StatusCode::OK, msg))
+}
+
+/// POST /api/backups/{id}/check: verifica el repositorio restic en segundo plano
+pub async fn check_repository(
+    State(state): State<AppState>,
+    AxPath(id): AxPath<String>,
+) -> Result<(StatusCode, String), ApiError> {
+    let id2 = id.clone();
+    let job = crate::db::db_op(&state.db, move |conn| load_job(conn, &id2))
+        .await?
+        .ok_or((StatusCode::NOT_FOUND, "Respaldo no encontrado".to_string()))?;
+    if job.kind != "restic" {
+        return Err((StatusCode::BAD_REQUEST, "Solo los repositorios restic se verifican".to_string()));
+    }
+    let creds = load_restic_creds(&state.db, &job.id).await?;
+    tokio::spawn(async move {
+        let repo = job.destination.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            crate::handlers::restic::Repo { repo: &repo, password: &creds.0, env: &creds.1 }.check()
+        })
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()));
+        let (level, text) = match &result {
+            Ok(()) => (crate::events::Level::Success, "Repositorio verificado: sin errores".to_string()),
+            Err(e) => (crate::events::Level::Error, e.clone()),
+        };
+        crate::events::notify(&state, crate::events::Audience::Admins, None, level, &format!("Verificación de {}", job.name), &text);
+        state.log_activity("Respaldo verificado", &format!("{}: {}", job.name, text), "sistema").await;
+    });
+    Ok((StatusCode::ACCEPTED, "Verificación iniciada; te avisaremos al terminar".to_string()))
 }
 
 // ─── Ejecucion ───
@@ -331,9 +475,21 @@ async fn run_job(state: AppState, job: BackupJob) {
         job.keep as usize,
         job.include_db,
     );
-    let result = tokio::task::spawn_blocking(move || snapshot(&source, &dest, keep, include_db.then_some(&pool)))
-        .await
-        .unwrap_or_else(|e| Err(e.to_string()));
+    let result = if job.kind == "restic" {
+        match load_restic_creds(&state.db, &job.id).await {
+            Ok(creds) => {
+                let (repo, jid) = (job.destination.clone(), job.id.clone());
+                tokio::task::spawn_blocking(move || restic_snapshot(&source, &repo, &creds, keep as u32, include_db.then_some(&pool), &jid))
+                    .await
+                    .unwrap_or_else(|e| Err(e.to_string()))
+            }
+            Err((_, e)) => Err(e),
+        }
+    } else {
+        tokio::task::spawn_blocking(move || snapshot(&source, &dest, keep, include_db.then_some(&pool)))
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()))
+    };
 
     let (status, message) = match &result {
         Ok(SnapshotOutcome { name, warning: None }) => ("ok", format!("Snapshot {}", name)),
@@ -380,6 +536,46 @@ async fn run_job(state: AppState, job: BackupJob) {
 struct SnapshotOutcome {
     name: String,
     warning: Option<String>,
+}
+
+/// Respaldo restic: crea el repositorio si hace falta, respalda (y la DB), aplica la retencion
+fn restic_snapshot(
+    source: &Path,
+    repo: &str,
+    creds: &(String, Vec<(String, String)>),
+    keep: u32,
+    db: Option<&DbPool>,
+    job_id: &str,
+) -> Result<SnapshotOutcome, String> {
+    let r = crate::handlers::restic::Repo { repo, password: &creds.0, env: &creds.1 };
+    if !crate::handlers::restic::is_remote(repo) {
+        std::fs::create_dir_all(repo).map_err(|e| format!("No se pudo crear el repositorio {}: {}", repo, e))?;
+    }
+    r.ensure_init()?;
+
+    // La DB va como copia consistente (VACUUM INTO) en una carpeta temporal
+    let db_dir = crate::db::data_dir().join(format!("restic-tmp-{}", job_id));
+    let mut paths: Vec<&Path> = vec![source];
+    if let Some(pool) = db {
+        let _ = std::fs::remove_dir_all(&db_dir);
+        std::fs::create_dir_all(&db_dir).map_err(|e| e.to_string())?;
+        let conn = pool.get().map_err(|e| e.to_string())?;
+        conn.execute("VACUUM INTO ?1", [db_dir.join("labnas.db").to_string_lossy().to_string()])
+            .map_err(|e| format!("Error respaldando la base de datos: {}", e))?;
+        paths.push(&db_dir);
+    }
+    let trash = format!("{}/{}", source.display(), crate::handlers::trash::TRASH_DIR);
+    let restore = format!("{}/{}", source.display(), crate::handlers::restic::RESTORE_DIR);
+    let result = r.backup(&paths, &[&trash, &restore]);
+    let _ = std::fs::remove_dir_all(&db_dir);
+    let (name, warning) = result?;
+
+    // Retencion: un fallo aca no invalida el snapshot recien creado
+    let warning = match r.forget(keep) {
+        Ok(()) => warning,
+        Err(e) => Some(warning.map(|w| format!("{} | {}", w, e)).unwrap_or(e)),
+    };
+    Ok(SnapshotOutcome { name, warning })
 }
 
 fn is_snapshot_name(name: &str) -> bool {
@@ -438,6 +634,7 @@ fn snapshot(source: &Path, dest: &Path, keep: usize, db: Option<&DbPool>) -> Res
     cmd.args(["-a", "--delete", "--numeric-ids"]);
     // La papelera no se respalda
     cmd.arg(format!("--exclude={}/", crate::handlers::trash::TRASH_DIR));
+    cmd.arg(format!("--exclude={}/", crate::handlers::restic::RESTORE_DIR));
     if let Ok(prev) = std::fs::canonicalize(&latest) {
         if prev.is_dir() {
             cmd.arg(format!("--link-dest={}", prev.display()));
@@ -578,6 +775,8 @@ mod tests {
     fn job(hour: u32, minute: u32, created: &str, last: Option<&str>) -> BackupJob {
         BackupJob {
             id: "x".into(),
+            kind: "rsync".into(),
+            has_password: false,
             name: "x".into(),
             source: "/a".into(),
             destination: "/b".into(),

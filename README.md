@@ -288,7 +288,7 @@ Opciones (tras `sudo bash -s --`, o descargando el script):
 | `--user NOMBRE` | Usuario del servicio (por defecto quien ejecutó `sudo`) |
 | `--version vX.Y.Z` | Versión concreta en vez de la última |
 | `--dir RUTA` | Directorio de instalación (por defecto `/opt/labnas`) |
-| `--deps` | Instala dependencias opcionales (rsync, ffmpeg, mpv, yt-dlp, cups, smartmontools) |
+| `--deps` | Instala dependencias opcionales (rsync, restic, ffmpeg, mpv, yt-dlp, cups, smartmontools) |
 | `--smart` | Configura el lector SMART (`setup-smart.sh`) |
 | `--tarball ARCHIVO` | Instala desde un tarball local (necesita `ARCHIVO.sha256` al lado) |
 | `--uninstall` | Quita servicio y programa; conserva `~/.labnas` |
@@ -581,6 +581,14 @@ Borrar desde el explorador **mueve a la papelera** (`.labnas-trash/`, oculta, en
 - Además, `labnas.db` se copia sola cada día en `~/.labnas/backups/` (se conservan 7)
 
 Requiere `rsync` en el servidor.
+
+**Repositorios restic (cifrados, fuera del laboratorio):** al crear la tarea, elige el tipo «restic». El destino puede ser una ruta local o un disco externo, `sftp:usuario@otro-equipo:/ruta`, `s3:...`, `b2:bucket:carpeta` o `rest:https://...`.
+- Los datos se cifran antes de salir y se deduplican: solo se sube lo nuevo
+- Se conserva una copia por día de los últimos N días (`forget --keep-daily N --prune`)
+- La contraseña del repositorio y las credenciales del destino (`B2_ACCOUNT_ID=...`, `AWS_ACCESS_KEY_ID=...`, una por línea) se guardan cifradas. **Guarda la contraseña en otro lugar: sin ella no se puede restaurar**
+- **Verificar** revisa la integridad del repositorio (con una muestra del 5 % de los datos). **Restaurar** copia un snapshot a `<origen>/.labnas-restore/` sin pisar nada
+- Para SFTP, el usuario del servicio necesita una llave SSH autorizada en el otro equipo
+- Requiere `restic` (`sudo pacman -S restic` / `sudo apt install restic`, o `install.sh --deps`)
 
 > **Importante:** los secretos de la base van cifrados con `~/.labnas/secret.key`, que **no** se incluye en los respaldos (así una copia de la base sola no expone contraseñas ni tokens). Guarda ese archivo aparte: para restaurar la base en otra máquina hay que copiar también `secret.key` a `~/.labnas/`.
 
