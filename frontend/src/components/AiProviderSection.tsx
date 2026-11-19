@@ -85,7 +85,7 @@ export default function AiProviderSection() {
       </div>
       <div className="rounded-xl p-6 space-y-4" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
         <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-          Cualquier servicio compatible con la API de OpenAI. Se aplica a todos los usuarios. La IA solo propone: nada se agenda sin aprobación.
+          Una sola configuración para todo LabNAS (hoy la usa el correo; la usarán otros módulos). Cualquier servicio compatible con la API de OpenAI. La IA solo propone: una persona aprueba.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -131,7 +131,7 @@ export default function AiProviderSection() {
         </div>
         {msg && <p className="text-xs" style={{ color: msg.ok ? 'var(--success)' : 'var(--danger)' }}>{msg.text}</p>}
         <p className="text-xs" style={{ color: 'var(--text-secondary)', opacity: 0.8 }}>
-          Con un proveedor en la nube, el contenido de los correos se envía a ese servicio. Con Ollama local no sale de tu red.
+          Con un proveedor en la nube, lo que se le pide a la IA (por ejemplo, el texto de los correos) se envía a ese servicio. Con Ollama local no sale de tu red.
         </p>
       </div>
     </section>

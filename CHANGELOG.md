@@ -10,6 +10,10 @@
 - **Ancla externa**: cada día, si la bitácora creció, la huella final va a los admins por Telegram; botón «Anclar» con texto para copiar en un correo. Si la cadena aparece alterada o recortada, avisa por Telegram y en la web y lo deja en la auditoría
 - Migración 16 (`ledger_entries`). Solo admin y no disponible por el puente de internet
 
+### IA
+
+- El **proveedor de IA y su API key** se configuran en **Configuración > Sistema** (antes estaban dentro de Correo y no se podían configurar con ese módulo apagado). Es una sola configuración para todos los módulos
+
 ### Cámaras
 
 - **Módulo Cámaras** (viene apagado; se activa en Configuración > Laboratorio): webcams USB del servidor y cámaras IP (RTSP o MJPEG) de la red, más las cámaras de las impresoras 3D, que aparecen solas. Grilla con imagen cada segundo, vista en vivo, **fotos** y **grabaciones con audio** (MP4 fragmentado, reproducible aunque se corte) en una carpeta del NAS, con duración máxima configurable

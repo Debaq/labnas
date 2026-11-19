@@ -10,6 +10,7 @@ import SmartSection from '../components/SmartSection'
 import HttpsSection from '../components/HttpsSection'
 import AuditLogSection from '../components/AuditLogSection'
 import LedgerSection from '../components/LedgerSection'
+import AiProviderSection from '../components/AiProviderSection'
 import BridgeSection from '../components/BridgeSection'
 import SnapshotsSection from '../components/SnapshotsSection'
 import { useViaBridge } from '../lib/bridge'
@@ -1710,6 +1711,7 @@ export default function SettingsPage() {
       {activeTab === 'backups' && isAdmin && <SnapshotsSection />}
 
       {activeTab === 'system' && isAdmin && <BridgeSection />}
+      {activeTab === 'system' && isAdmin && <AiProviderSection />}
       {activeTab === 'admin' && isAdmin && <LedgerSection />}
       {activeTab === 'admin' && isAdmin && <AuditLogSection />}
 

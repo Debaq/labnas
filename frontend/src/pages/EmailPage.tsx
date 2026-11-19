@@ -5,7 +5,6 @@ import {
   Plus, Filter, AlertTriangle, Bell, BellOff, EyeOff, Tag,
 } from 'lucide-react'
 import ProposalsPanel from '../components/ProposalsPanel'
-import AiProviderSection from '../components/AiProviderSection'
 import MicrosoftConnect from '../components/MicrosoftConnect'
 import MicrosoftOAuthSection from '../components/MicrosoftOAuthSection'
 import { useEvent } from '../events/useEvents'
@@ -608,7 +607,11 @@ export default function EmailPage() {
           </section>
 
           {isAdmin && <MicrosoftOAuthSection />}
-          {isAdmin && <AiProviderSection />}
+          {isAdmin && (
+            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+              El proveedor de IA (y su API key) se configura en Configuración &gt; Sistema; lo usan el correo y los demás módulos.
+            </p>
+          )}
         </div>
       )}
     </div>
