@@ -186,6 +186,39 @@ export interface IppInfo {
   listen_error: string | null
 }
 
+export interface ScanDevice {
+  id: string
+  name: string
+}
+
+export interface ScanDevicesResponse {
+  available: boolean
+  devices: ScanDevice[]
+  error: string | null
+}
+
+export interface ScanOptions {
+  modes: string[]
+  default_mode: string | null
+  resolutions: number[]
+  default_resolution: number | null
+  sources: string[]
+  default_source: string | null
+}
+
+export interface ScanPage {
+  width: number
+  height: number
+  dpi: number
+  gray: boolean
+  size: number
+}
+
+export interface ScanSession {
+  id: string
+  pages: ScanPage[]
+}
+
 export interface CupsPrintJob {
   id: string
   printer: string

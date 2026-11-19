@@ -123,6 +123,7 @@ Módulos disponibles:
 - **Wizard doble cara manual**: para impresoras sin dúplex automático, guía al usuario paso a paso con lotes multi-impresora, intercalado correcto y configuración avanzada por trabajo
 - Conteo real de páginas PDF y límite de subida configurable
 - **Impresora de red (IPP)**: cada usuario agrega las impresoras de LabNAS en Windows, Linux o macOS con una dirección personal (puerto 8631, solo LAN). Windows usa su driver genérico, sin instalar nada; el trabajo queda contado a nombre del usuario
+- **Escáner desde la web** (SANE en el servidor, USB o red): página por página con vista previa, se descarga o se guarda en una carpeta del NAS como PDF o JPG. Instalación y drivers en `docs/ESCANER.md`
 
 ### Tareas y Proyectos
 - Crear tareas con asignación (`@user`, `@all`), fecha límite, proyecto

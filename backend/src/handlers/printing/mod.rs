@@ -1,4 +1,5 @@
-//! Impresion CUPS: impresoras, trabajos, estadisticas de costo y duplex manual.
+//! Impresion CUPS: impresoras, trabajos, estadisticas de costo, duplex manual,
+//! impresora de red (IPP) y escaner (SANE).
 
 use axum::{
     extract::{Multipart, Path, State},
@@ -26,10 +27,11 @@ mod stats;
 mod duplex;
 pub(crate) mod ipp_codec;
 mod ipp;
+mod scan;
 
 // API publica (handlers y loops) y visibilidad entre submodulos (`use super::*`)
 #[allow(unused_imports)]
-pub use {printers::*, print::*, stats::*, duplex::*, ipp::*};
+pub use {printers::*, print::*, stats::*, duplex::*, ipp::*, scan::*};
 
 /// Extrae el username de la sesión a partir del header Authorization
 async fn extract_session(

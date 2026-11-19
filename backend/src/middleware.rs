@@ -159,6 +159,8 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         ("GET", ["printing", "user-costs"]) => Admin,
         ("POST", ["printing", "printers", _, "costs"]) | ("POST", ["printing", "printers", _, "stats", "reset"]) => Admin,
         ("POST", ["printing", "printers", _, "enable"]) | ("POST", ["printing", "printers", _, "disable"]) => Admin,
+        // Escaner: mismo permiso que imprimir (tambien para ver las paginas)
+        (_, ["printing", "scan", ..]) => PermPrint,
         ("GET", ["printing", ..]) => User,
         ("POST", ["printing", "printers", _, "wake"]) => PermPrint,
         ("POST", ["printing", "print"]) | ("POST", ["printing", "print-file"]) => PermPrint,
@@ -375,6 +377,9 @@ mod tests {
         assert_eq!(acc(Method::GET, "/api/printing/ipp"), User);
         assert_eq!(acc(Method::POST, "/api/printing/ipp/token"), PermPrint);
         assert_eq!(acc(Method::DELETE, "/api/printing/ipp/token"), PermPrint);
+        assert_eq!(acc(Method::GET, "/api/printing/scan/devices"), PermPrint);
+        assert_eq!(acc(Method::GET, "/api/printing/scan/sessions/abc/pages/0"), PermPrint);
+        assert_eq!(acc(Method::POST, "/api/printing/scan/pages"), PermPrint);
         assert_eq!(acc(Method::PUT, "/api/printers3d/abc"), Operator);
         assert_eq!(acc(Method::GET, "/api/printers3d/abc/status"), User);
         assert_eq!(acc(Method::POST, "/api/printers3d/queue"), User);

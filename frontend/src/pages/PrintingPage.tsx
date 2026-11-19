@@ -39,11 +39,12 @@ import {
 import { useAuth } from '../auth/AuthContext'
 import DuplexWizard from '../components/DuplexWizard'
 import NetworkPrinterPanel from '../components/NetworkPrinterPanel'
+import ScanPanel from '../components/ScanPanel'
 import type { CupsPrinter, CupsPrintJob, PrinterOption, PrinterStatsResponse, AllUserCostsResponse } from '../types'
 import { errorMessage } from '../lib/errors'
 
 export default function PrintingPage() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, can } = useAuth()
   const [printers, setPrinters] = useState<CupsPrinter[]>([])
   const [jobs, setJobs] = useState<CupsPrintJob[]>([])
   const [loading, setLoading] = useState(true)
@@ -546,6 +547,9 @@ export default function PrintingPage() {
 
       {/* Impresora de red (IPP) */}
       <NetworkPrinterPanel printers={printers} />
+
+      {/* Escaner (SANE en el servidor) */}
+      {can('impresion') && <ScanPanel />}
 
       {/* Drop zone */}
       <div

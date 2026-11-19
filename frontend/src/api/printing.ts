@@ -157,3 +157,68 @@ export async function revokeIppToken(): Promise<void> {
   const res = await api('/api/printing/ipp/token', { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al revocar la direccion')
 }
+
+// --- Escaner (SANE) ---
+
+async function failText(res: Response, fallback: string): Promise<never> {
+  const text = await res.text().catch(() => '')
+  throw new Error(text || fallback)
+}
+
+export async function fetchScanDevices(refresh = false): Promise<import('../types').ScanDevicesResponse> {
+  const res = await api(`/api/printing/scan/devices${refresh ? '?refresh=true' : ''}`)
+  if (!res.ok) return failText(res, 'Error al buscar escaneres')
+  return res.json()
+}
+
+export async function fetchScanOptions(device: string): Promise<import('../types').ScanOptions> {
+  const res = await api(`/api/printing/scan/options?device=${encodeURIComponent(device)}`)
+  if (!res.ok) return failText(res, 'Error al leer las opciones del escaner')
+  return res.json()
+}
+
+export async function scanPage(req: {
+  session?: string
+  device: string
+  mode?: string
+  resolution?: number
+  source?: string
+}): Promise<import('../types').ScanSession> {
+  const res = await api('/api/printing/scan/pages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) return failText(res, 'Error al escanear')
+  return res.json()
+}
+
+export async function deleteScanPage(session: string, index: number): Promise<import('../types').ScanSession> {
+  const res = await api(`/api/printing/scan/sessions/${session}/pages/${index}`, { method: 'DELETE' })
+  if (!res.ok) return failText(res, 'Error al quitar la pagina')
+  return res.json()
+}
+
+export async function deleteScanSession(session: string): Promise<void> {
+  await api(`/api/printing/scan/sessions/${session}`, { method: 'DELETE' })
+}
+
+export function scanPageUrl(session: string, index: number): string {
+  return `/api/printing/scan/sessions/${session}/pages/${index}`
+}
+
+export function scanDownloadUrl(session: string, format: 'pdf' | 'jpg', name: string): string {
+  const q = new URLSearchParams({ format })
+  if (name.trim()) q.set('name', name.trim())
+  return `/api/printing/scan/sessions/${session}/download?${q}`
+}
+
+export async function saveScan(session: string, folder: string, name: string, format: 'pdf' | 'jpg'): Promise<string[]> {
+  const res = await api(`/api/printing/scan/sessions/${session}/save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder, name: name.trim() || undefined, format }),
+  })
+  if (!res.ok) return failText(res, 'Error al guardar')
+  return (await res.json()).saved
+}

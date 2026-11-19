@@ -53,6 +53,7 @@ p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "std
 ciborium = "0.2.2"
 rsa = { version = "0.10.0", default-features = false, features = ["std", "pkcs1v15"] }
 minisign-verify = "0.3.0"
+jpeg-encoder = "0.7"
 
 [features]
 default = []

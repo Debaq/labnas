@@ -18,6 +18,7 @@ mod printers;
 mod secrets;
 mod security;
 mod sensors;
+mod scan;
 mod setup;
 mod shares;
 mod twofa;

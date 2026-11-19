@@ -2,6 +2,13 @@
 
 ## [Sin publicar]
 
+### Escáner desde la web
+
+- **Impresión > Escanear**: LabNAS escanea con SANE (`scanimage`) usando el escáner conectado al servidor (USB o red), así se escanea desde Windows, Linux o el celular sin drivers. Página por página con vista previa; se descarga o se guarda en una carpeta del NAS (respeta los permisos de carpeta, sin pisar archivos) como **PDF** o **JPG**
+- El PDF se arma en LabNAS (JPEG incrustado al tamaño real escaneado), sin dependencias externas; acepta blanco y negro, gris y color de 8 o 16 bits
+- Pide el permiso de impresión, escanea un trabajo a la vez y deja cada escaneo y guardado en la auditoría. Modo, resolución y origen se validan contra lo que reporta el escáner
+- `install.sh --deps` instala SANE; guía para la Brother DCP-165C (brscan3) y permisos USB en `docs/ESCANER.md`
+
 ### Impresora de red (IPP)
 
 - **Imprimir desde Windows, Linux o macOS pasando por LabNAS**: con el módulo de impresión encendido, LabNAS actúa como impresora IPP en el puerto 8631 (HTTP, solo LAN). Cada usuario genera en Impresión su **dirección personal** por impresora y la agrega en Windows con «Seleccionar una impresora compartida por nombre»; Windows usa su driver genérico (IPP Class Driver), sin instalar drivers

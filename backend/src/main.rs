@@ -631,6 +631,13 @@ fn api_routes() -> Router<AppState> {
         .route("/api/printing/my-costs", get(handlers::printing::get_my_costs))
         .route("/api/printing/ipp", get(handlers::printing::get_ipp_info))
         .route("/api/printing/ipp/token", post(handlers::printing::regenerate_ipp_token).delete(handlers::printing::revoke_ipp_token))
+        .route("/api/printing/scan/devices", get(handlers::printing::scan_devices))
+        .route("/api/printing/scan/options", get(handlers::printing::scan_options))
+        .route("/api/printing/scan/pages", post(handlers::printing::scan_page))
+        .route("/api/printing/scan/sessions/{id}", get(handlers::printing::get_scan_session).delete(handlers::printing::delete_scan_session))
+        .route("/api/printing/scan/sessions/{id}/pages/{n}", get(handlers::printing::scan_page_image).delete(handlers::printing::delete_scan_page))
+        .route("/api/printing/scan/sessions/{id}/download", get(handlers::printing::download_scan))
+        .route("/api/printing/scan/sessions/{id}/save", post(handlers::printing::save_scan))
         // Duplex manual
         .route("/api/printing/duplex/prepare", post(handlers::printing::duplex_prepare))
         .route("/api/printing/duplex/print", post(handlers::printing::duplex_print_step))
