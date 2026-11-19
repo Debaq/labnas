@@ -76,6 +76,30 @@ pub struct BridgeStatus {
 
 static STATUS: LazyLock<StdMutex<BridgeStatus>> = LazyLock::new(Default::default);
 
+/// Pedidos del navegador que LabNAS esta atendiendo por el puente (p.ej. una descarga)
+static IN_FLIGHT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Descuenta el pedido al terminar, tambien si la tarea falla o se cancela
+struct InFlight;
+impl InFlight {
+    fn start() -> Self {
+        IN_FLIGHT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        InFlight
+    }
+}
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        IN_FLIGHT.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+fn in_flight() -> usize {
+    IN_FLIGHT.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Cuanto espera la autoactualizacion a que no haya pedidos en curso antes de hacerla igual
+const UPDATE_IDLE_WAIT: Duration = Duration::from_secs(10 * 60);
+
 fn with_status(f: impl FnOnce(&mut BridgeStatus)) {
     if let Ok(mut s) = STATUS.lock() {
         f(&mut s);
@@ -195,6 +219,12 @@ pub async fn bridge_loop(state: AppState, app: Router) {
             .await
             .unwrap_or(true);
         if auto && remote.is_some_and(|v| v != crate::updater::CURRENT_VERSION) {
+            // No cambiar los archivos del conector en medio de una descarga: esperar a que
+            // termine lo que esta en curso (con tope, para que una descarga eterna no lo impida)
+            let deadline = tokio::time::Instant::now() + UPDATE_IDLE_WAIT;
+            while in_flight() > 0 && tokio::time::Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
             match update_connector(&state).await {
                 Ok(msg) => state.log_activity("puente_actualizado", &msg, "sistema").await,
                 Err(e) => with_status(|s| s.last_error = Some(format!("Autoactualizacion del conector: {}", e))),
@@ -261,6 +291,7 @@ async fn worker(state: AppState, app: Router) {
 /// Ejecuta un pedido del navegador y devuelve la respuesta al puente, en partes
 /// del tamaño que acepta el hosting (archivos grandes y video sin cargarlos en memoria)
 async fn handle(state: AppState, app: Router, cfg: BridgeConfig, req: PolledRequest) {
+    let _busy = InFlight::start();
     let id = req.id.clone();
     let (status, headers, length, body) = match execute(&state, app, &cfg, req).await {
         Ok(r) => r,
@@ -644,6 +675,18 @@ mod tests {
         assert_ne!(s1, sign(&key, "status", 1_800_000_000, &"0".repeat(32), b"", ""));
         assert_eq!(hex_decode("0aff"), Some(vec![10, 255]));
         assert_eq!(hex_decode("0g"), None);
+    }
+
+    #[test]
+    fn cuenta_pedidos_en_curso() {
+        let antes = in_flight();
+        {
+            let _a = InFlight::start();
+            let _b = InFlight::start();
+            assert!(in_flight() >= antes + 2);
+        }
+        // Al soltarse (fin del pedido, error o cancelacion) se descuentan
+        assert!(in_flight() <= antes + 2);
     }
 
     #[test]
