@@ -132,6 +132,21 @@ fn with_cookie(mut resp: Response, token: &str, secure: bool) -> Response {
     resp
 }
 
+/// Abre una sesion y responde como el login (token + cookie). La usan las passkeys.
+pub async fn issue_login(
+    state: &AppState,
+    username: &str,
+    role: UserRole,
+    permissions: UserPermissions,
+    secure: bool,
+) -> Result<Response, (StatusCode, String)> {
+    let token = create_session(state, username, role.clone(), permissions.clone()).await?;
+    let modules = crate::db::db_op(&state.db, |conn| Ok(crate::db::get_modules(conn))).await.unwrap_or_default();
+    let cookie_token = token.clone();
+    let resp = Json(AuthResponse { token, username: username.to_string(), role, permissions, enabled_modules: modules }).into_response();
+    Ok(with_cookie(resp, &cookie_token, secure))
+}
+
 fn extract_token(headers: &HeaderMap) -> Option<String> {
     headers
         .get("authorization")

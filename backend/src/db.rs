@@ -203,6 +203,19 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE backup_jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'rsync';
     ALTER TABLE backup_jobs ADD COLUMN restic_password TEXT;
     ALTER TABLE backup_jobs ADD COLUMN restic_env TEXT;",
+    // 13: passkeys (WebAuthn): clave publica COSE ligada a un dominio (rp_id)
+    "CREATE TABLE IF NOT EXISTS webauthn_credentials (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL REFERENCES web_users(username) ON DELETE CASCADE ON UPDATE CASCADE,
+        name TEXT NOT NULL,
+        rp_id TEXT NOT NULL,
+        alg INTEGER NOT NULL,
+        public_key BLOB NOT NULL,
+        sign_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        last_used TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_webauthn_user ON webauthn_credentials(username, rp_id);",
 ];
 
 fn run_migrations(conn: &Connection) {

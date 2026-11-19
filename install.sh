@@ -150,6 +150,11 @@ done
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+# Clave publica minisign de los releases (el workflow de release la escribe aqui antes de firmar
+# este script). Con ella y el comando minisign, el tarball se verifica antes de ejecutar nada.
+MINISIGN_PUBKEY="${LABNAS_MINISIGN_PUBKEY:-__MINISIGN_PUBKEY__}"
+case "$MINISIGN_PUBKEY" in __*) MINISIGN_PUBKEY="" ;; esac
+
 if [ -n "$TARBALL" ]; then
     [ -f "$TARBALL" ] || die "No existe $TARBALL"
     [ -f "$TARBALL.sha256" ] || die "Falta $TARBALL.sha256 (checksum obligatorio)"
@@ -168,6 +173,9 @@ else
     info "Descargando LabNAS ${VERSION} (${ARCH})"
     curl -fL --progress-bar -o "$WORK/labnas.tar.gz" "$BASE/$ASSET" || die "No se pudo descargar $ASSET"
     EXPECTED="$(curl -fsSL "$BASE/$ASSET.sha256" | cut -d' ' -f1)" || die "No se pudo descargar el checksum"
+    if [ -n "$MINISIGN_PUBKEY" ]; then
+        curl -fsSL -o "$WORK/labnas.tar.gz.minisig" "$BASE/$ASSET.minisig" || die "El release no esta firmado (falta $ASSET.minisig)"
+    fi
 fi
 
 ACTUAL="$(sha256sum "$WORK/labnas.tar.gz" | cut -d' ' -f1)"
@@ -175,6 +183,17 @@ if [ -z "$EXPECTED" ] || [ "$ACTUAL" != "$EXPECTED" ]; then
     die "Checksum SHA-256 no coincide: descarga corrupta o alterada"
 fi
 ok "Checksum verificado"
+
+# Firma: prueba que el paquete lo publico el dueño de la clave (no solo que llego entero)
+if [ -n "$MINISIGN_PUBKEY" ] && [ -z "$TARBALL" ]; then
+    if command -v minisign > /dev/null; then
+        minisign -Vq -P "$MINISIGN_PUBKEY" -m "$WORK/labnas.tar.gz" -x "$WORK/labnas.tar.gz.minisig" \
+            || die "Firma minisign invalida: el paquete no es del publicador esperado"
+        ok "Firma verificada"
+    else
+        warn "Instala 'minisign' para verificar la firma del release (solo se verifico el checksum)"
+    fi
+fi
 
 tar xzf "$WORK/labnas.tar.gz" -C "$WORK"
 [ -x "$WORK/labnas/labnas-backend" ] || die "El tarball no contiene labnas/labnas-backend"

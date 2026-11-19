@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
-import { Loader2, LogIn, UserPlus } from 'lucide-react'
+import { Loader2, LogIn, UserPlus, Fingerprint } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
-import { getBranding } from '../api'
+import { getBranding, passkeysSupported } from '../api'
 import { errorMessage } from '../lib/errors'
 
 export default function LoginPage() {
-  const { login, register } = useAuth()
+  const { login, register, passkeyLogin } = useAuth()
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -154,6 +154,29 @@ export default function LoginPage() {
             {mode === 'login' ? 'Entrar' : 'Crear cuenta'}
           </button>
         </form>
+
+        {mode === 'login' && passkeysSupported() && (
+          <button
+            type="button"
+            disabled={loading}
+            onClick={async () => {
+              setError(null)
+              setLoading(true)
+              try {
+                await passkeyLogin(username.trim() || undefined)
+              } catch (e) {
+                setError(e instanceof DOMException && e.name === 'NotAllowedError' ? 'Operación cancelada' : errorMessage(e))
+              } finally {
+                setLoading(false)
+              }
+            }}
+            className="w-full mt-3 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 hover:opacity-90"
+            style={{ color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+          >
+            <Fingerprint size={16} />
+            Entrar con passkey
+          </button>
+        )}
 
         <div className="mt-4 text-center">
           <button

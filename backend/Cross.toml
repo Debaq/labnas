@@ -1,0 +1,3 @@
+# cross compila dentro de un contenedor: pasar la clave publica de releases
+[build.env]
+passthrough = ["LABNAS_MINISIGN_PUBKEY"]

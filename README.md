@@ -453,6 +453,14 @@ Config persiste en `~/.labnas/` (SQLite + assets). Override con `LABNAS_CONFIG`.
 - Por el puente no están la terminal ni la administración (usa la LAN o Tailscale). Los archivos van hasta el límite de envío del hosting
 - Detalles y seguridad: [docs/PUENTE_PHP.md](docs/PUENTE_PHP.md)
 
+### Passkeys (entrar sin contraseña)
+En **Configuración > General > Passkeys** cada usuario agrega su huella, Face ID, Windows Hello o llave de seguridad, y en el login usa **Entrar con passkey**. El navegador las exige con **HTTPS y nombre de dominio**: funcionan por el puente (`https://labnas.tudominio.cl`) o en la LAN con `https://labnas.local` y el certificado de LabNAS instalado; no por `http://IP`. Cada passkey queda ligada a la dirección donde se creó.
+
+### Releases firmados (para quien publica)
+1. Genera una clave sin contraseña: `minisign -G -W -p labnas.pub -s labnas.key`
+2. En GitHub > Settings > Secrets and variables > Actions: secreto `MINISIGN_SECRET_KEY` = contenido de `labnas.key`; variable `MINISIGN_PUBKEY` = la segunda línea de `labnas.pub`
+3. Guarda `labnas.key` fuera del repositorio. Desde ese release, el binario trae la clave pública y el updater no instala nada sin una firma válida (un tarball alterado con su `.sha256` recalculado ya no pasa)
+
 ### Video en pantallas externas
 Corriendo como servicio systemd, LabNAS:
 1. Detecta usuario con sesión X activa

@@ -12,6 +12,7 @@ mod files;
 mod folders;
 mod https;
 mod network;
+mod passkeys;
 mod printers;
 mod secrets;
 mod security;

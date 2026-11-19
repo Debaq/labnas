@@ -4,6 +4,7 @@ import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, 
 import { useAuth } from '../auth/AuthContext'
 import SetupWizard from '../components/SetupWizard'
 import TwoFactorSection from '../components/TwoFactorSection'
+import PasskeysSection from '../components/PasskeysSection'
 import StorageRootsSection from '../components/StorageRootsSection'
 import SmartSection from '../components/SmartSection'
 import HttpsSection from '../components/HttpsSection'
@@ -712,6 +713,7 @@ export default function SettingsPage() {
       </section>}
 
       {activeTab === 'general' && <TwoFactorSection />}
+      {activeTab === 'general' && <PasskeysSection />}
 
       {/* Usuarios y Telegram (admin only) */}
       {activeTab === 'users' && isAdmin && <section>

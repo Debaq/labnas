@@ -2,6 +2,12 @@
 
 ## [Sin publicar]
 
+### Passkeys y releases firmados
+
+- **Passkeys (WebAuthn)**: iniciar sesión sin contraseña con huella, Face ID, Windows Hello o una llave de seguridad (Configuración > General). Verificación propia con criptografía pura en Rust (ES256 y RS256), sin OpenSSL; desafíos de un solo uso, control de origen y de contador de firmas. Requieren HTTPS y un nombre de dominio: funcionan por el puente o por `https://labnas.local` con el certificado instalado
+- **Releases firmados con minisign**: si el release se compila con `MINISIGN_PUBKEY`, el updater exige una firma válida **antes de extraer o ejecutar** el paquete, e `install.sh` la verifica si está `minisign`. El workflow firma tarballs e instalador cuando existe el secreto `MINISIGN_SECRET_KEY`
+- El updater ya no instala versiones anteriores a la actual
+
 ### Sesiones más seguras
 
 - **La sesión web va en una cookie HttpOnly + SameSite=Strict** (Secure por el puente): el token ya no se guarda en `localStorage`, así que un XSS no puede robarlo. Con sesión por cookie, los métodos que modifican exigen la cabecera `X-LabNAS-CSRF`. El token Bearer sigue funcionando para clientes y scripts

@@ -73,14 +73,19 @@ jobs:
           npm ci
           npx vite build --emptyOutDir
 
+      # La clave publica minisign queda embebida en el binario: el updater exige firma valida
       - name: Build backend (nativo)
         if: matrix.use_cross == false
         working-directory: backend
+        env:
+          LABNAS_MINISIGN_PUBKEY: ${{ vars.MINISIGN_PUBKEY }}
         run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Build backend (cross)
         if: matrix.use_cross == true
         working-directory: backend
+        env:
+          LABNAS_MINISIGN_PUBKEY: ${{ vars.MINISIGN_PUBKEY }}
         run: cross build --release --locked --target ${{ matrix.target }}
 
       - name: Empaquetar release
@@ -108,6 +113,38 @@ jobs:
           tar czf "$TARBALL" "$RELEASE_DIR"
           sha256sum "$TARBALL" > "$TARBALL.sha256"
           echo "tarball=$TARBALL" >> "$GITHUB_ENV"
+
+      - name: Firmar con minisign
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PUBKEY: ${{ vars.MINISIGN_PUBKEY }}
+        run: |
+          if [ -z "$MINISIGN_SECRET_KEY" ]; then
+            # Un binario con clave publica embebida no instalaria un release sin firma
+            if [ -n "$MINISIGN_PUBKEY" ]; then
+              echo "::error::MINISIGN_PUBKEY configurada pero falta el secreto MINISIGN_SECRET_KEY"
+              exit 1
+            fi
+            echo "::warning::Release sin firmar (configura MINISIGN_SECRET_KEY y MINISIGN_PUBKEY, ver README)"
+            exit 0
+          fi
+          sudo apt-get update -qq && sudo apt-get install -y minisign
+          KEY="$RUNNER_TEMP/minisign.key"
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$KEY"
+          chmod 600 "$KEY"
+          VERSION="${{ steps.version.outputs.version }}"
+          minisign -S -s "$KEY" -m "${{ env.tarball }}" -t "labnas v$VERSION ${{ matrix.arch }}"
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            # El instalador lleva la clave publica para verificar el tarball
+            sed -i "s|__MINISIGN_PUBKEY__|$MINISIGN_PUBKEY|" install.sh
+            minisign -S -s "$KEY" -m install.sh -t "labnas v$VERSION install.sh"
+            sha256sum install.sh > install.sh.sha256
+          fi
+          rm -f "$KEY"
+          # Comprobar con la clave publica antes de publicar
+          if [ -n "$MINISIGN_PUBKEY" ]; then
+            minisign -V -P "$MINISIGN_PUBKEY" -m "${{ env.tarball }}"
+          fi
 
       - name: Crear release si no existe
         env:
@@ -141,14 +178,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.version.outputs.tag }}"
-          gh release upload "$TAG" "${{ env.tarball }}" "${{ env.tarball }}.sha256" --clobber
+          FILES=("${{ env.tarball }}" "${{ env.tarball }}.sha256")
+          [ -f "${{ env.tarball }}.minisig" ] && FILES+=("${{ env.tarball }}.minisig")
+          gh release upload "$TAG" "${FILES[@]}" --clobber
 
       # Una sola vez: releases/latest/download/install.sh apunta siempre al ultimo
       - name: Subir instalador
         if: matrix.arch == 'x86_64'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ steps.version.outputs.tag }}" install.sh --clobber
+        run: |
+          FILES=(install.sh)
+          [ -f install.sh.minisig ] && FILES+=(install.sh.minisig install.sh.sha256)
+          gh release upload "${{ steps.version.outputs.tag }}" "${FILES[@]}" --clobber
 
   viewer:
     name: Viewer ${{ matrix.arch }}

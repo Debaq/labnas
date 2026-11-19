@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { UserRole, UserPermissions, ModuleInfo } from '../types'
 import { api, UNAUTHORIZED_EVENT } from '../api/client'
+import { loginWithPasskey } from '../api/passkeys'
 
 /** Lo que se guarda en localStorage: sin token (la sesion va en una cookie HttpOnly) */
 interface AuthUser {
@@ -15,6 +16,8 @@ interface AuthContextType {
   loading: boolean
   /** false: la cuenta tiene doble factor y falta el codigo */
   login: (username: string, password: string, code?: string) => Promise<boolean>
+  /** Entrar con una passkey (huella, Face ID, llave) */
+  passkeyLogin: (username?: string) => Promise<void>
   register: (username: string, password: string) => Promise<void>
   logout: () => void
   can: (perm: 'terminal' | 'impresion' | 'archivos_escritura' | 'settings') => boolean
@@ -133,6 +136,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return true
   }
 
+  async function passkeyLogin(username?: string) {
+    const data = await loginWithPasskey(username)
+    const authUser: AuthUser = {
+      username: data.username,
+      role: data.role as UserRole,
+      permissions: data.permissions as UserPermissions,
+      enabledModules: parseModules(data as { enabled_modules?: unknown }),
+    }
+    setUser(authUser)
+    localStorage.setItem('labnas_auth', JSON.stringify(authUser))
+  }
+
   async function register(username: string, password: string) {
     const res = await api('/api/auth/register', {
       method: 'POST',
@@ -199,7 +214,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, can, isAdmin, enabledModules, isModuleEnabled, refreshModules, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, login, passkeyLogin, register, logout, can, isAdmin, enabledModules, isModuleEnabled, refreshModules, refreshUser }}>
       {children}
     </AuthContext.Provider>
   )

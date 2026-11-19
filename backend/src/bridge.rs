@@ -42,7 +42,7 @@ const DEFAULT_MAX_BODY: usize = 6 * 1024 * 1024;
 const SKIP_RESPONSE_HEADERS: &[&str] = &["content-length", "transfer-encoding", "connection", "keep-alive"];
 /// Cabeceras del navegador que se aceptan (las mismas que manda el conector)
 const ALLOWED_REQUEST_HEADERS: &[&str] = &[
-    "authorization", "cookie", "x-labnas-csrf", "content-type", "range", "if-none-match", "if-modified-since", "if-range", "accept", "accept-language",
+    "authorization", "cookie", "x-labnas-csrf", "origin", "content-type", "range", "if-none-match", "if-modified-since", "if-range", "accept", "accept-language",
 ];
 
 #[derive(Debug, Clone)]

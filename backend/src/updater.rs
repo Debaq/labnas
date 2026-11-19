@@ -37,6 +37,27 @@ pub struct ReleaseAssets {
     pub tag: String,
     pub tarball_url: String,
     pub sha256_url: Option<String>,
+    /// Firma minisign del tarball (`<tarball>.minisig`)
+    pub minisig_url: Option<String>,
+}
+
+/// Clave publica minisign de los releases, embebida al compilar el release
+/// (`LABNAS_MINISIGN_PUBKEY`, ver docs). Si esta presente, el updater exige firma valida:
+/// el `.sha256` solo prueba integridad, la firma prueba que lo publico el dueño de la clave.
+pub fn release_pubkey() -> Option<&'static str> {
+    option_env!("LABNAS_MINISIGN_PUBKEY").map(str::trim).filter(|k| !k.is_empty())
+}
+
+/// Verifica la firma minisign de `data` con la clave publica (base64)
+pub fn verify_minisign(pubkey_b64: &str, data: &[u8], signature: &str) -> Result<(), String> {
+    let pk = minisign_verify::PublicKey::from_base64(pubkey_b64).map_err(|e| format!("Clave publica de releases invalida: {}", e))?;
+    let sig = minisign_verify::Signature::decode(signature).map_err(|e| format!("Firma con formato invalido: {}", e))?;
+    pk.verify(data, &sig, false).map_err(|_| "La firma del release no es valida: no se instala".to_string())
+}
+
+fn semver(v: &str) -> Option<(u64, u64, u64)> {
+    let mut it = v.trim_start_matches('v').split(['.', '-']).map(|p| p.parse::<u64>().ok());
+    Some((it.next()??, it.next()??, it.next()??))
 }
 
 // ─── Consulta de releases ───
@@ -68,6 +89,7 @@ pub fn assets_for(release: &serde_json::Value) -> Option<ReleaseAssets> {
     Some(ReleaseAssets {
         tarball_url: asset_url(release, &name)?,
         sha256_url: asset_url(release, &format!("{}.sha256", name)),
+        minisig_url: asset_url(release, &format!("{}.minisig", name)),
         tag,
     })
 }
@@ -166,6 +188,13 @@ pub async fn install(client: &reqwest::Client, assets: &ReleaseAssets) -> Result
     ))
     .ok_or("Checksum SHA-256 con formato invalido")?;
 
+    // Nunca volver a una version anterior (un release viejo puede tener fallos ya corregidos)
+    if let (Some(new), Some(cur)) = (semver(&assets.tag), semver(CURRENT_VERSION)) {
+        if new < cur {
+            return Err(format!("{} es anterior a la version instalada ({}); no se instala", assets.tag, CURRENT_VERSION));
+        }
+    }
+
     let tarball = download(client, &assets.tarball_url, Duration::from_secs(300)).await?;
     let actual = sha256_hex(&tarball);
     if actual != expected {
@@ -173,6 +202,16 @@ pub async fn install(client: &reqwest::Client, assets: &ReleaseAssets) -> Result
             "Checksum no coincide (esperado {}, obtenido {}); descarga corrupta o alterada",
             expected, actual
         ));
+    }
+
+    // Firma: se verifica ANTES de extraer o ejecutar nada del paquete
+    match release_pubkey() {
+        Some(pk) => {
+            let url = assets.minisig_url.as_ref().ok_or("El release no esta firmado; no se instala por seguridad")?;
+            let sig = download(client, url, Duration::from_secs(30)).await?;
+            verify_minisign(pk, &tarball, &String::from_utf8_lossy(&sig))?;
+        }
+        None => eprintln!("[Updater] Build sin clave publica de releases: solo se verifica el SHA-256"),
     }
 
     let dir = install_dir()?;
@@ -411,6 +450,19 @@ mod tests {
         let a = assets_for(&release).unwrap();
         assert_eq!(a.tarball_url, "server");
         assert_eq!(a.sha256_url.as_deref(), Some("sha"));
+        assert_eq!(a.minisig_url, None);
+    }
+
+    #[test]
+    fn versiones_y_firma() {
+        assert!(semver("v3.0.0") < semver("3.0.1"));
+        assert!(semver("v3.10.0") > semver("v3.9.9"));
+        assert_eq!(semver("v3.1"), None);
+        // Vector prehash (formato actual de minisign) de los tests de minisign-verify
+        let pk = "RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
+        let sig = "untrusted comment: signature from minisign secret key\nRUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=\ntrusted comment: timestamp:1556193335\tfile:test\ny/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg==";
+        assert!(verify_minisign(pk, b"test", sig).is_ok());
+        assert!(verify_minisign(pk, b"otro contenido", sig).is_err());
     }
 
     /// Tarball como el del release, con un "binario" que responde `--version`

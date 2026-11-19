@@ -64,6 +64,8 @@ fn is_public(path: &str) -> bool {
             | "/api/auth/login"
             | "/api/auth/register"
             | "/api/auth/has-users"
+            | "/api/auth/passkey/login/options"
+            | "/api/auth/passkey/login"
             | "/api/system/branding"
             | "/api/sensors/data"
             // certificado publico del servidor, para instalarlo como confiable
@@ -112,6 +114,7 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         ("POST", ["auth", "password"]) | ("POST", ["auth", "rename"]) | ("POST", ["auth", "link-code"]) => User,
         ("GET", ["auth", "usernames"]) => User,
         ("GET", ["auth", "2fa"]) | ("POST", ["auth", "2fa", _]) => User,
+        ("POST", ["auth", "passkey", "register", ..]) | ("GET", ["auth", "passkeys"]) | ("DELETE", ["auth", "passkeys", _]) => User,
 
         // --- Modulos ---
         ("GET", ["modules"]) => User,
@@ -374,6 +377,9 @@ mod tests {
     fn autoservicio() {
         assert_eq!(acc(Method::GET, "/api/auth/me"), User);
         assert_eq!(acc(Method::POST, "/api/auth/password"), User);
+        assert_eq!(acc(Method::POST, "/api/auth/passkey/register/options"), User);
+        assert_eq!(acc(Method::DELETE, "/api/auth/passkeys/abc"), User);
+        assert!(is_public("/api/auth/passkey/login"));
         assert_eq!(acc(Method::POST, "/api/music/play"), User);
         assert_eq!(acc(Method::GET, "/api/email/proposals"), User);
         assert_eq!(acc(Method::POST, "/api/email/oauth/microsoft/start"), User);
