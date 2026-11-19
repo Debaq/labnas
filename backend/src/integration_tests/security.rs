@@ -159,3 +159,24 @@ async fn sesion_por_cookie_httponly_con_csrf() {
     let me = s.client().get(format!("{}/api/auth/me", s.base)).header("cookie", &pair).send().await.unwrap();
     assert_eq!(me.status(), 401);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn varios_admins_sin_quedar_sin_ninguno() {
+    let s = Server::start().await;
+    let admin = s.admin().await;
+    let ana = s.user(&admin, "ana", "operador").await;
+
+    // Un admin no se quita el rol a si mismo, y el ultimo admin no se degrada
+    let r = s.post("/api/auth/users/admin/role", &admin, json!({ "role": "operador" })).await;
+    assert_eq!(r.status, 400, "{}", r.text);
+    // Nombrar a otro admin
+    assert!(s.post("/api/auth/users/ana/role", &admin, json!({ "role": "admin" })).await.status < 300);
+    let users = s.get("/api/auth/users", &ana).await;
+    assert_eq!(users.status, 200, "ana ya es admin");
+    // Ahora ana puede degradar al primer admin (quedan admins)
+    assert!(s.post("/api/auth/users/admin/role", &ana, json!({ "role": "operador" })).await.status < 300);
+    // ...pero nadie puede degradar al ultimo
+    let r = s.post("/api/auth/users/ana/role", &ana, json!({ "role": "operador" })).await;
+    assert_eq!(r.status, 400);
+    assert!(r.text.contains("No puedes quitarte"), "{}", r.text);
+}

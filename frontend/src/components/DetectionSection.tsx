@@ -23,7 +23,7 @@ function newRule(cameraId: string): DetectorInput {
   return {
     camera_id: cameraId, kind: 'personas', classes: [], min_score: 0.5, interval_s: 2,
     schedule: { days: [0, 1, 2, 3, 4], from: '20:00', to: '07:00' },
-    actions: { photo: true, telegram: true, clip_s: 10 }, cooldown_s: 120, enabled: true,
+    actions: { photo: true, telegram: true, clip_s: 10, telegram_operators: false }, cooldown_s: 120, enabled: true,
   }
 }
 
@@ -184,6 +184,11 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
               <span>Al detectar</span>
               <label className="flex items-center gap-1"><input type="checkbox" checked={r.actions.photo} onChange={(e) => set({ actions: { ...r.actions, photo: e.target.checked } })} /> Guardar foto</label>
               <label className="flex items-center gap-1"><input type="checkbox" checked={r.actions.telegram} onChange={(e) => set({ actions: { ...r.actions, telegram: e.target.checked } })} /> Telegram con foto</label>
+              {r.actions.telegram && (
+                <label className="flex items-center gap-1 pl-4" title="Si no, solo a los administradores">
+                  <input type="checkbox" checked={r.actions.telegram_operators ?? false} onChange={(e) => set({ actions: { ...r.actions, telegram_operators: e.target.checked } })} /> también a operadores
+                </label>
+              )}
             </div>
           </div>
 

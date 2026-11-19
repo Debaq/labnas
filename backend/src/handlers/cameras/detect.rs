@@ -57,6 +57,9 @@ pub struct Actions {
     /// Segundos de video al detectar (0 = no grabar)
     #[serde(default)]
     pub clip_s: u32,
+    /// El aviso de Telegram llega tambien a los operadores (si no, solo a los admins)
+    #[serde(default)]
+    pub telegram_operators: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -525,7 +528,7 @@ async fn fire(state: &AppState, rule: &Rule, cam: &CameraRow, frame: axum::body:
     }
     if rule.input.actions.telegram {
         let caption = format!("🔎 {} en {}: {}\n{}", kind_title(&rule.input.kind), cam.name, labels, at.format("%d-%m-%Y %H:%M:%S"));
-        if let Err(e) = crate::handlers::notifications::notify_admins_photo(state, marked, &caption).await {
+        if let Err(e) = crate::handlers::notifications::notify_admins_photo(state, marked, &caption, rule.input.actions.telegram_operators).await {
             errors.push(format!("telegram: {}", e));
         }
     }
@@ -855,7 +858,7 @@ mod tests {
             min_score: 0.5,
             interval_s: 2,
             schedule: None,
-            actions: Actions { photo: true, telegram: true, clip_s: 10 },
+            actions: Actions { photo: true, telegram: true, clip_s: 10, telegram_operators: false },
             cooldown_s: 60,
             enabled: true,
         };

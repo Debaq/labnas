@@ -796,15 +796,19 @@ export default function SettingsPage() {
                 </div>
 
                 {/* Role + Permissions + Telegram link */}
-                {u.role !== 'admin' && (
+                {u.username !== authUser?.username && (
                   <div className="flex items-center gap-3 flex-wrap">
                     <select value={u.role} onChange={async (e) => {
-                      try { await setWebUserRole(u.username, e.target.value, u.permissions); setWebUsers(await fetchWebUsers()) } catch {}
+                      const role = e.target.value
+                      if (role === 'admin' && !confirm(`¿Dar rol de administrador a ${u.username}? Tendrá control total del NAS (usuarios, respaldos, terminal, configuración).`)) return
+                      try { await setWebUserRole(u.username, role, u.permissions); setWebUsers(await fetchWebUsers()) }
+                      catch (err) { alert(err instanceof Error ? err.message : String(err)) }
                     }} className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer"
                       style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}>
                       <option value="pendiente">Pendiente</option>
                       <option value="observador">Observador</option>
                       <option value="operador">Operador</option>
+                      <option value="admin">Admin</option>
                     </select>
 
                     {u.role === 'operador' && (

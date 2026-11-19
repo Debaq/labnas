@@ -54,6 +54,9 @@ pub async fn notify_admins(state: &AppState, text: &str) -> usize {
 const ADMIN_CHATS: &str =
     "role = 'admin' OR linked_web_user IN (SELECT username FROM web_users WHERE role = 'admin')";
 
+/// Administradores y operadores (p.ej. avisos de camaras que tambien atiende un operador)
+const STAFF_CHATS: &str = "role IN ('admin', 'operador') OR linked_web_user IN (SELECT username FROM web_users WHERE role IN ('admin', 'operador'))";
+
 /// Token del bot y chats que cumplen `where_sql` (None si no hay bot)
 async fn tg_targets(state: &AppState, where_sql: &'static str) -> Option<(String, Vec<i64>)> {
     crate::db::db_op(&state.db, move |conn| {
@@ -77,14 +80,19 @@ async fn tg_targets(state: &AppState, where_sql: &'static str) -> Option<(String
     .flatten()
 }
 
-/// Envia una foto (JPEG) con texto a los chats de los administradores.
-/// Devuelve a cuantos chats llego, o por que no llego a ninguno.
-pub async fn notify_admins_photo(state: &AppState, jpeg: Vec<u8>, caption: &str) -> Result<usize, String> {
-    let Some((token, chats)) = tg_targets(state, ADMIN_CHATS).await else {
+/// Envia una foto (JPEG) con texto a los chats de los administradores (y de los
+/// operadores si `with_operators`). Devuelve a cuantos chats llego, o por que no llego.
+pub async fn notify_admins_photo(state: &AppState, jpeg: Vec<u8>, caption: &str, with_operators: bool) -> Result<usize, String> {
+    let filter = if with_operators { STAFF_CHATS } else { ADMIN_CHATS };
+    let Some((token, chats)) = tg_targets(state, filter).await else {
         return Err("no hay bot de Telegram configurado (Configuracion > Notificaciones)".into());
     };
     if chats.is_empty() {
-        return Err("ningun chat de administrador: en Configuracion > Notificaciones dale rol admin a tu chat o vinculalo a tu cuenta".into());
+        let who = if with_operators { "administrador ni operador" } else { "administrador" };
+        return Err(format!(
+            "ningun chat de {}: en Configuracion > Notificaciones vincula el chat a la cuenta (o avisa tambien a operadores en la regla)",
+            who
+        ));
     }
     let url = format!("{}/bot{}/sendPhoto", telegram_base(), token);
     let (mut sent, mut last_err) = (0, String::new());

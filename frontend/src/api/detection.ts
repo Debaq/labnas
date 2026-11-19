@@ -14,6 +14,8 @@ export interface DetectionActions {
   telegram: boolean
   /** Segundos de video al detectar (0 = no grabar) */
   clip_s: number
+  /** El aviso de Telegram llega tambien a los operadores */
+  telegram_operators: boolean
 }
 
 export interface DetectorInput {

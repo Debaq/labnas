@@ -2,6 +2,14 @@
 
 ## [Sin publicar]
 
+### Usuarios
+
+- **Puede haber más de un administrador**: en Configuración > Usuarios el selector de rol ofrece «Admin» (con confirmación). Para no quedar sin administrador, nadie puede quitarse el rol a sí mismo ni degradar al último admin
+
+### Detección con IA
+
+- Cada regla puede **avisar por Telegram también a los operadores** (no solo a los admins), sin tener que darles rol de administrador
+
 ### Telegram
 
 - **Los avisos a administradores llegan también a los chats vinculados a una cuenta web de admin**, aunque el rol del chat no se haya actualizado (pasaba si el chat se vinculó antes de ser admin). Afecta a la detección con IA, respaldos, discos y bitácora

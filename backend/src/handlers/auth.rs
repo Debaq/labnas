@@ -603,10 +603,16 @@ pub async fn list_usernames(
 
 pub async fn set_user_role(
     State(state): State<AppState>,
+    axum::Extension(me): axum::Extension<SessionInfo>,
     Path(username): Path<String>,
     Json(req): Json<SetWebUserRoleRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let role = req.role.clone();
+    // Nunca quedarse sin administrador: no se quita el rol a uno mismo (otro admin
+    // puede hacerlo) ni al ultimo admin
+    if role != UserRole::Admin && username == me.username {
+        return Err((StatusCode::BAD_REQUEST, "No puedes quitarte el rol de administrador; pidele a otro admin que lo haga".into()));
+    }
     let permissions = req.permissions.clone().unwrap_or_else(|| {
         crate::handlers::notifications::default_permissions_for_role(&role)
     });
@@ -616,7 +622,20 @@ pub async fn set_user_role(
     let new_perms = permissions.clone();
     let username_clone = username.clone();
 
+    let demoting = new_role != UserRole::Admin;
     let linked_tg = crate::db::db_op_status(&state.db, move |conn| {
+        if demoting {
+            let (was_admin, admins): (bool, i64) = conn
+                .query_row(
+                    "SELECT (SELECT role FROM web_users WHERE username = ?1) = 'admin', (SELECT COUNT(*) FROM web_users WHERE role = 'admin')",
+                    params![&username_clone],
+                    |r| Ok((r.get::<_, Option<bool>>(0)?.unwrap_or(false), r.get(1)?)),
+                )
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            if was_admin && admins <= 1 {
+                return Err((StatusCode::BAD_REQUEST, "Es el unico administrador: nombra a otro antes".to_string()));
+            }
+        }
         // Update web user
         let rows = conn.execute(
             "UPDATE web_users SET role = ?1, perm_terminal = ?2, perm_impresion = ?3, perm_archivos_escritura = ?4

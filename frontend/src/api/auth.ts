@@ -66,7 +66,7 @@ export async function setWebUserRole(username: string, role: string, permissions
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role, permissions }),
   })
-  if (!res.ok) throw new Error('Error al cambiar rol')
+  if (!res.ok) throw new Error((await res.text().catch(() => '')) || 'Error al cambiar rol')
 }
 
 export async function deleteWebUser(username: string): Promise<void> {
