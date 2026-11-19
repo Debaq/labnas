@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 dirs = "7.0.0"
-mdns-sd = "0.18"
+mdns-sd = "0.21"
 png = "0.18.1"
 serde_json = "1.0.151"
 tao = "0.37.0"
