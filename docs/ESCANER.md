@@ -91,3 +91,10 @@ sudo scanimage -L                   # como root: si aquí aparece y como usuario
 
 Una hoja carta a 300 ppp en color pesa entre 0,5 y 1,5 MB en el PDF. Para documentos
 de texto conviene el modo gris.
+
+## «sane_start: Invalid argument»
+
+Algunos drivers declaran un área más larga que su vidrio (brscan3 en la DCP-165C informa
+215,9 × 355,6 mm, Legal, pero el vidrio es A4). Si se escanea el área máxima, `sane_start`
+falla. LabNAS escanea **Carta** por defecto y permite elegir el tamaño de hoja; si aparece
+el error, elige Carta o A4. Desde la terminal: `scanimage -d '<dispositivo>' -x 215.9 -y 279.4 > prueba.pnm`.

@@ -22,6 +22,17 @@ const JPEG_QUALITY: u8 = 85;
 /// Resoluciones que se ofrecen cuando el escaner acepta un rango
 const COMMON_DPI: &[u32] = &[75, 100, 150, 200, 300, 400, 600, 1200];
 
+/// Tamaños de hoja (mm). Sin indicarlo, scanimage usa el area maxima que declara el driver,
+/// y algunos (brscan3: 215,9 x 355,6 mm en una DCP-165C de vidrio A4) declaran mas de lo
+/// que admite el vidrio: sane_start falla con "Invalid argument"
+const PAPERS: &[(&str, &str, f64, f64)] = &[
+    ("carta", "Carta (216 × 279 mm)", 215.9, 279.4),
+    ("a4", "A4 (210 × 297 mm)", 210.0, 297.0),
+    ("oficio", "Oficio (216 × 330 mm)", 215.9, 330.2),
+    ("legal", "Legal (216 × 356 mm)", 215.9, 355.6),
+];
+const DEFAULT_PAPER: &str = "carta";
+
 // ═══════════════════════════════════════
 // Dispositivos y opciones
 // ═══════════════════════════════════════
@@ -129,6 +140,39 @@ pub struct ScanOptions {
     default_resolution: Option<u32>,
     sources: Vec<String>,
     default_source: Option<String>,
+    /// Area maxima que declara el escaner (opciones -x / -y), en mm
+    max_width_mm: Option<f64>,
+    max_height_mm: Option<f64>,
+    /// Tamaños de hoja que caben en esa area
+    papers: Vec<Paper>,
+    default_paper: Option<String>,
+}
+
+#[derive(Serialize, Debug, PartialEq, Clone)]
+pub struct Paper {
+    id: String,
+    label: String,
+    width_mm: f64,
+    height_mm: f64,
+}
+
+/// Limite superior de un rango "0..215.9mm (in steps of 0.0999908) [215.88]"
+fn range_max_mm(value: &str) -> Option<f64> {
+    let main = value.trim().split(' ').next()?;
+    let (_, max) = main.split_once("..")?;
+    let max: f64 = max.trim_end_matches("mm").parse().ok()?;
+    (max > 0.0 && max < 2000.0).then_some(max)
+}
+
+fn fill_papers(o: &mut ScanOptions) {
+    let (Some(w), Some(h)) = (o.max_width_mm, o.max_height_mm) else { return };
+    // Medio milimetro de tolerancia: los drivers redondean
+    o.papers = PAPERS
+        .iter()
+        .filter(|(_, _, pw, ph)| *pw <= w + 0.5 && *ph <= h + 0.5)
+        .map(|(id, label, pw, ph)| Paper { id: (*id).into(), label: (*label).into(), width_mm: *pw, height_mm: *ph })
+        .collect();
+    o.default_paper = o.papers.iter().find(|p| p.id == DEFAULT_PAPER).or(o.papers.first()).map(|p| p.id.clone());
 }
 
 /// "Lineart|Gray|Color [Color]" -> (valores, por defecto). None si la opcion esta inactiva.
@@ -164,6 +208,14 @@ fn parse_options(out: &str) -> ScanOptions {
     let mut o = ScanOptions::default();
     for line in out.lines() {
         let line = line.trim();
+        if let Some(v) = line.strip_prefix("-x ") {
+            o.max_width_mm = range_max_mm(v);
+            continue;
+        }
+        if let Some(v) = line.strip_prefix("-y ") {
+            o.max_height_mm = range_max_mm(v);
+            continue;
+        }
         let Some(rest) = line.strip_prefix("--") else { continue };
         let Some((key, value)) = rest.split_once(' ') else { continue };
         let Some((values, default)) = split_option(value) else { continue };
@@ -183,6 +235,7 @@ fn parse_options(out: &str) -> ScanOptions {
             _ => {}
         }
     }
+    fill_papers(&mut o);
     o
 }
 
@@ -207,6 +260,24 @@ async fn device_options(_device: &str) -> ScanOptions {
         default_resolution: Some(150),
         ..Default::default()
     }
+}
+
+/// Argumentos de area (-l -t -x -y) para la hoja elegida, o ninguno si el escaner no
+/// informa su area. Sin hoja elegida: Carta (o la primera que quepa)
+fn paper_args(paper: Option<&str>, opts: &ScanOptions) -> Result<Vec<String>, (StatusCode, String)> {
+    let wanted = paper.filter(|p| !p.is_empty());
+    let id = wanted.or(opts.default_paper.as_deref());
+    let Some(id) = id else { return Ok(Vec::new()) };
+    let Some(p) = opts.papers.iter().find(|p| p.id == id) else {
+        return if wanted.is_some() {
+            Err((StatusCode::BAD_REQUEST, format!("Tamaño de hoja no admitido por este escaner: {}", id)))
+        } else {
+            Ok(Vec::new())
+        };
+    };
+    let w = p.width_mm.min(opts.max_width_mm.unwrap_or(p.width_mm));
+    let h = p.height_mm.min(opts.max_height_mm.unwrap_or(p.height_mm));
+    Ok(vec!["-l".into(), "0".into(), "-t".into(), "0".into(), "-x".into(), format!("{:.1}", w), "-y".into(), format!("{:.1}", h)])
 }
 
 #[cfg(not(test))]
@@ -449,6 +520,9 @@ pub struct ScanRequest {
     mode: Option<String>,
     resolution: Option<u32>,
     source: Option<String>,
+    /// carta | a4 | oficio | legal
+    #[serde(default)]
+    paper: Option<String>,
 }
 
 /// Mensaje legible a partir del stderr de scanimage
@@ -462,6 +536,8 @@ fn scan_error(stderr: &str) -> String {
         "No se encontro el escaner: revisa que este encendido y conectado".into()
     } else if s.contains("document feeder") && s.contains("out of documents") {
         "No hay hojas en el alimentador".into()
+    } else if s.contains("sane_start") && s.contains("invalid argument") {
+        "El escaner rechazo el tamaño de hoja: elige Carta o A4 (algunos escaneres declaran un area mas larga que su vidrio)".into()
     } else {
         let msg = stderr.trim();
         format!("Error al escanear: {}", if msg.is_empty() { "scanimage termino sin imagen" } else { msg })
@@ -492,6 +568,7 @@ async fn run_scanimage(req: &ScanRequest, opts: &ScanOptions) -> Result<Vec<u8>,
         args.push("--resolution".into());
         args.push(r.to_string());
     }
+    args.extend(paper_args(req.paper.as_deref(), opts)?);
 
     #[cfg(test)]
     if let Some(out) = TEST_SCAN_OUTPUT.lock().unwrap().clone() {
@@ -776,6 +853,24 @@ mod tests {
         assert_eq!(o.resolutions, vec![100, 150, 200, 300, 400, 600, 1200]);
         assert_eq!(o.default_resolution, Some(200));
         assert_eq!(o.sources, vec!["FlatBed"]);
+
+        // Area declarada por brscan3 (Legal) y hojas que caben
+        assert_eq!((o.max_width_mm, o.max_height_mm), (None, None));
+        let geo = format!("{}    -l 0..215.9mm (in steps of 0.0999908) [0]\n    -t 0..355.6mm (in steps of 0.0999908) [0]\n    -x 0..215.9mm (in steps of 0.0999908) [215.88]\n    -y 0..355.6mm (in steps of 0.0999908) [355.567]\n", brother);
+        let o = parse_options(&geo);
+        assert_eq!((o.max_width_mm, o.max_height_mm), (Some(215.9), Some(355.6)));
+        assert_eq!(o.papers.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["carta", "a4", "oficio", "legal"]);
+        assert_eq!(o.default_paper.as_deref(), Some("carta"));
+        // Sin elegir: Carta, no el area maxima (que hacia fallar a la DCP-165C)
+        assert_eq!(paper_args(None, &o).unwrap(), vec!["-l", "0", "-t", "0", "-x", "215.9", "-y", "279.4"]);
+        assert_eq!(paper_args(Some("a4"), &o).unwrap()[5..], ["210.0", "-y", "297.0"]);
+        // Un escaner A4 no ofrece Oficio
+        let a4 = parse_options("    -x 0..216mm [216]\n    -y 0..297mm [297]\n");
+        assert_eq!(a4.papers.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["carta", "a4"]);
+        assert_eq!(paper_args(Some("oficio"), &a4).unwrap_err().0, StatusCode::BAD_REQUEST);
+        // Sin area informada no se fuerza nada
+        assert!(paper_args(None, &ScanOptions::default()).unwrap().is_empty());
+        assert!(scan_error("scanimage: sane_start: Invalid argument").contains("Carta o A4"));
 
         let range = parse_options("    --resolution 75..600dpi (in steps of 1) [75]\n    --mode Lineart|Gray|Color [inactive]\n");
         assert_eq!(range.resolutions, vec![75, 100, 150, 200, 300, 400, 600]);

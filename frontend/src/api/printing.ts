@@ -192,6 +192,7 @@ export async function scanPage(req: {
   mode?: string
   resolution?: number
   source?: string
+  paper?: string
 }): Promise<import('../types').ScanSession> {
   const res = await api('/api/printing/scan/pages', {
     method: 'POST',

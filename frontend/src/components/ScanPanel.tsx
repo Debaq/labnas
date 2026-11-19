@@ -28,6 +28,7 @@ export default function ScanPanel() {
   const [mode, setMode] = useState('')
   const [resolution, setResolution] = useState<number | ''>('')
   const [source, setSource] = useState('')
+  const [paper, setPaper] = useState('')
   const [session, setSession] = useState<ScanSession | null>(null)
   const [scanning, setScanning] = useState(false)
   const [searching, setSearching] = useState(false)
@@ -59,6 +60,7 @@ export default function ScanPanel() {
         setOptions(o)
         setMode(o.default_mode ?? '')
         setSource(o.default_source ?? '')
+        setPaper(o.default_paper ?? '')
         // 300 ppp por defecto si existe (buena calidad para documentos); si no, la del escaner
         setResolution(o.resolutions.includes(300) ? 300 : (o.default_resolution ?? ''))
       })
@@ -76,6 +78,7 @@ export default function ScanPanel() {
         mode: mode || undefined,
         resolution: resolution === '' ? undefined : resolution,
         source: source || undefined,
+        paper: paper || undefined,
       })
       setSession(s)
     } catch (e) {
@@ -179,6 +182,14 @@ export default function ScanPanel() {
                   style={input}
                 >
                   {options.resolutions.map((r) => <option key={r} value={r}>{r} ppp</option>)}
+                </select>
+              </label>
+            )}
+            {options && options.papers.length > 0 && (
+              <label className="text-xs space-y-1" style={{ color: 'var(--text-secondary)' }}>
+                <span>Tamaño de hoja</span>
+                <select value={paper} onChange={(e) => setPaper(e.target.value)} className="w-full rounded-lg px-2 py-1.5 text-sm" style={input}>
+                  {options.papers.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select>
               </label>
             )}

@@ -206,6 +206,12 @@ export interface ScanOptions {
   default_resolution: number | null
   sources: string[]
   default_source: string | null
+  /** Area maxima que declara el escaner (mm) */
+  max_width_mm: number | null
+  max_height_mm: number | null
+  /** Tamaños de hoja que caben en esa area */
+  papers: { id: string; label: string; width_mm: number; height_mm: number }[]
+  default_paper: string | null
 }
 
 export interface ScanPage {
