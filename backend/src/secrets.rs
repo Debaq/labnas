@@ -96,14 +96,14 @@ pub fn register_sql_functions(conn: &rusqlite::Connection) -> rusqlite::Result<(
 
     fn wrap(
         f: fn(&str) -> Result<String, String>,
-    ) -> impl Fn(&rusqlite::functions::Context) -> rusqlite::Result<Value> {
+    ) -> impl Fn(&mut rusqlite::functions::Context) -> rusqlite::Result<Value> {
         move |ctx| match ctx.get_raw(0) {
             ValueRef::Null => Ok(Value::Null),
             ValueRef::Text(t) => {
                 let s = std::str::from_utf8(t).map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?;
                 f(s).map(Value::Text).map_err(|e| rusqlite::Error::UserFunctionError(e.into()))
             }
-            other => Ok(Value::from(other)),
+            other => Value::try_from(other).map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e))),
         }
     }
 

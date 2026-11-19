@@ -31,9 +31,9 @@ url = "2.5"
 mdns-sd = "0.18.2"
 libc = "0.2"
 regex-lite = "0.1"
-rusqlite = { version = "0.32", features = ["bundled", "functions"] }
+rusqlite = { version = "0.42", features = ["bundled", "functions", "fallible_uint"] }
 r2d2 = "0.8"
-r2d2_sqlite = "0.25"
+r2d2_sqlite = "0.37"
 serialport = "4"
 tokio-util = { version = "0.7.19", features = ["io"] }
 sha2 = "0.11.0"

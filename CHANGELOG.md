@@ -2,6 +2,21 @@
 
 ## [Sin publicar]
 
+### Seguridad
+
+- **Dependencias con vulnerabilidades conocidas actualizadas**: SQLite (`libsqlite3-sys` 0.40, CVE-2026-119375; `rusqlite` 0.42), `h2` (HTTP/2), `rustls` y `rustls-webpki` (TLS: varios avisos RustSec) y `react-router` (XSS y DoS). Las encontró la auditoría nueva del CI
+- **Auditoría automática de dependencias**: `cargo audit` (backend y visor) y `npm audit` en cada cambio de dependencias y cada lunes; Dependabot propone actualizaciones agrupadas cada semana
+- **Abrir y cerrar la terminal web queda en la auditoría**, con usuario y duración
+
+### Estabilidad
+
+- **Límite de tiempo para comandos externos**: `yt-dlp` y `lp` (60 s), `ffmpeg` del timelapse (30 min) y `rsync` (se corta si pasa 15 min sin transferir; sin tope total, un respaldo grande puede durar horas). Antes uno colgado dejaba la tarea esperando para siempre
+- **El conector PHP ya no se autoactualiza en medio de una descarga**: espera a que terminen los pedidos en curso (hasta 10 min)
+
+### Bitácora
+
+- El ancla solo se registra si la huella salió del servidor: sin Telegram, la revisión diaria ya no la da por anclada, y el ancla manual queda como «solo texto mostrado». La pantalla dice por dónde salió
+
 ### IA
 
 - **Modelos elegibles de una lista:** Configuración > Sistema > Proveedor de IA pide al proveedor (DeepSeek, OpenAI, Groq, Ollama…) los modelos disponibles y los muestra en un selector, en vez de escribir el nombre a mano. Se carga solo si la IA ya está configurada, o con «Cargar modelos» usando la clave escrita. Avisa si el modelo guardado ya no existe. La clave guardada solo se envía a la misma URL para la que se guardó
