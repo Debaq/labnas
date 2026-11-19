@@ -1,6 +1,6 @@
 # Puente PHP: LabNAS desde internet sin abrir puertos
 
-> Estado: **diseño para revisar**, sin código todavía. Versión 2, 2026-11-18 (ajustado al hosting real: PHP 7+, Apache, carpetas fuera de la web, un solo LabNAS).
+> Estado: **etapa B1 implementada** (`bridge/` y `backend/src/bridge.rs`); B2–B4 pendientes. Versión 2, 2026-11-18 (ajustado al hosting real: PHP 7+, Apache, carpetas fuera de la web, un solo LabNAS).
 
 ## 1. Objetivo
 

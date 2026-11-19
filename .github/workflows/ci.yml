@@ -37,6 +37,7 @@ jobs:
         working-directory: backend
         run: cargo clippy --all-targets -- -D warnings
 
+      # Incluye el test de punta a punta del puente PHP (el runner trae php)
       - name: cargo test
         working-directory: backend
         run: cargo test
@@ -47,7 +48,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: shellcheck
-        run: shellcheck install.sh setup-smart.sh labnas-smart-read viewer/install.sh
+        run: shellcheck install.sh setup-smart.sh labnas-smart-read viewer/install.sh bridge/check-php7.sh
+
+  bridge:
+    name: Conector PHP (PHP ${{ matrix.php }})
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        php: ['7.0', '7.4', '8.1', '8.3']
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - name: Sintaxis
+        run: for f in bridge/index.php bridge/instalar.php bridge/dev-router.php bridge/app/bridge.php; do php -l "$f"; done
+      - name: Sin construcciones posteriores a PHP 7.0
+        run: bridge/check-php7.sh
 
   musl:
     name: Backend (build musl estatico)

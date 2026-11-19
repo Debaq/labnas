@@ -2,6 +2,13 @@
 
 ## [Sin publicar]
 
+### Acceso remoto: puente PHP (etapa B1)
+
+- **Conector PHP** para hosting compartido (PHP 7.0 a 8.x, Apache) que permite usar LabNAS desde internet **sin abrir puertos**: LabNAS sale hacia el hosting, recoge los pedidos (long-poll) y devuelve las respuestas; todo el canal va firmado con HMAC-SHA256. Diseño en `docs/PUENTE_PHP.md`
+- Enlace con código de un solo uso (`instalar.php`); los datos del conector van fuera de `public_html`. LabNAS entrega el paquete (`GET /api/bridge/package`: PHP + frontend de la misma versión)
+- Por el puente se niegan la terminal, los WebSocket, el registro de cuentas y todo lo de admin; los inicios de sesión quedan en la auditoría con la IP real y no se revela la IP de la LAN
+- Límite B1: pedidos y respuestas hasta el `post_max_size` del hosting (los archivos más grandes llegan en B2)
+
 ### Correo con IA
 
 - **Proveedor de IA genérico** compatible con OpenAI (URL, modelo y clave cifrada; solo admin): DeepSeek por defecto, también Groq, OpenAI u Ollama local. Reemplaza la clave de Groq (se migra sola). Endpoints `/api/ai/config` y `/api/ai/test`; se elimina `/api/email/groq-key`

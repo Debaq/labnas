@@ -55,6 +55,20 @@ fn is_public(path: &str) -> bool {
         || path.starts_with("/api/preview/")
 }
 
+/// Rutas que no se atienden por el puente PHP (devuelve el motivo)
+pub fn bridge_denied(method: &Method, path: &str) -> Option<&'static str> {
+    if WS_PATHS.contains(&path) || path.starts_with("/api/live") {
+        return Some("No disponible por el puente: requiere conexion directa (LAN o Tailscale)");
+    }
+    if path == "/api/auth/register" {
+        return Some("El registro de cuentas no esta disponible por el puente");
+    }
+    if !is_public(path) && required_access(method, path) == Access::Admin {
+        return Some("La administracion no esta disponible por el puente: usa la LAN o Tailscale");
+    }
+    None
+}
+
 /// Lo que exige una ruta
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
@@ -170,6 +184,13 @@ pub async fn permission_check(
     let path = request.uri().path().to_string();
     let method = request.method().clone();
 
+    // Por el puente PHP (internet): nada de terminal, WebSocket, registro de cuentas ni admin
+    if request.extensions().get::<crate::bridge::BridgeOrigin>().is_some() {
+        if let Some(reason) = bridge_denied(&method, &path) {
+            return (StatusCode::FORBIDDEN, reason).into_response();
+        }
+    }
+
     if !path.starts_with("/api/") || is_public(&path) {
         return next.run(request).await;
     }
@@ -273,6 +294,24 @@ mod tests {
         assert_eq!(acc(Method::PUT, "/api/email/oauth/microsoft/config"), Admin);
         // ruta inventada: denegada por defecto
         assert_eq!(acc(Method::GET, "/api/nueva/ruta"), Admin);
+    }
+
+    #[test]
+    fn puente_niega_admin_y_terminal() {
+        let d = |m: Method, p: &str| bridge_denied(&m, p).is_some();
+        assert!(d(Method::GET, "/api/terminal"));
+        assert!(d(Method::GET, "/api/live"));
+        assert!(d(Method::POST, "/api/live/ticket"));
+        assert!(d(Method::POST, "/api/auth/register"));
+        assert!(d(Method::GET, "/api/auth/users"));
+        assert!(d(Method::POST, "/api/system/update"));
+        assert!(d(Method::GET, "/api/bridge"));
+        assert!(d(Method::GET, "/api/nueva/ruta"), "lo no declarado es admin: tambien negado");
+        assert!(!d(Method::GET, "/api/files"));
+        assert!(!d(Method::POST, "/api/auth/login"));
+        assert!(!d(Method::GET, "/api/health"));
+        assert!(!d(Method::GET, "/api/email/inbox"));
+        assert!(!d(Method::POST, "/api/email/proposals/x/approve"));
     }
 
     #[test]

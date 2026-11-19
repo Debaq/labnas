@@ -258,6 +258,7 @@ pub async fn register(
 
 pub async fn login(
     State(state): State<AppState>,
+    bridge: Option<axum::Extension<crate::bridge::BridgeOrigin>>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Response, (StatusCode, String)> {
     let username = req.username.trim().to_lowercase();
@@ -336,6 +337,13 @@ pub async fn login(
     };
 
     let token = create_session(&state, &username, role.clone(), permissions.clone()).await?;
+
+    // Inicio de sesion desde internet: queda en la auditoria con la IP real
+    if let Some(axum::Extension(origin)) = bridge {
+        state
+            .log_activity("login_puente", &format!("Inicio de sesion por el puente PHP desde {}", origin.client_ip), &username)
+            .await;
+    }
 
     let modules = crate::db::db_op(&state.db, |conn| Ok(crate::db::get_modules(conn))).await
         .unwrap_or_default();

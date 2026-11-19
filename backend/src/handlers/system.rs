@@ -46,14 +46,19 @@ fn request_restart(state: &AppState) {
     });
 }
 
-pub async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
+pub async fn health_handler(
+    State(state): State<AppState>,
+    origin: Option<axum::Extension<crate::bridge::BridgeOrigin>>,
+) -> Json<HealthResponse> {
+    let via_bridge = origin.is_some();
     let uptime = state.start_time.elapsed();
     let secs = uptime.as_secs();
     let hours = secs / 3600;
     let mins = (secs % 3600) / 60;
     let uptime_str = format!("{}h {}m {}s", hours, mins, secs % 60);
 
-    let ip = local_ip_address::local_ip().ok().map(|ip| ip.to_string());
+    // Por internet no se revela la IP de la LAN
+    let ip = if via_bridge { None } else { local_ip_address::local_ip().ok().map(|ip| ip.to_string()) };
     let upload_limit_mb = crate::db::db_op(&state.db, |conn| {
         Ok(crate::db::get_setting_u32(conn, "upload_limit_mb", 50))
     }).await.unwrap_or(50);
@@ -64,6 +69,7 @@ pub async fn health_handler(State(state): State<AppState>) -> Json<HealthRespons
         uptime: uptime_str,
         ip,
         upload_limit_mb,
+        via: via_bridge.then_some("bridge"),
     })
 }
 

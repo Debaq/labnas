@@ -11,6 +11,7 @@ mod tls;
 mod totp;
 mod updater;
 mod netguard;
+mod bridge;
 mod ai;
 mod textutil;
 
@@ -113,22 +114,7 @@ async fn main() {
     }
 
     // Static files
-    let exe_dir = updater::install_dir().unwrap_or_else(|_| PathBuf::from("."));
-
-    let static_dir = std::env::var("LABNAS_STATIC")
-        .map(PathBuf::from)
-        .ok()
-        .or_else(|| {
-            let candidates = [
-                exe_dir.join("dist"),
-                exe_dir.join("../frontend/dist"),
-                PathBuf::from("../frontend/dist"),
-                PathBuf::from("frontend/dist"),
-            ];
-            candidates
-                .into_iter()
-                .find(|p| p.join("index.html").exists())
-        });
+    let static_dir = static_dir();
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3001));
 
@@ -143,6 +129,9 @@ async fn main() {
         println!("  Usa LABNAS_STATIC=/ruta/a/dist o ejecuta en modo desarrollo.");
         api
     };
+
+    // Puente PHP: los pedidos de internet se ejecutan contra este mismo router
+    tokio::spawn(bridge::bridge_loop(state.clone(), app.clone()));
 
     let local_ip = local_ip_address::local_ip()
         .map(|ip| ip.to_string())
@@ -437,6 +426,20 @@ fn cors_origins() -> Vec<axum::http::HeaderValue> {
 }
 
 /// API completa: rutas + limite de subida + permisos (+ CORS solo si se configuro)
+/// Carpeta del frontend compilado (LABNAS_STATIC, junto al binario o en el repo)
+pub fn static_dir() -> Option<PathBuf> {
+    let exe_dir = updater::install_dir().unwrap_or_else(|_| PathBuf::from("."));
+    std::env::var("LABNAS_STATIC").map(PathBuf::from).ok().or_else(|| {
+        let candidates = [
+            exe_dir.join("dist"),
+            exe_dir.join("../frontend/dist"),
+            PathBuf::from("../frontend/dist"),
+            PathBuf::from("frontend/dist"),
+        ];
+        candidates.into_iter().find(|p| p.join("index.html").exists())
+    })
+}
+
 fn build_api(state: &AppState, upload_limit_mb: u32) -> Router {
     let api = api_routes()
         .layer(axum::extract::DefaultBodyLimit::max(upload_limit_mb as usize * 1024 * 1024))
@@ -721,6 +724,10 @@ fn api_routes() -> Router<AppState> {
         .route("/api/email/proposals/{id}/dismiss", post(handlers::email::dismiss_proposal_handler))
         .route("/api/ai/config", get(ai::get_config).put(ai::set_config))
         .route("/api/ai/test", post(ai::test_config))
+        .route("/api/bridge", get(bridge::get_bridge).delete(bridge::unlink_bridge))
+        .route("/api/bridge/link", post(bridge::link_bridge))
+        .route("/api/bridge/enabled", put(bridge::set_bridge_enabled))
+        .route("/api/bridge/package", get(bridge::download_package))
         .route("/api/email/filters", get(handlers::email::list_filters))
         .route("/api/email/filters", post(handlers::email::add_filter))
         .route("/api/email/filters/{pattern}", delete(handlers::email::delete_filter))

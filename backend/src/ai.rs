@@ -50,7 +50,7 @@ impl AiConfig {
 }
 
 /// localhost, IP de la LAN/Tailscale o nombre .local: no exige clave
-fn is_local_server(base_url: &str) -> bool {
+pub(crate) fn is_local_server(base_url: &str) -> bool {
     let Ok(url) = reqwest::Url::parse(base_url) else { return false };
     match url.host() {
         Some(url::Host::Domain(d)) => d == "localhost" || d.ends_with(".local") || !d.contains('.'),

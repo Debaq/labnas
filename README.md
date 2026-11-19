@@ -445,6 +445,14 @@ Config persiste en `~/.labnas/` (SQLite + assets). Override con `LABNAS_CONFIG`.
    - **Outlook / Hotmail / Microsoft 365** (p. ej. correos institucionales en Microsoft): tipo «Microsoft». Microsoft ya no acepta contraseña por IMAP/POP desde 2024. LabNAS muestra un código, lo ingresas en microsoft.com/devicelogin y listo
 4. **Solo para Microsoft, una vez (admin):** registrar una app gratuita en [Microsoft Entra](https://entra.microsoft.com) > Registros de aplicaciones > Nuevo registro (cuentas de cualquier organización y personales, sin URI de redirección); en *Autenticación* activar «Permitir flujos de clientes públicos»; en *Permisos de API* agregar Office 365 Exchange Online > delegado `IMAP.AccessAsUser.All`. Pegar el «Id. de aplicación (cliente)» en **Correo > Configuración > Conexión con Microsoft**. Si la institución bloquea apps de terceros, TI debe aprobar la app la primera vez. Alternativa sin TI: reenviar el correo institucional a un Gmail
 
+### Acceso remoto por un hosting PHP (sin abrir puertos)
+1. Crea un subdominio con HTTPS en tu hosting compartido (PHP 7.0 o superior, Apache), por ejemplo `labnas.tudominio.cl`
+2. En LabNAS: **Configuración > Sistema > Acceso remoto > Descargar conector PHP** y descomprime el zip en la carpeta del subdominio
+3. Abre `https://labnas.tudominio.cl/instalar.php`, elige una carpeta de datos **fuera de `public_html`** y copia el código
+4. Pega la URL y el código en LabNAS > **Enlazar**. Listo: entra a `https://labnas.tudominio.cl` desde cualquier lugar
+- Por el puente no están la terminal ni la administración (usa la LAN o Tailscale). Los archivos van hasta el límite de envío del hosting
+- Detalles y seguridad: [docs/PUENTE_PHP.md](docs/PUENTE_PHP.md)
+
 ### Video en pantallas externas
 Corriendo como servicio systemd, LabNAS:
 1. Detecta usuario con sesión X activa

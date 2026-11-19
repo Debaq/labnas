@@ -7,6 +7,9 @@ pub struct HealthResponse {
     pub uptime: String,
     pub ip: Option<String>,
     pub upload_limit_mb: u32,
+    /// "bridge" si el pedido llego por el puente PHP (la UI oculta terminal y admin)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub via: Option<&'static str>,
 }
 
 #[derive(Debug, Serialize)]

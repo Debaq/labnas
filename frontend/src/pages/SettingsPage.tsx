@@ -8,6 +8,8 @@ import StorageRootsSection from '../components/StorageRootsSection'
 import SmartSection from '../components/SmartSection'
 import HttpsSection from '../components/HttpsSection'
 import AuditLogSection from '../components/AuditLogSection'
+import BridgeSection from '../components/BridgeSection'
+import { useViaBridge } from '../lib/bridge'
 import BackupsSection from '../components/BackupsSection'
 import { useTheme } from '../themes/ThemeContext'
 import { themes, getThemeNames, type ThemeName } from '../themes/themes'
@@ -168,6 +170,7 @@ export default function SettingsPage() {
   const [dailyEnabled, setDailyEnabled] = useState(false)
 
   const isAdmin = authUser?.role === 'admin'
+  const viaBridge = useViaBridge()
 
   useEffect(() => {
     localStorage.setItem('labnas-settings-tab', activeTab)
@@ -237,7 +240,8 @@ export default function SettingsPage() {
     navigate('/terminal', { state: { commands: cmd } })
   }
 
-  const visibleTabs = TABS.filter(t => !t.adminOnly || isAdmin)
+  // Por el puente (internet) la administracion no esta disponible
+  const visibleTabs = TABS.filter(t => !t.adminOnly || (isAdmin && !viaBridge))
   const sortedModules = [...modules].sort((a, b) => a.display_order - b.display_order)
   const enabledCount = modules.filter(m => m.enabled).length
 
@@ -1699,6 +1703,7 @@ export default function SettingsPage() {
 
       {activeTab === 'backups' && isAdmin && <BackupsSection />}
 
+      {activeTab === 'system' && isAdmin && <BridgeSection />}
       {activeTab === 'admin' && isAdmin && <AuditLogSection />}
 
       {activeTab === 'admin' && isAdmin && (

@@ -1,6 +1,7 @@
 import { Suspense, lazy, useState, useEffect } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight, Mail, Download, Package, GraduationCap, Thermometer, Loader2 } from 'lucide-react'
+import { useViaBridge } from '../lib/bridge'
 import { useAuth } from '../auth/AuthContext'
 import { shutdownServer, getBranding, fetchHealth, checkUpdate } from '../api'
 import MusicPanel from './MusicPanel'
@@ -128,12 +129,14 @@ export default function Layout() {
     terminal:   { to: '/terminal',   label: 'Terminal',        icon: TerminalSquare },
   }
 
+  const viaBridge = useViaBridge()
+
   // Build nav items from enabled modules (sorted by display_order)
   const moduleItems = enabledModules
     .filter(m => m.enabled && moduleNav[m.id])
     .sort((a, b) => a.display_order - b.display_order)
     .filter(m => {
-      if (m.id === 'terminal') return can('terminal')
+      if (m.id === 'terminal') return can('terminal') && !viaBridge
       if (m.id === 'printing') return can('impresion')
       return true
     })
@@ -346,6 +349,11 @@ export default function Layout() {
           ) : (
             <>
               <div className={location.pathname === '/terminal' ? 'hidden' : 'p-8 h-full overflow-auto'}>
+                {viaBridge && (
+                  <div className="mb-4 rounded-lg px-4 py-2 text-xs" style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+                    Estás entrando por el puente de internet: la terminal y la administración solo están disponibles en la red del laboratorio (o por Tailscale).
+                  </div>
+                )}
                 <Suspense fallback={<div className="flex justify-center py-16"><Loader2 size={28} className="animate-spin" style={{ color: 'var(--accent)' }} /></div>}>
                   <Outlet />
                 </Suspense>

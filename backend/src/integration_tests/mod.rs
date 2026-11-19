@@ -4,6 +4,7 @@
 mod harness;
 
 mod backups;
+mod bridge;
 mod email_ai;
 mod email_oauth;
 mod events;

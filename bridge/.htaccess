@@ -1,0 +1,32 @@
+# LabNAS - conector puente. Apache con mod_rewrite.
+Options -Indexes
+
+# Muchos hostings (FastCGI/suPHP) no pasan Authorization a PHP
+<IfModule mod_setenvif.c>
+    SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+</IfModule>
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # Codigo interno y puntero a los datos: nunca accesibles directo
+    RewriteRule ^(app/|labnas-path\.php$|VERSION$) - [F,L]
+
+    # Ya reescrito a web/: no seguir (evita bucles)
+    RewriteRule ^web/ - [L]
+
+    # API de LabNAS (relay) y protocolo del puente
+    RewriteRule ^(api|_labnas)(/.*)?$ index.php [L,QSA]
+
+    # Archivos del frontend: Apache los sirve directo (mas rapido)
+    RewriteCond %{DOCUMENT_ROOT}/web/$1 -f
+    RewriteRule ^(.+)$ web/$1 [L]
+
+    # Instalador
+    RewriteRule ^instalar\.php$ - [L]
+
+    # Todo lo demas (rutas de la app): index.php sirve web/index.html
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^ index.php [L]
+</IfModule>

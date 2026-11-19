@@ -32,6 +32,8 @@ export interface HealthInfo {
   uptime: string
   ip: string | null
   upload_limit_mb: number
+  /** 'bridge' si se entra por el puente PHP */
+  via?: 'bridge'
 }
 
 export async function fetchHealth(): Promise<HealthInfo> {
