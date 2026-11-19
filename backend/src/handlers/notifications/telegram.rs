@@ -38,16 +38,18 @@ pub(super) async fn call_telegram<T: serde::de::DeserializeOwned>(
 }
 
 /// Envia un mensaje (Markdown) a todos los chats de Telegram aprobados (no pendientes).
-pub async fn notify_active_chats(state: &AppState, text: &str) {
-    notify_chats_where(state, "role != 'pendiente'", text).await;
+/// Devuelve a cuantos chats llego.
+pub async fn notify_active_chats(state: &AppState, text: &str) -> usize {
+    notify_chats_where(state, "role != 'pendiente'", text).await
 }
 
 /// Envia un mensaje (Markdown) a todos los chats de Telegram con rol admin.
-pub async fn notify_admins(state: &AppState, text: &str) {
-    notify_chats_where(state, "role = 'admin'", text).await;
+/// Devuelve a cuantos chats llego (0 si no hay bot o ningun admin lo tiene vinculado).
+pub async fn notify_admins(state: &AppState, text: &str) -> usize {
+    notify_chats_where(state, "role = 'admin'", text).await
 }
 
-pub(super) async fn notify_chats_where(state: &AppState, where_sql: &'static str, text: &str) {
+pub(super) async fn notify_chats_where(state: &AppState, where_sql: &'static str, text: &str) -> usize {
     let tg_data = crate::db::db_op(&state.db, move |conn| {
         let token: Option<String> = conn
             .query_row("SELECT labnas_decrypt(bot_token) FROM notification_config WHERE id = 1", [], |row| row.get(0))
@@ -68,11 +70,15 @@ pub(super) async fn notify_chats_where(state: &AppState, where_sql: &'static str
     .ok()
     .flatten();
 
+    let mut sent = 0;
     if let Some((token, chats)) = tg_data {
         for chat_id in chats {
-            let _ = send_telegram_message(&state.http_client, &token, chat_id, text).await;
+            if send_telegram_message(&state.http_client, &token, chat_id, text).await.is_ok() {
+                sent += 1;
+            }
         }
     }
+    sent
 }
 
 pub async fn send_tg_public(

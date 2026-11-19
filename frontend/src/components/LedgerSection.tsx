@@ -113,7 +113,9 @@ export default function LedgerSection() {
       const r = await anchorLedger()
       setAnchorText(r.text)
       refreshStatus()
-      addToast('Huella enviada a los administradores por Telegram', 'success')
+      addToast(r.telegram_sent > 0
+        ? `Huella enviada por Telegram (${r.telegram_sent} chat${r.telegram_sent > 1 ? 's' : ''})`
+        : 'Telegram no está configurado: guarda el texto fuera del NAS', r.telegram_sent > 0 ? 'success' : 'info')
     } catch (e) {
       addToast(e instanceof Error ? e.message : String(e), 'error')
     }
@@ -157,7 +159,7 @@ export default function LedgerSection() {
             </div>
             <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
               {status.last_anchor
-                ? `Último ancla: registro #${status.last_anchor.seq}, ${formatTime(status.last_anchor.at)}`
+                ? `Último ancla: registro #${status.last_anchor.seq}, ${formatTime(status.last_anchor.at)}${status.last_anchor.via === 'telegram' ? ' (por Telegram)' : ' (solo texto mostrado, sin Telegram)'}`
                 : 'Nunca anclada. Anclar envía la huella final fuera del servidor; así se nota si alguien reescribe la cadena.'}
             </div>
           </div>

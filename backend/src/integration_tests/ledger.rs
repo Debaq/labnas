@@ -78,10 +78,15 @@ async fn bitacora_de_punta_a_punta() {
     assert_eq!(l["hash"], h.as_str());
     assert_eq!(l["prev_hash"], lines[0]["hash"]);
 
-    // Ancla (sin Telegram configurado igual queda registrada)
+    // La revision diaria sin Telegram no finge un ancla: la huella no salio del servidor
+    crate::handlers::ledger::check_once(&s.state).await;
+    assert!(s.get("/api/ledger/verify", &admin).await.json()["last_anchor"].is_null());
+    // A mano si: la persona recibe el texto para guardarlo afuera
     let r = s.post("/api/ledger/anchor", &admin, json!({})).await;
     assert_eq!(r.status, 200, "{}", r.text);
+    assert_eq!(r.json()["telegram_sent"], 0);
     let v = s.get("/api/ledger/verify", &admin).await.json();
+    assert_eq!(v["last_anchor"]["via"], "texto");
     assert_eq!(v["last_anchor"]["seq"], 2);
     assert_eq!(v["last_anchor"]["hash"], l["hash"]);
 

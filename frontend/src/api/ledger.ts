@@ -23,7 +23,7 @@ export interface LedgerVerify {
   head_hash: string
   broken_at: number | null
   reason: string | null
-  last_anchor: { seq: number; hash: string; at: string } | null
+  last_anchor: { seq: number; hash: string; at: string; via: 'telegram' | 'texto' } | null
 }
 
 export interface LedgerFileCheck {
@@ -83,7 +83,7 @@ export async function checkLedgerFiles(seq: number): Promise<LedgerFileCheck[]> 
 }
 
 /** Envia la huella final a los admins por Telegram y devuelve el texto para guardarlo afuera */
-export async function anchorLedger(): Promise<{ text: string }> {
+export async function anchorLedger(): Promise<{ text: string; telegram_sent: number }> {
   const res = await api('/api/ledger/anchor', { method: 'POST' })
   if (!res.ok) return failText(res, 'No se pudo anclar la bitácora')
   return res.json()

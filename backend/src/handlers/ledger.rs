@@ -93,6 +93,8 @@ pub struct Anchor {
     pub seq: i64,
     pub hash: String,
     pub at: String,
+    /// "telegram" o "texto" (sin Telegram: solo se mostro el texto para guardarlo afuera)
+    pub via: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -107,6 +109,7 @@ fn load_anchor(conn: &rusqlite::Connection) -> Option<Anchor> {
         seq: crate::db::get_setting(conn, "ledger_anchor_seq")?.parse().ok()?,
         hash: crate::db::get_setting(conn, "ledger_anchor_hash")?,
         at: crate::db::get_setting(conn, "ledger_anchor_at")?,
+        via: crate::db::get_setting(conn, "ledger_anchor_via").unwrap_or_else(|| "telegram".into()),
     })
 }
 
@@ -333,10 +336,14 @@ pub struct AnchorResponse {
     /// Texto para guardar fuera del servidor (correo, acta, chat)
     pub text: String,
     pub report: VerifyReport,
+    /// Chats de Telegram de admins a los que llego (0: no salio del servidor)
+    pub telegram_sent: usize,
 }
 
-/// Verifica y, si cuadra, envia la huella final a los admins por Telegram y la recuerda
-async fn send_anchor(state: &AppState, by: &str) -> Result<AnchorResponse, ApiError> {
+/// Verifica y, si cuadra, envia la huella final a los admins por Telegram y la recuerda.
+/// `manual`: lo pidio una persona, que ve el texto para guardarlo afuera; la revision
+/// diaria sin Telegram no registra nada (la huella no salio del servidor).
+async fn send_anchor(state: &AppState, by: &str, manual: bool) -> Result<AnchorResponse, ApiError> {
     let (report, lab) = crate::db::db_op(&state.db, |conn| {
         let lab: String = conn
             .query_row("SELECT lab_name FROM branding WHERE id = 1", [], |r| r.get(0))
@@ -356,18 +363,26 @@ async fn send_anchor(state: &AppState, by: &str) -> Result<AnchorResponse, ApiEr
         report.head_seq.unwrap_or(0),
         report.head_hash
     );
-    crate::handlers::notifications::notify_admins(state, &tg).await;
+    let telegram_sent = crate::handlers::notifications::notify_admins(state, &tg).await;
+    if telegram_sent == 0 && !manual {
+        return Ok(AnchorResponse { text, report, telegram_sent });
+    }
     let (seq, hash) = (report.head_seq.unwrap_or(0), report.head_hash.clone());
+    let via = if telegram_sent > 0 { "telegram" } else { "texto" };
     crate::db::db_op(&state.db, move |conn| {
         crate::db::set_setting(conn, "ledger_anchor_seq", &seq.to_string())?;
         crate::db::set_setting(conn, "ledger_anchor_hash", &hash)?;
+        crate::db::set_setting(conn, "ledger_anchor_via", via)?;
         crate::db::set_setting(conn, "ledger_anchor_at", &chrono::Utc::now().to_rfc3339())
     })
     .await?;
-    state
-        .log_activity("Bitacora anclada", &format!("#{} {}", seq, report.head_hash), by)
-        .await;
-    Ok(AnchorResponse { text, report })
+    let detail = if telegram_sent > 0 {
+        format!("#{} {} (Telegram a {} chat(s))", seq, report.head_hash, telegram_sent)
+    } else {
+        format!("#{} {} (sin Telegram: texto mostrado)", seq, report.head_hash)
+    };
+    state.log_activity("Bitacora anclada", &detail, by).await;
+    Ok(AnchorResponse { text, report, telegram_sent })
 }
 
 /// POST /api/ledger/anchor
@@ -375,7 +390,7 @@ pub async fn anchor(
     State(state): State<AppState>,
     Extension(session): Extension<SessionInfo>,
 ) -> Result<Json<AnchorResponse>, ApiError> {
-    Ok(Json(send_anchor(&state, &session.username).await?))
+    Ok(Json(send_anchor(&state, &session.username, true).await?))
 }
 
 /// Revision diaria: si la cadena se rompio, alarma; si crecio desde el ultimo ancla, ancla.
@@ -424,7 +439,7 @@ pub(crate) async fn check_once(state: &AppState) {
     }
     let grew = report.head_seq.unwrap_or(0) > anchor.map(|a| a.seq).unwrap_or(0);
     if grew {
-        if let Err((_, e)) = send_anchor(state, "sistema").await {
+        if let Err((_, e)) = send_anchor(state, "sistema", false).await {
             eprintln!("[Bitacora] No se pudo anclar: {}", e);
         }
     }
