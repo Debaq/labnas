@@ -111,6 +111,27 @@ pub(crate) async fn bcrypt_hash(password: String) -> Result<String, (StatusCode,
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Error hasheando contrasena".to_string()))
 }
 
+/// Cookie de sesion: HttpOnly (un XSS no puede leerla) y SameSite=Strict (no viaja
+/// en pedidos desde otros sitios). `secure` cuando el navegador entro por HTTPS (puente).
+pub const SESSION_COOKIE: &str = "labnas_session";
+
+pub fn session_cookie(token: &str, secure: bool) -> String {
+    format!(
+        "{}={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}{}",
+        SESSION_COOKIE,
+        token,
+        crate::state::SESSION_TTL_SECS,
+        if secure { "; Secure" } else { "" }
+    )
+}
+
+fn with_cookie(mut resp: Response, token: &str, secure: bool) -> Response {
+    if let Ok(v) = axum::http::HeaderValue::from_str(&session_cookie(token, secure)) {
+        resp.headers_mut().append(axum::http::header::SET_COOKIE, v);
+    }
+    resp
+}
+
 fn extract_token(headers: &HeaderMap) -> Option<String> {
     headers
         .get("authorization")
@@ -154,8 +175,9 @@ pub async fn has_users(
 
 pub async fn register(
     State(state): State<AppState>,
+    bridge: Option<axum::Extension<crate::bridge::BridgeOrigin>>,
     Json(req): Json<RegisterRequest>,
-) -> Result<Json<AuthResponse>, (StatusCode, String)> {
+) -> Result<Response, (StatusCode, String)> {
     let username = req.username.trim().to_lowercase();
     if username.len() < 2 || username.len() > 32 {
         return Err((StatusCode::BAD_REQUEST, "Usuario debe tener entre 2 y 32 caracteres".to_string()));
@@ -245,13 +267,16 @@ pub async fn register(
     let modules = crate::db::db_op(&state.db, |conn| Ok(crate::db::get_modules(conn))).await
         .unwrap_or_default();
 
-    Ok(Json(AuthResponse {
+    let cookie_token = token.clone();
+    let resp = Json(AuthResponse {
         token,
         username,
         role,
         permissions,
         enabled_modules: modules,
-    }))
+    })
+    .into_response();
+    Ok(with_cookie(resp, &cookie_token, bridge.is_some()))
 }
 
 // --- Login ---
@@ -338,6 +363,7 @@ pub async fn login(
 
     let token = create_session(&state, &username, role.clone(), permissions.clone()).await?;
 
+    let secure = bridge.is_some();
     // Inicio de sesion desde internet: queda en la auditoria con la IP real
     if let Some(axum::Extension(origin)) = bridge {
         state
@@ -348,14 +374,16 @@ pub async fn login(
     let modules = crate::db::db_op(&state.db, |conn| Ok(crate::db::get_modules(conn))).await
         .unwrap_or_default();
 
-    Ok(Json(AuthResponse {
+    let cookie_token = token.clone();
+    let resp = Json(AuthResponse {
         token,
         username,
         role,
         permissions,
         enabled_modules: modules,
     })
-    .into_response())
+    .into_response();
+    Ok(with_cookie(resp, &cookie_token, secure))
 }
 
 /// Cuenta un intento fallido (bloquea tras MAX_LOGIN_FAILURES) y demora la respuesta
@@ -414,11 +442,15 @@ pub async fn me(
 pub async fn logout(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> StatusCode {
+) -> impl IntoResponse {
     if let Some(token) = extract_token(&headers) {
         remove_session(&state, &token).await;
     }
-    StatusCode::OK
+    // Borra la cookie del navegador
+    (
+        [(axum::http::header::SET_COOKIE, format!("{}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0", SESSION_COOKIE))],
+        StatusCode::OK,
+    )
 }
 
 // --- Change password ---

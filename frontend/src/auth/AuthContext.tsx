@@ -1,8 +1,9 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { UserRole, UserPermissions, ModuleInfo } from '../types'
+import { api, UNAUTHORIZED_EVENT } from '../api/client'
 
+/** Lo que se guarda en localStorage: sin token (la sesion va en una cookie HttpOnly) */
 interface AuthUser {
-  token: string
   username: string
   role: UserRole
   permissions: UserPermissions
@@ -34,7 +35,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const raw = localStorage.getItem('labnas_auth')
       if (!raw) return null
-      const parsed = JSON.parse(raw) as AuthUser
+      const parsed = JSON.parse(raw) as AuthUser & { token?: string }
+      // Formato viejo (con token en localStorage): se descarta; hay que volver a entrar
+      if (parsed.token) {
+        localStorage.removeItem('labnas_auth')
+        return null
+      }
       if (!parsed.enabledModules) parsed.enabledModules = []
       return parsed
     } catch {
@@ -49,10 +55,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return []
   }
 
-  function refreshFromServer(token: string, parsed: AuthUser) {
-    return fetch('/api/auth/me', {
-      headers: { Authorization: `Bearer ${token}` },
-    }).then(res => {
+  function refreshFromServer(parsed: AuthUser) {
+    return api('/api/auth/me').then(res => {
       if (res.ok) {
         return res.json().then(data => {
           const updated = {
@@ -74,7 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Initial load
   useEffect(() => {
     if (!saved) return
-    refreshFromServer(saved.token, saved)
+    refreshFromServer(saved)
       .catch(() => localStorage.removeItem('labnas_auth'))
       .finally(() => setLoading(false))
     // Solo al montar
@@ -89,15 +93,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const parsed = JSON.parse(saved) as AuthUser
           if (!parsed.enabledModules) parsed.enabledModules = []
-          refreshFromServer(parsed.token, parsed).catch(() => {})
+          refreshFromServer(parsed).catch(() => {})
         } catch {}
       }
     }, 30000)
     return () => clearInterval(interval)
   }, [])
 
+  // Cualquier 401 de la API (sesion vencida o revocada) vuelve al login
+  useEffect(() => {
+    const onUnauthorized = () => {
+      setUser(null)
+      localStorage.removeItem('labnas_auth')
+    }
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+  }, [])
+
   async function login(username: string, password: string, code?: string): Promise<boolean> {
-    const res = await fetch('/api/auth/login', {
+    const res = await api('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password, code }),
@@ -109,7 +123,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await res.json()
     if (data.totp_required) return false
     const authUser: AuthUser = {
-      token: data.token,
       username: data.username,
       role: data.role,
       permissions: data.permissions,
@@ -121,7 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function register(username: string, password: string) {
-    const res = await fetch('/api/auth/register', {
+    const res = await api('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
@@ -132,7 +145,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const data = await res.json()
     const authUser: AuthUser = {
-      token: data.token,
       username: data.username,
       role: data.role,
       permissions: data.permissions,
@@ -144,10 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   function logout() {
     if (user) {
-      fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${user.token}` },
-      }).catch(() => {})
+      api('/api/auth/logout', { method: 'POST' }).catch(() => {})
     }
     setUser(null)
     localStorage.removeItem('labnas_auth')
@@ -173,15 +182,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function refreshUser() {
     if (!user) return
-    await refreshFromServer(user.token, user).catch(() => {})
+    await refreshFromServer(user).catch(() => {})
   }
 
   async function refreshModules() {
     if (!user) return
     try {
-      const res = await fetch('/api/modules', {
-        headers: { Authorization: `Bearer ${user.token}` },
-      })
+      const res = await api('/api/modules')
       if (res.ok) {
         const modules: ModuleInfo[] = await res.json()
         const updated = { ...user, enabledModules: modules }

@@ -2,6 +2,12 @@
 
 ## [Sin publicar]
 
+### Sesiones más seguras
+
+- **La sesión web va en una cookie HttpOnly + SameSite=Strict** (Secure por el puente): el token ya no se guarda en `localStorage`, así que un XSS no puede robarlo. Con sesión por cookie, los métodos que modifican exigen la cabecera `X-LabNAS-CSRF`. El token Bearer sigue funcionando para clientes y scripts
+- Un 401 en cualquier pantalla devuelve al login (antes mostraba listas vacías)
+- Tras actualizar hay que **volver a iniciar sesión una vez** (se descarta la sesión guardada en el formato viejo)
+
 ### Respaldos con restic
 
 - Tareas de respaldo tipo **restic**: repositorio cifrado y deduplicado en disco local o remoto (SFTP, S3, B2, REST...). Contraseña y credenciales cifradas en la base (migración 12), retención diaria, **verificación** de integridad y **restauración** a `<origen>/.labnas-restore/` sin pisar archivos. Las tareas rsync siguen igual

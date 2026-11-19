@@ -236,7 +236,7 @@ function lb_static($path)
 /** Cabeceras del navegador que se reenvian a LabNAS */
 function lb_forward_headers()
 {
-    $names = array('Authorization', 'Content-Type', 'Range', 'If-None-Match', 'If-Modified-Since', 'If-Range', 'Accept', 'Accept-Language');
+    $names = array('Authorization', 'Cookie', 'X-LabNAS-CSRF', 'Content-Type', 'Range', 'If-None-Match', 'If-Modified-Since', 'If-Range', 'Accept', 'Accept-Language');
     $out = array();
     foreach ($names as $n) {
         $v = lb_header($n);

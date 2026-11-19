@@ -1113,9 +1113,9 @@ export default function SettingsPage() {
               ) : (
                 <button
                   onClick={async () => {
-                    if (!authUser?.token) return
+                    if (!authUser) return
                     try {
-                      const code = await generateLinkCode(authUser.token)
+                      const code = await generateLinkCode()
                       setLinkCode(code)
                     } catch {}
                   }}

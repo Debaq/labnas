@@ -43,7 +43,7 @@ export async function fetchHealth(): Promise<HealthInfo> {
 }
 
 export async function shutdownServer(): Promise<void> {
-  await fetch('/api/system/shutdown', { method: 'POST' })
+  await api('/api/system/shutdown', { method: 'POST' })
 }
 
 export async function fetchAutostartStatus(): Promise<import('../types').AutostartStatus> {

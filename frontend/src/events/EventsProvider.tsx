@@ -62,9 +62,10 @@ export default function EventsProvider({ children }: { children: ReactNode }) {
     toastRef.current = addToast
   })
 
-  const token = user?.token
+  // Se reconecta al cambiar de usuario (la sesion va en la cookie)
+  const sessionKey = user?.username
   useEffect(() => {
-    if (!token) return
+    if (!sessionKey) return
     let ws: WebSocket | null = null
     let retry: ReturnType<typeof setTimeout> | null = null
     let backoff = 1000
@@ -127,7 +128,7 @@ export default function EventsProvider({ children }: { children: ReactNode }) {
       wsRef.current = null
       setConnected(false)
     }
-  }, [token, dispatch, sendInterest])
+  }, [sessionKey, dispatch, sendInterest])
 
   return (
     <EventsContext.Provider value={{ connected, subscribe }}>

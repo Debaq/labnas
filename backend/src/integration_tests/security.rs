@@ -129,3 +129,33 @@ async fn sin_cors_para_otros_origenes() {
     assert_eq!(r.status, 200);
     assert_eq!(r.header("access-control-allow-origin"), "", "no se autoriza a otros origenes");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sesion_por_cookie_httponly_con_csrf() {
+    let s = Server::start().await;
+    s.admin().await;
+    let login = s.client().post(format!("{}/api/auth/login", s.base))
+        .json(&json!({ "username": "admin", "password": "adminadmin" })).send().await.unwrap();
+    let cookie = login.headers().get("set-cookie").expect("Set-Cookie").to_str().unwrap().to_string();
+    assert!(cookie.contains("HttpOnly") && cookie.contains("SameSite=Strict"), "{}", cookie);
+    let pair = cookie.split(';').next().unwrap().to_string();
+
+    // Solo con la cookie (sin Authorization) se puede leer
+    let me = s.client().get(format!("{}/api/auth/me", s.base)).header("cookie", &pair).send().await.unwrap();
+    assert_eq!(me.status(), 200);
+
+    // Modificar sin la cabecera anti-CSRF: rechazado; con ella: permitido
+    let url = format!("{}/api/auth/link-code", s.base);
+    assert_eq!(s.client().post(&url).header("cookie", &pair).send().await.unwrap().status(), 403);
+    assert_eq!(s.client().post(&url).header("cookie", &pair).header("x-labnas-csrf", "1").send().await.unwrap().status(), 200);
+
+    // Cookie basura no autentica
+    let bad = s.client().get(format!("{}/api/auth/me", s.base)).header("cookie", "labnas_session=<script>").send().await.unwrap();
+    assert_eq!(bad.status(), 401);
+
+    // Logout invalida la sesion y borra la cookie
+    let out = s.client().post(format!("{}/api/auth/logout", s.base)).header("cookie", &pair).header("x-labnas-csrf", "1").send().await.unwrap();
+    assert!(out.headers().get("set-cookie").unwrap().to_str().unwrap().contains("Max-Age=0"));
+    let me = s.client().get(format!("{}/api/auth/me", s.base)).header("cookie", &pair).send().await.unwrap();
+    assert_eq!(me.status(), 401);
+}

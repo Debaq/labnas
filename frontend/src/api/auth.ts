@@ -31,11 +31,8 @@ export async function renameUser(newUsername: string): Promise<{ token: string; 
 
 // --- Linking ---
 
-export async function generateLinkCode(token: string): Promise<string> {
-  const res = await api('/api/auth/link-code', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-  })
+export async function generateLinkCode(): Promise<string> {
+  const res = await api('/api/auth/link-code', { method: 'POST' })
   if (!res.ok) throw new Error('Error al generar codigo')
   return res.text()
 }

@@ -1,15 +1,13 @@
-/** fetch con el token de sesion (lo usan todos los modulos de ../api) */
-// Auth-aware fetch wrapper
+/**
+ * fetch de la app. La sesion viaja en una cookie HttpOnly (el navegador la manda
+ * sola; JavaScript no puede leerla, asi que un XSS no puede robar el token).
+ * Toda peticion lleva X-LabNAS-CSRF: con sesion por cookie el servidor la exige
+ * en los metodos que modifican.
+ */
+export const UNAUTHORIZED_EVENT = 'labnas:unauthorized'
+
 export function authHeaders(extra?: Record<string, string>): Record<string, string> {
-  const headers: Record<string, string> = { ...extra }
-  try {
-    const saved = localStorage.getItem('labnas_auth')
-    if (saved) {
-      const { token } = JSON.parse(saved)
-      if (token) headers['Authorization'] = `Bearer ${token}`
-    }
-  } catch {}
-  return headers
+  return { ...extra, 'X-LabNAS-CSRF': '1' }
 }
 
 export async function api(url: string, opts?: RequestInit): Promise<Response> {
@@ -21,15 +19,16 @@ export async function api(url: string, opts?: RequestInit): Promise<Response> {
     ) : undefined
   )
 
-  // Don't set auth header for FormData (browser sets content-type with boundary)
+  // FormData: el navegador pone el Content-Type con el boundary
   const isFormData = opts?.body instanceof FormData
+  if (isFormData) delete headers['Content-Type']
 
-  return fetch(url, {
-    ...opts,
-    headers: isFormData
-      ? (headers['Authorization'] ? { Authorization: headers['Authorization'] } : {})
-      : headers,
-  })
+  const res = await fetch(url, { ...opts, credentials: 'same-origin', headers })
+  // Sesion vencida o revocada: la app vuelve al login (una sola via, ver AuthContext)
+  if (res.status === 401 && !url.startsWith('/api/auth/login') && !url.startsWith('/api/auth/register')) {
+    window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
+  }
+  return res
 }
 
 /** JSON de la respuesta o Error con el texto del servidor */

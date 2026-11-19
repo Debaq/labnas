@@ -35,6 +35,24 @@ fn resolve_module_for_path(path: &str) -> Option<&'static str> {
     None
 }
 
+/// Cabecera que el frontend manda en todo pedido: con sesion por cookie es obligatoria
+/// en metodos que modifican (defensa CSRF junto a SameSite=Strict)
+pub const CSRF_HEADER: &str = "x-labnas-csrf";
+
+/// Token de la cookie de sesion
+pub fn cookie_token(headers: &axum::http::HeaderMap) -> Option<String> {
+    let prefix = format!("{}=", crate::handlers::auth::SESSION_COOKIE);
+    headers
+        .get_all(axum::http::header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .map(str::trim)
+        .find_map(|c| c.strip_prefix(prefix.as_str()))
+        .filter(|t| !t.is_empty() && t.len() <= 128 && t.chars().all(|c| c.is_ascii_alphanumeric()))
+        .map(String::from)
+}
+
 /// WebSockets: se autentican con `?ticket=` (ver events::create_ticket)
 const WS_PATHS: &[&str] = &["/api/terminal", "/api/live"];
 
@@ -205,12 +223,16 @@ pub async fn permission_check(
 
     // Token por header. Los WebSocket (el navegador no permite headers) usan un
     // ticket de un solo uso: el token de sesion nunca viaja en una URL.
-    let token = request
+    let bearer = request
         .headers()
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .map(|s| s.to_string())
+        .map(|s| s.to_string());
+    let cookie = if bearer.is_none() { cookie_token(request.headers()) } else { None };
+    let from_cookie = cookie.is_some();
+    let token = bearer
+        .or(cookie)
         .or_else(|| {
             if !WS_PATHS.contains(&path.as_str()) {
                 return None;
@@ -225,6 +247,18 @@ pub async fn permission_check(
     let Some(token) = token else {
         return (StatusCode::UNAUTHORIZED, "No autorizado").into_response();
     };
+
+    if from_cookie {
+        // CSRF: la cookie viaja sola; un formulario de otro sitio no puede poner esta cabecera
+        let safe = matches!(method, Method::GET | Method::HEAD | Method::OPTIONS);
+        if !safe && !request.headers().contains_key(CSRF_HEADER) {
+            return (StatusCode::FORBIDDEN, "Falta la cabecera anti-CSRF").into_response();
+        }
+        // Los handlers leen el token del header Authorization: se completa desde la cookie
+        if let Ok(v) = axum::http::HeaderValue::from_str(&format!("Bearer {}", token)) {
+            request.headers_mut().insert(axum::http::header::AUTHORIZATION, v);
+        }
+    }
 
     let session = state.sessions.lock().await.get(&token).cloned();
     let Some(session) = session else {
