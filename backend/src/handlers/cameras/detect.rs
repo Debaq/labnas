@@ -525,8 +525,8 @@ async fn fire(state: &AppState, rule: &Rule, cam: &CameraRow, frame: axum::body:
     }
     if rule.input.actions.telegram {
         let caption = format!("🔎 {} en {}: {}\n{}", kind_title(&rule.input.kind), cam.name, labels, at.format("%d-%m-%Y %H:%M:%S"));
-        if crate::handlers::notifications::notify_admins_photo(state, marked, &caption).await == 0 {
-            errors.push("telegram: no se pudo enviar (¿bot configurado y admins vinculados?)".into());
+        if let Err(e) = crate::handlers::notifications::notify_admins_photo(state, marked, &caption).await {
+            errors.push(format!("telegram: {}", e));
         }
     }
 

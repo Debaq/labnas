@@ -17,7 +17,7 @@ use crate::state::AppState;
 
 
 mod api;
-mod telegram;
+pub(crate) mod telegram;
 mod bot;
 mod terminal;
 mod calendar;

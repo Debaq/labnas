@@ -1,5 +1,12 @@
 # Changelog
 
+## [Sin publicar]
+
+### Telegram
+
+- **Los avisos a administradores llegan también a los chats vinculados a una cuenta web de admin**, aunque el rol del chat no se haya actualizado (pasaba si el chat se vinculó antes de ser admin). Afecta a la detección con IA, respaldos, discos y bitácora
+- Si la foto de una detección no se puede enviar, el aviso dice por qué: no hay bot, ningún chat de administrador, o la respuesta exacta de Telegram
+
 ## [3.3.0] — 2026-11-19
 
 Desde v3.2.2.
