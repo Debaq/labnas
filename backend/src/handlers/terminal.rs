@@ -1,6 +1,10 @@
 use axum::{
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        State,
+    },
     response::IntoResponse,
+    Extension,
 };
 use futures_util::{SinkExt, StreamExt};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
@@ -13,8 +17,22 @@ struct ResizeMessage {
     rows: u16,
 }
 
-pub async fn terminal_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(handle_terminal_socket)
+/// Abrir una consola en el servidor queda en la auditoria (quien, cuando y cuanto duro)
+pub async fn terminal_handler(
+    State(state): State<crate::state::AppState>,
+    Extension(session): Extension<crate::state::SessionInfo>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| async move {
+        let user = session.username;
+        state.log_activity("Terminal abierta", "", &user).await;
+        let started = std::time::Instant::now();
+        handle_terminal_socket(socket).await;
+        let secs = started.elapsed().as_secs();
+        state
+            .log_activity("Terminal cerrada", &format!("duracion {} min {} s", secs / 60, secs % 60), &user)
+            .await;
+    })
 }
 
 async fn handle_terminal_socket(mut socket: WebSocket) {

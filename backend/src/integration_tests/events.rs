@@ -15,6 +15,15 @@ async fn tickets_de_websocket() {
     assert_eq!(s.ws_status(&format!("/api/live?ticket={}", ticket)).await, 101);
     assert_eq!(s.ws_status(&format!("/api/live?ticket={}", ticket)).await, 401, "un solo uso");
     assert_eq!(s.ws_status(&format!("/api/terminal?token={}", admin)).await, 401, "token de sesion en URL");
+
+    // Abrir la terminal queda en la auditoria con el usuario, y tambien el cierre
+    let t = s.req(reqwest::Method::POST, "/api/live/ticket", Some(&admin), None).await.json();
+    assert_eq!(s.ws_status(&format!("/api/terminal?ticket={}", t.as_str().unwrap())).await, 101);
+    super::harness::wait_until(5_000, || async {
+        let a = s.get("/api/audit?q=Terminal", &admin).await.json();
+        a.as_array().is_some_and(|v| v.len() == 2 && v.iter().all(|e| e["username"] == "admin"))
+    })
+    .await;
     assert_eq!(s.req(reqwest::Method::POST, "/api/live/ticket", None, None).await.status, 401);
 }
 
