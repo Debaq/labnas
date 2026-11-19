@@ -10,9 +10,24 @@ const TENANTS: Record<string, string> = {
   consumers: 'Solo cuentas personales (Outlook.com, Hotmail)',
 }
 
-/** Admin: Client ID de la app registrada en Microsoft Entra */
+/**
+ * Apps publicas ya registradas en Microsoft que sirven para leer correo por IMAP con
+ * codigo de dispositivo. Agregar aqui solo las que se hayan probado de verdad.
+ * (Evolution de GNOME no sirve: su app esta habilitada para EWS, no para IMAP.)
+ */
+const KNOWN_APPS: { id: string; name: string; note: string }[] = [
+  {
+    id: '9e5f94bc-e8a4-4e73-b8be-63364c29d753',
+    name: 'Thunderbird (Mozilla)',
+    note: 'Probado con Microsoft 365 de la UACh. Microsoft mostrará «Mozilla Thunderbird» al iniciar sesión.',
+  },
+]
+const CUSTOM = 'propia'
+
+/** Admin: app de Microsoft con la que los usuarios conectan su correo */
 export default function MicrosoftOAuthSection() {
   const [clientId, setClientId] = useState('')
+  const [app, setApp] = useState(CUSTOM)
   const [tenant, setTenant] = useState('common')
   const [customTenant, setCustomTenant] = useState('')
   const [busy, setBusy] = useState(false)
@@ -21,6 +36,7 @@ export default function MicrosoftOAuthSection() {
   useEffect(() => {
     fetchMsOAuthConfig().then(c => {
       setClientId(c.client_id)
+      setApp(KNOWN_APPS.some(a => a.id === c.client_id) ? c.client_id : CUSTOM)
       if (c.tenant in TENANTS) setTenant(c.tenant)
       else { setTenant('custom'); setCustomTenant(c.tenant) }
     }).catch(e => setMsg({ ok: false, text: errorMessage(e) }))
@@ -31,7 +47,8 @@ export default function MicrosoftOAuthSection() {
     setMsg(null)
     try {
       const t = tenant === 'custom' ? customTenant.trim() : tenant
-      const c = await saveMsOAuthConfig({ client_id: clientId.trim(), tenant: t })
+      const id = app === CUSTOM ? clientId.trim() : app
+      const c = await saveMsOAuthConfig({ client_id: id, tenant: t })
       setMsg({ ok: true, text: c.configured ? 'Guardado: los usuarios ya pueden conectar cuentas Microsoft' : 'Guardado (sin Client ID: conexión con Microsoft desactivada)' })
     } catch (e) {
       setMsg({ ok: false, text: errorMessage(e) })
@@ -48,13 +65,26 @@ export default function MicrosoftOAuthSection() {
       </div>
       <div className="rounded-xl p-6 space-y-4" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
         <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-          Outlook.com, Hotmail y Microsoft 365 ya no aceptan contraseña por IMAP. Registra una app gratuita en Microsoft Entra y pega aquí su Client ID; cada usuario conecta su cuenta iniciando sesión en Microsoft.
+          Outlook.com, Hotmail y Microsoft 365 ya no aceptan contraseña por IMAP: cada usuario inicia sesión en Microsoft
+          y autoriza a una «aplicación» a leer su correo. Puedes usar una app de correo conocida que ya está registrada en
+          Microsoft (no requiere permisos especiales) o una propia, si TI de tu institución la registró.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Client ID (Id. de aplicación)</label>
-            <input value={clientId} onChange={e => setClientId(e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-              className="w-full px-3 py-2 rounded-lg text-sm outline-none font-mono" style={inputStyle} />
+            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Aplicación</label>
+            <select value={app} onChange={e => setApp(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer" style={inputStyle}>
+              {KNOWN_APPS.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              <option value={CUSTOM}>App propia (Client ID registrado por TI)</option>
+            </select>
+            {app === CUSTOM ? (
+              <input value={clientId} onChange={e => setClientId(e.target.value)} placeholder="Client ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                className="w-full mt-2 px-3 py-2 rounded-lg text-sm outline-none font-mono" style={inputStyle} />
+            ) : (
+              <p className="mt-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                {KNOWN_APPS.find(a => a.id === app)?.note}
+                <span className="block font-mono opacity-70">{app}</span>
+              </p>
+            )}
           </div>
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Cuentas permitidas (tenant)</label>
@@ -76,7 +106,7 @@ export default function MicrosoftOAuthSection() {
         {msg && <p className="text-xs" style={{ color: msg.ok ? 'var(--success)' : 'var(--danger)' }}>{msg.text}</p>}
 
         <details className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-          <summary className="cursor-pointer font-medium" style={{ color: 'var(--text-primary)' }}>Cómo obtener el Client ID (5 minutos)</summary>
+          <summary className="cursor-pointer font-medium" style={{ color: 'var(--text-primary)' }}>App propia: cómo registrarla en Microsoft Entra (requiere acceso de administrador de la institución)</summary>
           <ol className="list-decimal list-inside space-y-1.5 mt-2">
             <li>Entra a <a href="https://entra.microsoft.com" target="_blank" rel="noopener noreferrer" className="underline">entra.microsoft.com</a> &gt; Identidad &gt; Aplicaciones &gt; Registros de aplicaciones &gt; <em>Nuevo registro</em>. Nombre: LabNAS. Tipos de cuenta: «Cuentas en cualquier directorio organizativo y cuentas personales de Microsoft». Sin URI de redirección.</li>
             <li>En la app: <em>Autenticación</em> &gt; Configuración avanzada &gt; «Permitir flujos de clientes públicos» = Sí &gt; Guardar.</li>

@@ -68,7 +68,7 @@ export default function MicrosoftConnect({ initialEmail, onConnected }: { initia
   if (!configured) {
     return (
       <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-        El administrador debe configurar la conexión con Microsoft (Client ID) más abajo en esta página.
+        El administrador debe elegir la aplicación de Microsoft en «Conexión con Microsoft», más abajo en esta página.
       </p>
     )
   }

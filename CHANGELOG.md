@@ -10,6 +10,10 @@
 - **Ancla externa**: cada día, si la bitácora creció, la huella final va a los admins por Telegram; botón «Anclar» con texto para copiar en un correo. Si la cadena aparece alterada o recortada, avisa por Telegram y en la web y lo deja en la auditoría
 - Migración 16 (`ledger_entries`). Solo admin y no disponible por el puente de internet
 
+### Correo de Microsoft
+
+- **Conexión con Microsoft sin registrar una app**: el admin elige la aplicación de una lista de apps de correo públicas ya registradas en Microsoft (por ahora **Thunderbird**, probada con Microsoft 365 de la UACh) o pega el Client ID de una app propia. Antes había que registrar una app en Microsoft Entra, lo que en una cuenta institucional requiere a TI
+
 ### IA
 
 - El **proveedor de IA y su API key** se configuran en **Configuración > Sistema** (antes estaban dentro de Correo y no se podían configurar con ese módulo apagado). Es una sola configuración para todos los módulos
