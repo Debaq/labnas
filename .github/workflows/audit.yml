@@ -1,0 +1,45 @@
+name: Auditoria de dependencias
+
+# Vulnerabilidades conocidas (RustSec y npm). Corre tambien cada lunes: aparecen avisos
+# nuevos aunque el codigo no cambie
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'backend/Cargo.lock'
+      - 'viewer/Cargo.lock'
+      - 'frontend/package-lock.json'
+      - '.github/workflows/audit.yml'
+  pull_request:
+  schedule:
+    - cron: '0 12 * * 1'
+  workflow_dispatch:
+
+jobs:
+  rust:
+    name: cargo audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: backend
+        working-directory: backend
+        run: cargo audit
+      - name: visor
+        working-directory: viewer
+        run: cargo audit
+
+  npm:
+    name: npm audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      # Solo lo que llega al navegador; las herramientas de compilacion no se publican
+      - name: frontend
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
