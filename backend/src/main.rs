@@ -745,6 +745,7 @@ fn api_routes() -> Router<AppState> {
         .route("/api/email/proposals/{id}/dismiss", post(handlers::email::dismiss_proposal_handler))
         .route("/api/ai/config", get(ai::get_config).put(ai::set_config))
         .route("/api/ai/test", post(ai::test_config))
+        .route("/api/ai/models", post(ai::list_models))
         .route("/api/files/upload/chunked", post(handlers::uploads::init))
         .route("/api/files/upload/chunked/{id}", put(handlers::uploads::chunk).delete(handlers::uploads::abort))
         .route("/api/files/upload/chunked/{id}/complete", post(handlers::uploads::complete))

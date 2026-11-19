@@ -2,6 +2,10 @@
 
 ## [Sin publicar]
 
+### IA
+
+- **Modelos elegibles de una lista:** Configuración > Sistema > Proveedor de IA pide al proveedor (DeepSeek, OpenAI, Groq, Ollama…) los modelos disponibles y los muestra en un selector, en vez de escribir el nombre a mano. Se carga solo si la IA ya está configurada, o con «Cargar modelos» usando la clave escrita. Avisa si el modelo guardado ya no existe. La clave guardada solo se envía a la misma URL para la que se guardó
+
 ### Actualizaciones
 
 - El aviso **«Nueva versión disponible · Click para actualizar»** ahora lleva directo a Configuración > Sistema, al botón de actualizar (antes abría la última pestaña usada y, si ya estabas en Configuración, no hacía nada)

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Key, Loader2, Trash2 } from 'lucide-react'
-import { fetchAiConfig, saveAiConfig, testAi, type AiConfig } from '../api'
+import { Key, Loader2, RefreshCw, Trash2 } from 'lucide-react'
+import { fetchAiConfig, fetchAiModels, saveAiConfig, testAi, type AiConfig } from '../api'
 import { errorMessage } from '../lib/errors'
 
 const PRESETS: Record<string, { label: string; url: string; model: string }> = {
@@ -27,6 +27,21 @@ export default function AiProviderSection() {
   const [busy, setBusy] = useState(false)
   const [testing, setTesting] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [models, setModels] = useState<string[] | null>(null)
+  const [loadingModels, setLoadingModels] = useState(false)
+
+  async function loadModels(url: string, key?: string, quiet = false) {
+    if (!url.trim()) return
+    setLoadingModels(true)
+    try {
+      setModels(await fetchAiModels(url.trim(), key?.trim()))
+    } catch (e) {
+      setModels(null)
+      if (!quiet) setMsg({ ok: false, text: errorMessage(e) })
+    } finally {
+      setLoadingModels(false)
+    }
+  }
 
   function apply(c: AiConfig) {
     setCfg(c)
@@ -38,13 +53,19 @@ export default function AiProviderSection() {
   useEffect(() => {
     fetchAiConfig().then(c => {
       if (!c.base_url) { setCfg(c); setBaseUrl(PRESETS.deepseek.url); setModel(PRESETS.deepseek.model) }
-      else apply(c)
+      else {
+        apply(c)
+        // Ya configurada: traer la lista de modelos del proveedor sin pedir nada
+        if (c.enabled) loadModels(c.base_url, undefined, true)
+      }
     }).catch(e => setMsg({ ok: false, text: errorMessage(e) }))
   }, [])
 
   function choosePreset(k: string) {
     setPreset(k)
     if (k !== 'custom') { setBaseUrl(PRESETS[k].url); setModel(PRESETS[k].model) }
+    // Otro proveedor, otra lista
+    setModels(null)
   }
 
   async function save(key?: string) {
@@ -96,11 +117,34 @@ export default function AiProviderSection() {
           </div>
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Modelo</label>
-            <input value={model} onChange={e => { setModel(e.target.value); setPreset('custom') }} className="w-full px-3 py-2 rounded-lg text-sm outline-none font-mono" style={inputStyle} />
+            <div className="flex items-center gap-2">
+              {models ? (
+                <select value={model} onChange={e => setModel(e.target.value)}
+                  className="flex-1 min-w-0 px-3 py-2 rounded-lg text-sm outline-none cursor-pointer font-mono" style={inputStyle}>
+                  {!models.includes(model) && <option value={model}>{model || '(elige un modelo)'} — no está en la lista</option>}
+                  {models.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              ) : (
+                <input value={model} onChange={e => { setModel(e.target.value); setPreset('custom') }}
+                  className="flex-1 min-w-0 px-3 py-2 rounded-lg text-sm outline-none font-mono" style={inputStyle} />
+              )}
+              <button onClick={() => loadModels(baseUrl, apiKey)} disabled={loadingModels || !baseUrl.trim()}
+                title="Pedir al proveedor la lista de modelos disponibles (usa la clave escrita o la guardada)"
+                className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap"
+                style={{ color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
+                {loadingModels ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                {models ? 'Recargar' : 'Cargar modelos'}
+              </button>
+            </div>
+            {models && !models.includes(model) && model && (
+              <p className="mt-1 text-xs" style={{ color: 'var(--warning)' }}>
+                El proveedor no ofrece «{model}»: elige uno de la lista y guarda.
+              </p>
+            )}
           </div>
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>URL base</label>
-            <input value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setPreset('custom') }} className="w-full px-3 py-2 rounded-lg text-sm outline-none font-mono" style={inputStyle} />
+            <input value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setPreset('custom'); setModels(null) }} className="w-full px-3 py-2 rounded-lg text-sm outline-none font-mono" style={inputStyle} />
           </div>
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Clave API</label>

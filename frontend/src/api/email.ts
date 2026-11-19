@@ -139,6 +139,17 @@ export async function saveAiConfig(cfg: { base_url: string; model: string; api_k
   return res.json()
 }
 
+/** Modelos que ofrece el proveedor. Sin `api_key` usa la guardada (solo para la misma URL) */
+export async function fetchAiModels(base_url: string, api_key?: string): Promise<string[]> {
+  const res = await api('/api/ai/models', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base_url, api_key: api_key || undefined }),
+  })
+  if (!res.ok) return failText(res, 'No se pudo obtener la lista de modelos')
+  return res.json()
+}
+
 export async function testAi(): Promise<{ ok: boolean; model: string; ms: number }> {
   const res = await api('/api/ai/test', { method: 'POST' })
   if (!res.ok) return failText(res, 'Error al probar conexion')

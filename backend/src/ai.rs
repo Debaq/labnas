@@ -203,6 +203,75 @@ pub async fn test_config(State(state): State<AppState>) -> Result<Json<serde_jso
     })))
 }
 
+#[derive(Deserialize)]
+pub struct ModelsRequest {
+    pub base_url: String,
+    /// Vacia u omitida: la clave guardada, solo si `base_url` es la configurada
+    #[serde(default)]
+    pub api_key: Option<String>,
+}
+
+/// Extrae los ids de `GET /models` (formato OpenAI: `{"data": [{"id": ...}]}`), ordenados
+fn parse_models(json: &serde_json::Value) -> Vec<String> {
+    let mut ids: Vec<String> = json["data"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m["id"].as_str())
+        .filter(|id| !id.is_empty() && id.len() <= 200)
+        .map(String::from)
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// POST /api/ai/models: modelos que ofrece el proveedor (para elegir sin escribir el nombre)
+pub async fn list_models(
+    State(state): State<AppState>,
+    Json(req): Json<ModelsRequest>,
+) -> Result<Json<Vec<String>>, (StatusCode, String)> {
+    let base_url = req.base_url.trim().trim_end_matches('/').to_string();
+    let parsed = reqwest::Url::parse(&base_url).map_err(|_| (StatusCode::BAD_REQUEST, "URL invalida".to_string()))?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err((StatusCode::BAD_REQUEST, "La URL debe ser http(s)".to_string()));
+    }
+    let typed = req.api_key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
+    let url2 = base_url.clone();
+    let key = match typed {
+        Some(k) => Some(k),
+        // La clave guardada solo viaja al proveedor para el que se guardo
+        None => db_op(&state.db, move |conn| {
+            let saved_url = crate::db::get_setting(conn, "ai_base_url")
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+            Ok((saved_url.trim_end_matches('/') == url2)
+                .then(|| crate::db::get_secret_setting(conn, "ai_api_key"))
+                .flatten()
+                .filter(|k| !k.is_empty()))
+        })
+        .await?,
+    };
+
+    let mut r = state.http_client.get(format!("{}/models", base_url)).timeout(Duration::from_secs(15));
+    if let Some(k) = &key {
+        r = r.bearer_auth(k);
+    }
+    let resp = r.send().await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("No se pudo conectar: {}", e)))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        let hint = if status == StatusCode::UNAUTHORIZED && key.is_none() { " (falta la clave API)" } else { "" };
+        return Err((StatusCode::BAD_GATEWAY, format!("El proveedor respondio {}{}: {}", status, hint, crate::textutil::ellipsize(text.trim(), 200))));
+    }
+    let json: serde_json::Value = resp.json().await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Respuesta invalida: {}", e)))?;
+    let models = parse_models(&json);
+    if models.is_empty() {
+        return Err((StatusCode::BAD_GATEWAY, "El proveedor no informo modelos".to_string()));
+    }
+    Ok(Json(models))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,6 +282,17 @@ mod tests {
         assert_eq!(parse_json_content("```json\n{\"a\":2}\n```").unwrap()["a"], 2);
         assert_eq!(parse_json_content("  ```\n{\"a\":3}```  ").unwrap()["a"], 3);
         assert!(parse_json_content("no es json").is_err());
+    }
+
+    #[test]
+    fn lista_de_modelos() {
+        let j = serde_json::json!({ "object": "list", "data": [
+            { "id": "deepseek-reasoner", "object": "model" },
+            { "id": "deepseek-chat", "object": "model" },
+            { "id": "deepseek-chat" }, { "id": "" }, { "nombre": "x" },
+        ]});
+        assert_eq!(parse_models(&j), vec!["deepseek-chat", "deepseek-reasoner"]);
+        assert!(parse_models(&serde_json::json!({ "error": "x" })).is_empty());
     }
 
     #[test]

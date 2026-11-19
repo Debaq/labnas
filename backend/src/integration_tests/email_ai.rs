@@ -1,7 +1,7 @@
 //! Proveedor de IA generico (con un servidor falso compatible con OpenAI) y
 //! propuestas de eventos/tareas desde el correo.
 
-use axum::{http::HeaderMap, routing::post, Json, Router};
+use axum::{http::{HeaderMap, StatusCode}, routing::{get, post}, Json, Router};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
@@ -13,7 +13,15 @@ type Seen = Arc<Mutex<Vec<(Option<String>, Value)>>>;
 async fn fake_llm(content: Value) -> (String, Seen) {
     let seen: Seen = Arc::default();
     let s2 = seen.clone();
-    let app = Router::new().route(
+    let app = Router::new()
+        // Lista de modelos: exige la clave, como DeepSeek
+        .route("/v1/models", get(|headers: HeaderMap| async move {
+            if headers.get("authorization").and_then(|v| v.to_str().ok()) != Some("Bearer sk-123") {
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+            Ok(Json(json!({ "object": "list", "data": [{ "id": "modelo-z" }, { "id": "modelo-x" }] })))
+        }))
+        .route(
         "/v1/chat/completions",
         post(move |headers: HeaderMap, Json(body): Json<Value>| {
             let seen = s2.clone();
@@ -57,6 +65,18 @@ async fn proveedor_ia_configurable() {
     assert_eq!(auth.as_deref(), Some("Bearer sk-123"));
     assert_eq!(body["model"], "modelo-x");
     assert_eq!(body["response_format"]["type"], "json_object");
+
+    // Lista de modelos del proveedor: con la clave guardada (misma URL) o una escrita
+    assert_eq!(s.post("/api/ai/models", &ana, json!({ "base_url": url })).await.status, 403);
+    let r = s.post("/api/ai/models", &admin, json!({ "base_url": url })).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    assert_eq!(r.json(), json!(["modelo-x", "modelo-z"]));
+    // La clave guardada no viaja a otra URL
+    let otra = url.replace("127.0.0.1", "localhost");
+    let r = s.post("/api/ai/models", &admin, json!({ "base_url": otra })).await;
+    assert_eq!(r.status, 502);
+    assert!(r.text.contains("falta la clave"), "{}", r.text);
+    assert_eq!(s.post("/api/ai/models", &admin, json!({ "base_url": otra, "api_key": "sk-123" })).await.status, 200);
 
     // Sin tocar la clave (api_key ausente) se conserva; "" la borra
     s.put("/api/ai/config", &admin, json!({ "base_url": url, "model": "otro" })).await;
