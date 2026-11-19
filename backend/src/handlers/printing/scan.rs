@@ -49,13 +49,15 @@ static SCAN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 #[cfg(test)]
 pub static TEST_SCANNERS: StdMutex<Vec<ScanDevice>> = StdMutex::new(Vec::new());
 
-/// Salida de `scanimage -f "%d\t%v %m%n"` -> dispositivos
+/// Salida de `scanimage -f "%d\t%v %m%n"` -> dispositivos. Se omiten las camaras
+/// (backend v4l de SANE): no sirven para escanear documentos y confunden en la lista.
 fn parse_devices(out: &str) -> Vec<ScanDevice> {
     out.lines()
         .filter_map(|l| {
             let (id, name) = l.split_once('\t')?;
             let id = id.trim();
-            (!id.is_empty()).then(|| ScanDevice { id: id.to_string(), name: name.trim().to_string() })
+            (!id.is_empty() && !id.starts_with("v4l:"))
+                .then(|| ScanDevice { id: id.to_string(), name: name.trim().to_string() })
         })
         .collect()
 }
@@ -763,7 +765,7 @@ mod tests {
 
     #[test]
     fn dispositivos_y_opciones() {
-        let d = parse_devices("brother3:bus2;dev1\tBrother DCP-165C\nairscan:e0:HP\tHP eSCL\n\n");
+        let d = parse_devices("brother3:bus2;dev1\tBrother DCP-165C\nv4l:/dev/video0\tNoname HD Webcam\nairscan:e0:HP\tHP eSCL\n\n");
         assert_eq!(d.len(), 2);
         assert_eq!(d[0], ScanDevice { id: "brother3:bus2;dev1".into(), name: "Brother DCP-165C".into() });
 

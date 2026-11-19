@@ -64,6 +64,21 @@ sudo udevadm control --reload && sudo udevadm trigger
 sudo systemctl restart labnas
 ```
 
+## Si `scanimage -L` no muestra la Brother
+
+(Las webcams también aparecen en `scanimage -L`; LabNAS las oculta.)
+
+```bash
+lsusb | grep -i brother             # ¿el sistema ve el USB? (ID 04f9:...)
+brsaneconfig3 -q | grep -i 165      # ¿brscan3 instalado y reconoce el modelo?
+grep -n brother3 /etc/sane.d/dll.conf   # el backend debe estar habilitado
+sudo scanimage -L                   # como root: si aquí aparece y como usuario no, es permiso (paso 3)
+```
+
+- `brsaneconfig3: command not found`: falta el driver (paso 2).
+- `dll.conf` sin la línea `brother3`: agregarla con `echo brother3 | sudo tee -a /etc/sane.d/dll.conf`.
+- Con root aparece y con el usuario del servicio no: paso 3, y reiniciar el servicio.
+
 ## Problemas comunes
 
 | Mensaje en la web | Qué hacer |
