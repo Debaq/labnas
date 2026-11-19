@@ -336,6 +336,9 @@ mod tests {
         assert_eq!(acc(Method::GET, "/api/backups"), Admin);
         assert_eq!(acc(Method::POST, "/api/backups/abc/run"), Admin);
         assert_eq!(acc(Method::GET, "/api/audit"), Admin);
+        assert_eq!(acc(Method::GET, "/api/ledger"), Admin);
+        assert_eq!(acc(Method::POST, "/api/ledger/notes"), Admin);
+        assert_eq!(acc(Method::POST, "/api/ledger/3/annul"), Admin);
         assert_eq!(acc(Method::POST, "/api/sensors/devices/abc/token"), Admin);
         assert_eq!(acc(Method::PUT, "/api/sensors/security"), Admin);
         assert_eq!(acc(Method::PUT, "/api/files/webdav"), Admin);

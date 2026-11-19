@@ -9,6 +9,7 @@ mod cameras;
 mod email_ai;
 mod email_oauth;
 mod events;
+mod ledger;
 mod files;
 mod folders;
 mod https;

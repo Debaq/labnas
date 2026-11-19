@@ -251,7 +251,29 @@ const MIGRATIONS: &[&str] = &[
         deleted_by TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_camera_recordings_started ON camera_recordings(started_at);",
+    // 16: bitacora inalterable (ver ledger.rs)
+    MIGRATION_LEDGER,
 ];
+
+/// Migracion 16. Publicada: no modificar (ver `MIGRATIONS`).
+/// `prev_hash` UNIQUE impide bifurcar la cadena; los triggers, editar o borrar.
+pub(crate) const MIGRATION_LEDGER: &str = "CREATE TABLE IF NOT EXISTS ledger_entries (
+        seq INTEGER PRIMARY KEY,
+        timestamp TEXT NOT NULL,
+        username TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        subject TEXT NOT NULL DEFAULT '',
+        annuls INTEGER,
+        data TEXT NOT NULL,
+        prev_hash TEXT NOT NULL UNIQUE,
+        hash TEXT NOT NULL UNIQUE
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_annuls ON ledger_entries(annuls) WHERE annuls IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_ledger_kind ON ledger_entries(kind);
+    CREATE TRIGGER IF NOT EXISTS ledger_no_update BEFORE UPDATE ON ledger_entries
+    BEGIN SELECT RAISE(ABORT, 'bitacora inalterable: no se puede editar'); END;
+    CREATE TRIGGER IF NOT EXISTS ledger_no_delete BEFORE DELETE ON ledger_entries
+    BEGIN SELECT RAISE(ABORT, 'bitacora inalterable: no se puede borrar'); END;";
 
 fn run_migrations(conn: &Connection) {
     let current: usize = conn

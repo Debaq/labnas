@@ -9,6 +9,7 @@ pub mod backups;
 pub mod cameras;
 pub mod restic;
 pub mod audit;
+pub mod ledger;
 pub mod auth;
 pub mod email;
 pub mod extras;

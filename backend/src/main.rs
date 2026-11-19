@@ -15,6 +15,7 @@ mod bridge;
 mod ai;
 mod textutil;
 mod module_tasks;
+mod ledger;
 
 use axum::{
     http::Method,
@@ -87,6 +88,7 @@ async fn main() {
     tokio::spawn(handlers::notifications::daily_notification_loop(state.clone()));
     tokio::spawn(handlers::system::update_check_loop(state.clone()));
     tokio::spawn(handlers::audit::audit_cleanup_loop(state.clone()));
+    tokio::spawn(handlers::ledger::ledger_watch_loop(state.clone()));
     tokio::spawn(handlers::backups::backup_scheduler_loop(state.clone()));
     tokio::spawn(handlers::trash::trash_cleanup_loop(state.clone()));
     tokio::spawn(handlers::smart::smart_monitor_loop(state.clone()));
@@ -482,6 +484,14 @@ fn api_routes() -> Router<AppState> {
         .route("/api/backups/{id}/check", post(handlers::backups::check_repository))
         // Auditoria (admin)
         .route("/api/audit", get(handlers::audit::list_audit))
+        // Bitacora inalterable (admin)
+        .route("/api/ledger", get(handlers::ledger::list))
+        .route("/api/ledger/verify", get(handlers::ledger::verify))
+        .route("/api/ledger/export", get(handlers::ledger::export))
+        .route("/api/ledger/anchor", post(handlers::ledger::anchor))
+        .route("/api/ledger/notes", post(handlers::ledger::add_note))
+        .route("/api/ledger/{seq}/annul", post(handlers::ledger::annul))
+        .route("/api/ledger/{seq}/files", get(handlers::ledger::check_files))
         // Health
         .route("/api/health", get(handlers::system::health_handler))
         // Modules

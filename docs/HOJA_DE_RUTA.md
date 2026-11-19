@@ -141,10 +141,12 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
 - [ ] **Catálogo único de máquinas y bienes con QR:** cada equipo tiene una ficha
       a la que llevan las ideas de reservas, mantenimiento, inventario y uso.
 ### Registro y catálogo
-- [ ] **57. Bitácora que no se puede alterar.** Cada movimiento queda encadenado al
+- [x] **57. Bitácora que no se puede alterar.** Cada movimiento queda encadenado al
       anterior con su huella digital (hash). Nada se borra ni se edita: un error se
       corrige con un registro nuevo que lo anula. Si alguien adulterara un registro,
-      la cadena lo delataría.
+      la cadena lo delataría. *(hecho: `ledger.rs`, notas con huella de archivos,
+      anulaciones, exportación verificable con Python y ancla diaria por Telegram.
+      Detalle en `docs/BITACORA.md`)*
 - [ ] **72. Registro de cada acceso:** quién vio o descargó qué y cuándo. Amplía
       la auditoría que ya existe (`audit.rs`), que hoy registra acciones pero no
       lecturas.
