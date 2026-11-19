@@ -400,7 +400,6 @@ function lb_client($path)
 function lb_output_response($res, $id)
 {
     $meta = lb_read_json($res . '/' . $id . '.json');
-    $bodyFile = $res . '/' . $id . '.body';
     if (!$meta) {
         lb_send_text(502, 'Respuesta invalida de LabNAS');
         return;
@@ -421,14 +420,49 @@ function lb_output_response($res, $id)
         }
     }
     header('X-Accel-Buffering: no');
-    if (is_file($bodyFile)) {
-        header('Content-Length: ' . filesize($bodyFile));
-        readfile($bodyFile);
-        @unlink($bodyFile);
-    } else {
-        header('Content-Length: 0');
+    if (isset($meta['length']) && is_int($meta['length']) && $_SERVER['REQUEST_METHOD'] !== 'HEAD') {
+        header('Content-Length: ' . $meta['length']);
+    }
+
+    // Las partes se entregan apenas llegan (archivos grandes, video)
+    @ini_set('zlib.output_compression', 'Off');
+    while (ob_get_level() > 0) {
+        @ob_end_flush();
+    }
+    @set_time_limit(0);
+    ignore_user_abort(true);
+
+    $seq = 0;
+    $partDeadline = time() + 90;
+    while (true) {
+        clearstatcache();
+        $pf = $res . '/' . $id . '.p' . $seq;
+        if (is_file($pf)) {
+            readfile($pf);
+            @unlink($pf);
+            flush();
+            // Descarga larga: que la limpieza de la cola (120 s) no borre el pedido
+            @touch($res . '/' . $id . '.json');
+            $seq++;
+            $partDeadline = time() + 90;
+            continue;
+        }
+        $end = $res . '/' . $id . '.end';
+        if (is_file($end) && $seq > (int) file_get_contents($end)) {
+            break;
+        }
+        if (connection_aborted() || time() > $partDeadline) {
+            // Avisa a LabNAS que deje de enviar
+            @touch($res . '/' . $id . '.gone');
+            break;
+        }
+        usleep(50000);
     }
     @unlink($res . '/' . $id . '.json');
+    @unlink($res . '/' . $id . '.end');
+    foreach ((array) glob($res . '/' . $id . '.p*') as $f) {
+        @unlink($f);
+    }
 }
 
 // ─── Protocolo con LabNAS (/_labnas/*) ───
@@ -518,6 +552,15 @@ function lb_ops($op)
             return;
         case 'respond':
             lb_op_respond($dir, $body);
+            return;
+        case 'update_begin':
+            lb_op_update_begin($dir, $body);
+            return;
+        case 'update_file':
+            lb_op_update_file($dir, $body);
+            return;
+        case 'update_commit':
+            lb_op_update_commit($dir);
             return;
         default:
             lb_send_text(404, 'Operacion desconocida');
@@ -628,7 +671,10 @@ function lb_op_body($dir)
     readfile($f);
 }
 
-/** Respuesta de LabNAS: metadatos en ?meta= (base64url JSON), cuerpo crudo */
+/**
+ * Respuesta de LabNAS, en una o varias partes: ?id=&seq=N&final=0|1, y en la
+ * parte 0 tambien ?meta= (base64url JSON: status, headers, length). Cuerpo crudo.
+ */
 function lb_op_respond($dir, $body)
 {
     $id = isset($_GET['id']) ? $_GET['id'] : '';
@@ -636,25 +682,216 @@ function lb_op_respond($dir, $body)
         lb_send_text(400, 'id invalido');
         return;
     }
+    $seq = isset($_GET['seq']) ? (int) $_GET['seq'] : 0;
+    $final = !isset($_GET['final']) || $_GET['final'] === '1';
     $claimed = lb_queue($dir, 'claimed');
-    if (!is_file($claimed . '/' . $id . '.json')) {
-        // El navegador se canso de esperar
-        lb_send_text(410, 'El pedido ya no existe');
-        return;
-    }
-    $metaRaw = isset($_GET['meta']) ? base64_decode(strtr($_GET['meta'], '-_', '+/')) : false;
-    $meta = $metaRaw !== false ? json_decode($metaRaw, true) : null;
-    if (!is_array($meta) || !isset($meta['status'])) {
-        lb_send_text(400, 'meta invalida');
-        return;
-    }
     $res = lb_queue($dir, 'res');
-    if ($body !== '' && !lb_write_file($res . '/' . $id . '.body', $body)) {
+
+    if (is_file($res . '/' . $id . '.gone')) {
+        lb_send_text(410, 'El navegador cerro la descarga');
+        return;
+    }
+    if ($seq === 0) {
+        if (!is_file($claimed . '/' . $id . '.json')) {
+            // El navegador se canso de esperar
+            lb_send_text(410, 'El pedido ya no existe');
+            return;
+        }
+        $metaRaw = isset($_GET['meta']) ? base64_decode(strtr($_GET['meta'], '-_', '+/')) : false;
+        $meta = $metaRaw !== false ? json_decode($metaRaw, true) : null;
+        if (!is_array($meta) || !isset($meta['status'])) {
+            lb_send_text(400, 'meta invalida');
+            return;
+        }
+    } else {
+        if (!is_file($res . '/' . $id . '.json')) {
+            lb_send_text(410, 'El pedido ya no existe');
+            return;
+        }
+        // Contrapresion: si el navegador va lento, LabNAS espera antes de mandar mas
+        $pending = glob($res . '/' . $id . '.p*');
+        if (is_array($pending) && count($pending) >= 6) {
+            lb_send_text(429, 'Espera');
+            return;
+        }
+    }
+
+    if (!lb_write_file($res . '/' . $id . '.p' . $seq, $body)) {
         lb_send_text(507, 'Sin espacio en el hosting');
         return;
     }
-    lb_write_file($res . '/' . $id . '.json', json_encode($meta));
-    @unlink($claimed . '/' . $id . '.json');
-    @unlink($claimed . '/' . $id . '.body');
+    if ($seq === 0) {
+        lb_write_file($res . '/' . $id . '.json', json_encode($meta));
+        @unlink($claimed . '/' . $id . '.json');
+        @unlink($claimed . '/' . $id . '.body');
+    }
+    if ($final) {
+        lb_write_file($res . '/' . $id . '.end', (string) $seq);
+    }
     lb_send_json(200, array('ok' => true));
+}
+
+// ─── Autoactualizacion (la envia LabNAS; todo firmado con la clave del enlace) ───
+//
+// Se actualizan app/, web/, instalar.php y VERSION. index.php y .htaccess nunca:
+// si una actualizacion los rompiera, no habria forma de arreglarlo a distancia.
+
+function lb_update_path_ok($path)
+{
+    if (!is_string($path) || $path === '' || strlen($path) > 300) {
+        return false;
+    }
+    if (strpos($path, '..') !== false || $path[0] === '/' || strpos($path, '\\') !== false) {
+        return false;
+    }
+    if (preg_match('#^[A-Za-z0-9._/-]+$#', $path) !== 1) {
+        return false;
+    }
+    return $path === 'instalar.php' || $path === 'VERSION' || strpos($path, 'app/') === 0 || strpos($path, 'web/') === 0;
+}
+
+function lb_rmtree($dir)
+{
+    if (!is_dir($dir)) {
+        return;
+    }
+    foreach ((array) scandir($dir) as $e) {
+        if ($e === '.' || $e === '..') {
+            continue;
+        }
+        $p = $dir . '/' . $e;
+        if (is_dir($p) && !is_link($p)) {
+            lb_rmtree($p);
+        } else {
+            @unlink($p);
+        }
+    }
+    @rmdir($dir);
+}
+
+/** Manifiesto: {version, files: [{path, sha256, size}]} */
+function lb_op_update_begin($dir, $body)
+{
+    $m = json_decode($body, true);
+    if (!is_array($m) || !isset($m['version'], $m['files']) || !is_array($m['files']) || count($m['files']) === 0) {
+        lb_send_text(400, 'Manifiesto invalido');
+        return;
+    }
+    foreach ($m['files'] as $f) {
+        if (!is_array($f) || !isset($f['path'], $f['sha256'], $f['size']) || !lb_update_path_ok($f['path'])
+            || preg_match('/^[a-f0-9]{64}$/', (string) $f['sha256']) !== 1) {
+            lb_send_text(400, 'Archivo invalido en el manifiesto');
+            return;
+        }
+    }
+    if (preg_match('/^[0-9A-Za-z.+-]{1,40}$/', (string) $m['version']) !== 1) {
+        lb_send_text(400, 'Version invalida');
+        return;
+    }
+    $staging = LB_ROOT . '/.update-staging';
+    lb_rmtree($staging);
+    if (!@mkdir($staging, 0755, true)) {
+        lb_send_text(500, 'No se pudo crear la carpeta de actualizacion (permisos)');
+        return;
+    }
+    lb_write_file($dir . '/update.json', json_encode($m));
+    lb_send_json(200, array('ok' => true));
+}
+
+function lb_update_manifest_entry($dir, $path)
+{
+    $m = lb_read_json($dir . '/update.json');
+    if (!$m) {
+        return null;
+    }
+    foreach ($m['files'] as $f) {
+        if ($f['path'] === $path) {
+            return $f;
+        }
+    }
+    return null;
+}
+
+function lb_op_update_file($dir, $body)
+{
+    $path = isset($_GET['path']) ? (string) $_GET['path'] : '';
+    $entry = lb_update_path_ok($path) ? lb_update_manifest_entry($dir, $path) : null;
+    if (!$entry) {
+        lb_send_text(400, 'Archivo fuera del manifiesto');
+        return;
+    }
+    if (strlen($body) !== (int) $entry['size'] || !hash_equals((string) $entry['sha256'], hash('sha256', $body))) {
+        lb_send_text(400, 'El archivo no coincide con el manifiesto');
+        return;
+    }
+    $target = LB_ROOT . '/.update-staging/' . $path;
+    $parent = dirname($target);
+    if (!is_dir($parent) && !@mkdir($parent, 0755, true)) {
+        lb_send_text(500, 'No se pudo crear ' . dirname($path));
+        return;
+    }
+    if (file_put_contents($target, $body) === false) {
+        lb_send_text(507, 'Sin espacio en el hosting');
+        return;
+    }
+    @chmod($target, 0644);
+    lb_send_json(200, array('ok' => true));
+}
+
+/** Verifica todo y reemplaza con renames; si algo falla, vuelve atras */
+function lb_op_update_commit($dir)
+{
+    $m = lb_read_json($dir . '/update.json');
+    $staging = LB_ROOT . '/.update-staging';
+    if (!$m || !is_dir($staging)) {
+        lb_send_text(409, 'No hay actualizacion en curso');
+        return;
+    }
+    foreach ($m['files'] as $f) {
+        $p = $staging . '/' . $f['path'];
+        if (!is_file($p) || !hash_equals((string) $f['sha256'], hash_file('sha256', $p))) {
+            lb_send_text(400, 'Falta o no coincide: ' . $f['path']);
+            return;
+        }
+    }
+    $old = LB_ROOT . '/.update-old';
+    lb_rmtree($old);
+    @mkdir($old, 0755, true);
+    $names = array('app', 'web', 'instalar.php', 'VERSION');
+    $moved = array();
+    $ok = true;
+    foreach ($names as $n) {
+        if (!file_exists($staging . '/' . $n)) {
+            continue;
+        }
+        if (file_exists(LB_ROOT . '/' . $n) && !@rename(LB_ROOT . '/' . $n, $old . '/' . $n)) {
+            $ok = false;
+            break;
+        }
+        $moved[] = $n;
+        if (!@rename($staging . '/' . $n, LB_ROOT . '/' . $n)) {
+            $ok = false;
+            break;
+        }
+    }
+    if (!$ok) {
+        // Vuelta atras
+        foreach (array_reverse($moved) as $n) {
+            if (file_exists(LB_ROOT . '/' . $n) && file_exists($old . '/' . $n)) {
+                lb_rmtree(LB_ROOT . '/' . $n);
+                @unlink(LB_ROOT . '/' . $n);
+            }
+            if (file_exists($old . '/' . $n)) {
+                @rename($old . '/' . $n, LB_ROOT . '/' . $n);
+            }
+        }
+        lb_send_text(500, 'No se pudo reemplazar el conector (permisos); se dejo la version anterior');
+        return;
+    }
+    lb_rmtree($staging);
+    @unlink($dir . '/update.json');
+    if (function_exists('opcache_reset')) {
+        @opcache_reset();
+    }
+    lb_send_json(200, array('ok' => true, 'version' => $m['version']));
 }

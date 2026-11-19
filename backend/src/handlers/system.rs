@@ -70,6 +70,7 @@ pub async fn health_handler(
         ip,
         upload_limit_mb,
         via: via_bridge.then_some("bridge"),
+        max_request: via_bridge.then(crate::bridge::max_body),
     })
 }
 

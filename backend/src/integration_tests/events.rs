@@ -75,3 +75,31 @@ async fn musica_por_interes() {
     let last = ev.iter().rfind(|e| e["kind"] == "music.state").expect("music.state");
     assert_eq!(last["data"]["volume"], 42);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn eventos_por_long_poll() {
+    let s = Server::start().await;
+    let admin = s.admin().await;
+    let bob = s.user(&admin, "bob", "observador").await;
+
+    // Primera consulta: espera el proximo evento visible
+    let state = s.state.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        state.events.publish("solo.admin", 1, crate::events::Audience::Admins, None);
+        state.events.publish("para.bob", 2, crate::events::Audience::User("bob".into()), None);
+    });
+    let r = s.get("/api/live/poll?since=0&kinds=para.bob", &bob).await.json();
+    let kinds: Vec<&str> = r["events"].as_array().unwrap().iter().map(|e| e["kind"].as_str().unwrap()).collect();
+    assert_eq!(kinds, vec!["para.bob"], "bob no ve los eventos de admin");
+    let next = r["next"].as_u64().unwrap();
+
+    // Lo publicado entre consultas no se pierde
+    s.state.events.publish("otro", 3, crate::events::Audience::All, None);
+    let r = s.get(&format!("/api/live/poll?since={}", next), &bob).await.json();
+    assert_eq!(r["events"][0]["kind"], "otro");
+
+    // Un cursor imposible pide resincronizar
+    let r = s.get("/api/live/poll?since=999999999", &bob).await.json();
+    assert_eq!(r["events"][0]["kind"], "resync");
+}

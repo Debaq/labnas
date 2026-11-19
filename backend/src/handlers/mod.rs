@@ -11,6 +11,7 @@ pub mod auth;
 pub mod email;
 pub mod extras;
 pub mod files;
+pub mod uploads;
 pub mod modules;
 pub mod music;
 pub mod network;

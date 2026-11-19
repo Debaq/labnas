@@ -36,7 +36,7 @@ pub struct BridgeOrigin {
 const POLLERS: usize = 2;
 const POLL_TIMEOUT: Duration = Duration::from_secs(40);
 const CALL_TIMEOUT: Duration = Duration::from_secs(60);
-/// Respuestas mas grandes no caben en un POST del hosting (en B2 iran en partes)
+/// Tamaño de parte mientras no se conocen los limites del hosting
 const DEFAULT_MAX_BODY: usize = 6 * 1024 * 1024;
 /// Cabeceras de respuesta que no se reenvian
 const SKIP_RESPONSE_HEADERS: &[&str] = &["content-length", "transfer-encoding", "connection", "keep-alive"];
@@ -87,7 +87,7 @@ fn status_snapshot() -> BridgeStatus {
 }
 
 /// Tope de respuesta segun `post_max_size` del hosting (con margen)
-fn max_body() -> usize {
+pub(crate) fn max_body() -> usize {
     status_snapshot()
         .remote
         .and_then(|r| r["limits"]["post_max_size"].as_i64())
@@ -186,9 +186,20 @@ pub async fn bridge_loop(state: AppState, app: Router) {
     for _ in 0..POLLERS {
         tokio::spawn(worker(state.clone(), app.clone()));
     }
-    // Estado del hosting (limites, version) cada 10 minutos
+    // Estado del hosting (limites, version) cada 10 minutos; si el conector quedo
+    // en otra version (tras actualizar LabNAS), se actualiza solo
     loop {
         refresh_remote_status(&state).await;
+        let remote = status_snapshot().remote.and_then(|r| r["version"].as_str().map(String::from));
+        let auto = db_op(&state.db, |conn| Ok(crate::db::get_setting(conn, "bridge_auto_update").as_deref() != Some("0")))
+            .await
+            .unwrap_or(true);
+        if auto && remote.is_some_and(|v| v != crate::updater::CURRENT_VERSION) {
+            match update_connector(&state).await {
+                Ok(msg) => state.log_activity("puente_actualizado", &msg, "sistema").await,
+                Err(e) => with_status(|s| s.last_error = Some(format!("Autoactualizacion del conector: {}", e))),
+            }
+        }
         tokio::time::sleep(Duration::from_secs(600)).await;
     }
 }
@@ -247,25 +258,82 @@ async fn worker(state: AppState, app: Router) {
     }
 }
 
-/// Ejecuta un pedido del navegador y devuelve la respuesta al puente
+/// Ejecuta un pedido del navegador y devuelve la respuesta al puente, en partes
+/// del tamaño que acepta el hosting (archivos grandes y video sin cargarlos en memoria)
 async fn handle(state: AppState, app: Router, cfg: BridgeConfig, req: PolledRequest) {
     let id = req.id.clone();
-    let (status, headers, body) = match execute(&state, app, &cfg, req).await {
+    let (status, headers, length, body) = match execute(&state, app, &cfg, req).await {
         Ok(r) => r,
-        Err((status, msg)) => (status, vec![("content-type".into(), "text/plain; charset=utf-8".into())], msg.into_bytes()),
+        Err((status, msg)) => {
+            let bytes = msg.into_bytes();
+            let len = bytes.len() as u64;
+            (status, vec![("content-type".into(), "text/plain; charset=utf-8".into())], Some(len), Body::from(bytes))
+        }
     };
-    let meta = serde_json::json!({ "status": status.as_u16(), "headers": headers });
+    let meta = serde_json::json!({ "status": status.as_u16(), "headers": headers, "length": length });
     let meta = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(meta.to_string());
-    let query = format!("id={}&meta={}", id, meta);
-    match call(&state.http_client, &cfg, "respond", &query, body, CALL_TIMEOUT).await {
-        Ok(_) => with_status(|s| s.served += 1),
+    match stream_parts(&state, &cfg, &id, &meta, body).await {
+        Ok(()) => with_status(|s| s.served += 1),
         Err(e) => eprintln!("[Puente] No se pudo entregar la respuesta {}: {}", id, e),
     }
 }
 
-type Collected = (StatusCode, Vec<(String, String)>, Vec<u8>);
+/// Envia el cuerpo en partes (`seq`, `final`); la primera lleva los metadatos
+async fn stream_parts(state: &AppState, cfg: &BridgeConfig, id: &str, meta: &str, body: Body) -> Result<(), String> {
+    use futures_util::StreamExt;
+    let part_size = max_body().max(64 * 1024);
+    let mut stream = body.into_data_stream();
+    let mut buf: Vec<u8> = Vec::new();
+    let mut seq = 0u64;
+    let mut done = false;
+    while !done {
+        // Llenar una parte
+        while buf.len() < part_size {
+            match stream.next().await {
+                Some(Ok(chunk)) => buf.extend_from_slice(&chunk),
+                Some(Err(e)) => return Err(format!("Error leyendo la respuesta: {}", e)),
+                None => {
+                    done = true;
+                    break;
+                }
+            }
+        }
+        let rest = if buf.len() > part_size { buf.split_off(part_size) } else { Vec::new() };
+        // Si sobro algo, todavia no es la ultima parte aunque el stream haya terminado
+        let last = done && rest.is_empty();
+        let part = std::mem::replace(&mut buf, rest);
+        if done && !last {
+            done = false;
+        }
+        let query = if seq == 0 {
+            format!("id={}&seq=0&final={}&meta={}", id, u8::from(last), meta)
+        } else {
+            format!("id={}&seq={}&final={}", id, seq, u8::from(last))
+        };
+        send_part(state, cfg, &query, part).await?;
+        seq += 1;
+    }
+    Ok(())
+}
 
-async fn execute(state: &AppState, app: Router, cfg: &BridgeConfig, req: PolledRequest) -> Result<Collected, (StatusCode, String)> {
+/// Una parte, reintentando si el conector pide esperar (429: el navegador va lento)
+async fn send_part(state: &AppState, cfg: &BridgeConfig, query: &str, part: Vec<u8>) -> Result<(), String> {
+    let mut waits = 0;
+    loop {
+        match call(&state.http_client, cfg, "respond", query, part.clone(), CALL_TIMEOUT).await {
+            Ok(_) => return Ok(()),
+            Err(e) if e.contains(" 429") && waits < 600 => {
+                waits += 1;
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+type Executed = (StatusCode, Vec<(String, String)>, Option<u64>, Body);
+
+async fn execute(state: &AppState, app: Router, cfg: &BridgeConfig, req: PolledRequest) -> Result<Executed, (StatusCode, String)> {
     // Solo la API: el frontend lo sirve el conector y nada mas pasa por aca
     if !req.path.starts_with("/api/") || req.path.contains("..") || !is_hex_id(&req.id) {
         return Err((StatusCode::NOT_FOUND, "No encontrado".into()));
@@ -308,14 +376,12 @@ async fn execute(state: &AppState, app: Router, cfg: &BridgeConfig, req: PolledR
         .filter(|(n, _)| !SKIP_RESPONSE_HEADERS.contains(&n.as_str()))
         .filter_map(|(n, v)| v.to_str().ok().map(|v| (n.to_string(), v.to_string())))
         .collect();
-    let limit = max_body();
-    let body = axum::body::to_bytes(response.into_body(), limit).await.map_err(|_| {
-        (
-            StatusCode::PAYLOAD_TOO_LARGE,
-            format!("La respuesta supera lo que acepta el hosting por el puente ({} MB)", limit / (1024 * 1024)),
-        )
-    })?;
-    Ok((status, headers, body.to_vec()))
+    let length = response
+        .headers()
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok());
+    Ok((status, headers, length, response.into_body()))
 }
 
 fn is_hex_id(s: &str) -> bool {
@@ -451,26 +517,14 @@ const PHP_FILES: &[(&str, &str)] = &[
     ("app/bridge.php", include_str!("../../bridge/app/bridge.php")),
 ];
 
-/// Arma el zip del conector: PHP + frontend de esta misma version
-pub fn build_package(static_dir: Option<&std::path::Path>) -> Result<Vec<u8>, String> {
-    use std::io::Write;
-    use zip::write::SimpleFileOptions;
-
-    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-    let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
-    let mut add = |name: &str, data: &[u8]| -> Result<(), String> {
-        zip.start_file(name, opts).map_err(|e| e.to_string())?;
-        zip.write_all(data).map_err(|e| e.to_string())
-    };
-    for (name, content) in PHP_FILES {
-        add(name, content.as_bytes())?;
-    }
-    add("VERSION", crate::updater::CURRENT_VERSION.as_bytes())?;
+/// Archivos del conector (ruta dentro del zip, contenido): PHP + frontend de esta version
+fn package_files(static_dir: Option<&std::path::Path>) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let mut files: Vec<(String, Vec<u8>)> = PHP_FILES.iter().map(|(n, c)| (n.to_string(), c.as_bytes().to_vec())).collect();
+    files.push(("VERSION".into(), crate::updater::CURRENT_VERSION.as_bytes().to_vec()));
     if let Some(dir) = static_dir {
         let mut stack = vec![dir.to_path_buf()];
         while let Some(d) = stack.pop() {
-            let entries = std::fs::read_dir(&d).map_err(|e| e.to_string())?;
-            for entry in entries.flatten() {
+            for entry in std::fs::read_dir(&d).map_err(|e| e.to_string())?.flatten() {
                 let path = entry.path();
                 let meta = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
                 if meta.is_dir() {
@@ -478,12 +532,66 @@ pub fn build_package(static_dir: Option<&std::path::Path>) -> Result<Vec<u8>, St
                 } else if meta.is_file() {
                     let rel = path.strip_prefix(dir).map_err(|e| e.to_string())?;
                     let name = format!("web/{}", rel.to_string_lossy().replace('\\', "/"));
-                    add(&name, &std::fs::read(&path).map_err(|e| e.to_string())?)?;
+                    files.push((name, std::fs::read(&path).map_err(|e| e.to_string())?));
                 }
             }
         }
     }
+    Ok(files)
+}
+
+/// Arma el zip del conector: PHP + frontend de esta misma version
+pub fn build_package(static_dir: Option<&std::path::Path>) -> Result<Vec<u8>, String> {
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    for (name, data) in package_files(static_dir)? {
+        zip.start_file(name, opts).map_err(|e| e.to_string())?;
+        zip.write_all(&data).map_err(|e| e.to_string())?;
+    }
     Ok(zip.finish().map_err(|e| e.to_string())?.into_inner())
+}
+
+/// Actualiza el conector a esta version: manifiesto firmado, archivo por archivo, y cambio atomico.
+/// No se tocan index.php ni .htaccess (si se rompieran, no habria como arreglarlo a distancia).
+pub async fn update_connector(state: &AppState) -> Result<String, String> {
+    let cfg = load_config(state).await.filter(|c| c.enabled).ok_or("Puente sin enlazar o desactivado")?;
+    let files = tokio::task::spawn_blocking(|| package_files(crate::static_dir().as_deref()))
+        .await
+        .map_err(|e| e.to_string())??
+        .into_iter()
+        .filter(|(n, _)| n != "index.php" && n != ".htaccess")
+        .collect::<Vec<_>>();
+    let limit = max_body();
+    if let Some((n, d)) = files.iter().find(|(_, d)| d.len() > limit) {
+        return Err(format!("{} ({} KB) supera el limite del hosting; actualiza subiendo el zip a mano", n, d.len() / 1024));
+    }
+    let manifest = serde_json::json!({
+        "version": crate::updater::CURRENT_VERSION,
+        "files": files.iter().map(|(n, d)| serde_json::json!({
+            "path": n, "sha256": hex(&Sha256::digest(d)), "size": d.len(),
+        })).collect::<Vec<_>>(),
+    });
+    call(&state.http_client, &cfg, "update_begin", "", manifest.to_string().into_bytes(), CALL_TIMEOUT).await?;
+    for (name, data) in files {
+        let query = format!("path={}", urlencoding::encode(&name));
+        call(&state.http_client, &cfg, "update_file", &query, data, CALL_TIMEOUT).await?;
+    }
+    call(&state.http_client, &cfg, "update_commit", "", Vec::new(), CALL_TIMEOUT).await?;
+    refresh_remote_status(state).await;
+    Ok(format!("Conector actualizado a {}", crate::updater::CURRENT_VERSION))
+}
+
+/// POST /api/bridge/update
+pub async fn update_bridge(
+    State(state): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
+) -> Result<(StatusCode, String), (StatusCode, String)> {
+    let msg = update_connector(&state).await.map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
+    state.log_activity("puente_actualizado", &msg, &session.username).await;
+    Ok((StatusCode::OK, msg))
 }
 
 /// GET /api/bridge/package

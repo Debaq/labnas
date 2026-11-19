@@ -449,7 +449,10 @@ pub async fn login(
     let role = crate::handlers::auth::role_from_str(&user.0);
     let permissions = crate::models::notifications::UserPermissions { terminal: user.1, impresion: user.2, archivos_escritura: user.3 };
     let detail = match &bridge {
-        Some(Extension(o)) => format!("Inicio de sesion con passkey por el puente PHP desde {}", o.client_ip),
+        Some(Extension(o)) => {
+            crate::handlers::auth::notify_internet_login(&state, &username, &o.client_ip);
+            format!("Inicio de sesion con passkey por el puente PHP desde {}", o.client_ip)
+        }
         None => "Inicio de sesion con passkey".to_string(),
     };
     state.log_activity("login_passkey", &detail, &username).await;

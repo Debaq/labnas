@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import { useToast } from '../components/ToastContext'
-import { createWsTicket } from '../api'
+import { createWsTicket, fetchHealth } from '../api'
+import { api } from '../api/client'
 import { EventsContext, type EventHandler, type ServerEvent } from './useEvents'
 
 interface NotifyData {
@@ -84,7 +85,44 @@ export default function EventsProvider({ children }: { children: ReactNode }) {
       dispatch(ev.kind, ev.data)
     }
 
+    // Por el puente PHP (sin WebSocket) o si el WebSocket nunca conecta: long-poll del mismo bus
+    let wsFailures = 0
+    let usingPoll = false
+    const abort = new AbortController()
+    const startPolling = async () => {
+      if (usingPoll || stopped) return
+      usingPoll = true
+      let since = 0
+      let pollBackoff = 1000
+      while (!stopped) {
+        try {
+          const kinds = [...listeners.current.entries()]
+            .filter(([k, set]) => set.size > 0 && !LOCAL_KINDS.has(k))
+            .map(([k]) => k)
+            .join(',')
+          const res = await api(`/api/live/poll?since=${since}&kinds=${encodeURIComponent(kinds)}`, { signal: abort.signal })
+          if (!res.ok) throw new Error(String(res.status))
+          const data = await res.json() as { events: { kind: string; data: unknown }[]; next: number }
+          if (!wasConnected) {
+            wasConnected = true
+          } else if (pollBackoff > 1000) {
+            dispatch('resync', null)
+          }
+          setConnected(true)
+          pollBackoff = 1000
+          for (const ev of data.events) onEvent(ev as ServerEvent)
+          since = data.next
+        } catch {
+          if (stopped) return
+          setConnected(false)
+          await new Promise(r => setTimeout(r, pollBackoff))
+          pollBackoff = Math.min(pollBackoff * 2, MAX_BACKOFF_MS)
+        }
+      }
+    }
+
     const connect = async () => {
+      if (usingPoll) return
       try {
         const ticket = await createWsTicket()
         if (stopped) return
@@ -93,6 +131,7 @@ export default function EventsProvider({ children }: { children: ReactNode }) {
         wsRef.current = ws
         ws.onopen = () => {
           backoff = 1000
+          wsFailures = 0
           setConnected(true)
           // Declarar los temas que ya tienen oyentes
           listeners.current.forEach((set, kind) => { if (set.size > 0) sendInterest('sub', kind) })
@@ -107,10 +146,12 @@ export default function EventsProvider({ children }: { children: ReactNode }) {
           setConnected(false)
           ws = null
           wsRef.current = null
-          scheduleRetry()
+          if (!wasConnected && ++wsFailures >= 3) void startPolling()
+          else scheduleRetry()
         }
       } catch {
-        scheduleRetry()
+        if (!wasConnected && ++wsFailures >= 3) void startPolling()
+        else scheduleRetry()
       }
     }
 
@@ -120,9 +161,12 @@ export default function EventsProvider({ children }: { children: ReactNode }) {
       backoff = Math.min(backoff * 2, MAX_BACKOFF_MS)
     }
 
-    connect()
+    fetchHealth()
+      .then(h => { if (h.via === 'bridge') void startPolling(); else void connect() })
+      .catch(() => { void connect() })
     return () => {
       stopped = true
+      abort.abort()
       if (retry) clearTimeout(retry)
       if (ws) { ws.onclose = null; ws.close() }
       wsRef.current = null

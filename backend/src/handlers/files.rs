@@ -133,8 +133,11 @@ pub async fn upload_file(
                     .ok_or((StatusCode::BAD_REQUEST, "Nombre de archivo invalido".to_string()))?;
 
                 tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
-                let file_path = dir.join(&file_name);
-                let mut file = tokio::fs::File::create(&file_path).await.map_err(internal)?;
+                let final_path = dir.join(&file_name);
+                // Temporal nuevo (create_new no sigue symlinks) y rename al final: un symlink
+                // plantado con ese nombre se reemplaza, no se escribe a donde apunta
+                let file_path = dir.join(format!(".{}.{}.part", file_name, &uuid::Uuid::new_v4().simple().to_string()[..12]));
+                let mut file = tokio::fs::OpenOptions::new().write(true).create_new(true).open(&file_path).await.map_err(internal)?;
 
                 let write_result: Result<(), ApiError> = async {
                     while let Some(chunk) = field
@@ -152,7 +155,11 @@ pub async fn upload_file(
                     let _ = tokio::fs::remove_file(&file_path).await;
                     return Err(e);
                 }
-                saved = Some((file_name, file_path));
+                if let Err(e) = tokio::fs::rename(&file_path, &final_path).await {
+                    let _ = tokio::fs::remove_file(&file_path).await;
+                    return Err(internal(e));
+                }
+                saved = Some((file_name, final_path));
             }
             _ => {}
         }

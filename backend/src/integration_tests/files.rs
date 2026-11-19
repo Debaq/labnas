@@ -108,3 +108,36 @@ async fn vista_previa_con_link_temporal() {
 
     assert_eq!(get(&s, "/api/preview/inventado/x.png".to_string()).await.status, 410);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn subida_por_partes() {
+    let s = Server::start().await;
+    let admin = s.admin().await;
+    std::fs::create_dir_all(s.home.join("Docs")).unwrap();
+
+    let init = s.post("/api/files/upload/chunked", &admin, json!({ "path": s.path("Docs"), "name": "../tesis.pdf", "size": 10 })).await.json();
+    let id = init["id"].as_str().unwrap().to_string();
+    let put = |offset: usize, data: &'static [u8]| {
+        s.client().put(format!("{}/api/files/upload/chunked/{}?offset={}", s.base, id, offset)).bearer_auth(&admin).body(data)
+    };
+    assert_eq!(put(0, b"hola ").send().await.unwrap().status(), 200);
+    // Fuera de orden: 409 con el offset correcto para reanudar
+    let r = put(9, b"x").send().await.unwrap();
+    assert_eq!(r.status(), 409);
+    assert_eq!(r.text().await.unwrap(), "5");
+    assert_eq!(s.post(&format!("/api/files/upload/chunked/{}/complete", id), &admin, json!({})).await.status, 400, "incompleta");
+    assert_eq!(put(5, b"mundo").send().await.unwrap().status(), 200);
+    assert_eq!(put(10, b"!").send().await.unwrap().status(), 400, "supera el tamano anunciado");
+    assert_eq!(s.post(&format!("/api/files/upload/chunked/{}/complete", id), &admin, json!({})).await.status, 201);
+    // El nombre se sanea y no quedan temporales
+    assert_eq!(std::fs::read_to_string(s.home.join("Docs/tesis.pdf")).unwrap(), "hola mundo");
+    assert!(std::fs::read_dir(s.home.join("Docs")).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".part")));
+
+    // Otro usuario no puede escribir en una subida ajena; sobre el limite se rechaza
+    let bob = s.user(&admin, "bob", "operador").await;
+    let init = s.post("/api/files/upload/chunked", &admin, json!({ "path": s.path("Docs"), "name": "a", "size": 3 })).await.json();
+    let r = s.client().put(format!("{}/api/files/upload/chunked/{}?offset=0", s.base, init["id"].as_str().unwrap())).bearer_auth(&bob).body("abc").send().await.unwrap();
+    assert_eq!(r.status(), 404);
+    let r = s.post("/api/files/upload/chunked", &admin, json!({ "path": s.path("Docs"), "name": "b", "size": 10_u64 << 40 })).await;
+    assert_eq!(r.status, 413);
+}

@@ -450,7 +450,8 @@ Config persiste en `~/.labnas/` (SQLite + assets). Override con `LABNAS_CONFIG`.
 2. En LabNAS: **Configuración > Sistema > Acceso remoto > Descargar conector PHP** y descomprime el zip en la carpeta del subdominio
 3. Abre `https://labnas.tudominio.cl/instalar.php`, elige una carpeta de datos **fuera de `public_html`** y copia el código
 4. Pega la URL y el código en LabNAS > **Enlazar**. Listo: entra a `https://labnas.tudominio.cl` desde cualquier lugar
-- Por el puente no están la terminal ni la administración (usa la LAN o Tailscale). Los archivos van hasta el límite de envío del hosting
+- Por el puente no están la terminal ni la administración (usa la LAN o Tailscale). Archivos de cualquier tamaño (se envían en partes) y avisos en tiempo real
+- El conector se actualiza solo cuando actualizas LabNAS
 - Detalles y seguridad: [docs/PUENTE_PHP.md](docs/PUENTE_PHP.md)
 
 ### Passkeys (entrar sin contraseña)

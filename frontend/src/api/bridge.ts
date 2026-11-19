@@ -56,6 +56,14 @@ export async function unlinkBridge(): Promise<void> {
   if (!res.ok) return failText(res, 'Error al desenlazar')
 }
 
+/** Envia la version actual del conector al hosting (se hace sola cada 10 min si difiere) */
+export async function updateBridge(): Promise<string> {
+  const res = await api('/api/bridge/update', { method: 'POST' })
+  const text = await res.text()
+  if (!res.ok) throw new Error(text || 'No se pudo actualizar el conector')
+  return text
+}
+
 /** Descarga el zip del conector (necesita el token, por eso no es un <a href>) */
 export async function downloadBridgePackage(): Promise<void> {
   const res = await api('/api/bridge/package')

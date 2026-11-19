@@ -61,8 +61,17 @@ impl Default for EventBus {
 impl EventBus {
     pub fn publish(&self, kind: &'static str, data: impl Serialize, audience: Audience, module: Option<&'static str>) {
         let data = serde_json::to_value(data).unwrap_or(serde_json::Value::Null);
+        let ev = Event { kind, data, audience, module };
+        // Historial corto para los clientes por long-poll (puente PHP, sin WebSocket)
+        if let Ok(mut ring) = RING.lock() {
+            let seq = ring.back().map(|(s, _)| s + 1).unwrap_or(1);
+            ring.push_back((seq, ev.clone()));
+            if ring.len() > RING_CAPACITY {
+                ring.pop_front();
+            }
+        }
         // Sin suscriptores send() falla; no es un error
-        let _ = self.tx.send(Event { kind, data, audience, module });
+        let _ = self.tx.send(ev);
     }
 
     /// ¿Alguna pestaña esta escuchando `kind`? Para no hacer trabajo que nadie va a ver
@@ -93,6 +102,94 @@ pub fn notify(state: &AppState, audience: Audience, module: Option<&'static str>
         audience,
         module,
     );
+}
+
+// ─── Long-poll (puente PHP: sin WebSocket) ───
+
+const RING_CAPACITY: usize = 256;
+const POLL_WAIT: Duration = Duration::from_secs(18);
+
+static RING: LazyLock<StdMutex<std::collections::VecDeque<(u64, Event)>>> = LazyLock::new(Default::default);
+
+fn ring_last() -> u64 {
+    RING.lock().ok().and_then(|r| r.back().map(|(s, _)| *s)).unwrap_or(0)
+}
+
+#[derive(serde::Deserialize)]
+pub struct PollQuery {
+    /// Ultimo `seq` recibido (0 la primera vez: solo eventos nuevos)
+    #[serde(default)]
+    pub since: u64,
+    /// Temas que la pagina muestra (para `has_interest`), separados por coma
+    #[serde(default)]
+    pub kinds: String,
+}
+
+/// GET /api/live/poll — los eventos del WebSocket, por long-poll (hasta ~18 s)
+pub async fn events_poll(
+    State(state): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
+    axum::extract::Query(q): axum::extract::Query<PollQuery>,
+) -> Json<serde_json::Value> {
+    let mut interests = Interests(Default::default());
+    for k in q.kinds.split(',').map(str::trim).filter(|k| !k.is_empty()).take(64) {
+        interests.add(k);
+    }
+    let mut rx = state.events.subscribe();
+    let last = ring_last();
+    // Primera consulta, o el cliente quedo muy atras: empezar desde ahora (y pedir resync)
+    let oldest = RING.lock().ok().and_then(|r| r.front().map(|(s, _)| *s)).unwrap_or(1);
+    let (since, resync) = if q.since == 0 {
+        (last, false)
+    } else if q.since + 1 < oldest || q.since > last {
+        (last, true)
+    } else {
+        (q.since, false)
+    };
+
+    let collect = |since: u64| async move {
+        let pending = session.role == UserRole::Pendiente;
+        let candidates: Vec<(u64, Event)> = RING
+            .lock()
+            .map(|r| r.iter().filter(|(s, _)| *s > since).cloned().collect())
+            .unwrap_or_default();
+        let enabled = state.enabled_modules.lock().await.clone();
+        candidates
+            .into_iter()
+            .filter(|(_, ev)| visible_to(ev, &session))
+            .filter(|(_, ev)| !pending || matches!(ev.audience, Audience::User(_)))
+            .filter(|(_, ev)| ev.module.is_none_or(|m| enabled.contains(m)))
+            .collect::<Vec<_>>()
+    };
+
+    let mut events = collect.clone()(since).await;
+    if events.is_empty() && !resync {
+        // Esperar el proximo evento (cualquiera) y volver a filtrar
+        let _ = tokio::time::timeout(POLL_WAIT, async {
+            loop {
+                if rx.recv().await.is_err() {
+                    break;
+                }
+                // Agrupar eventos que llegan juntos
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                let found = collect.clone()(since).await;
+                if !found.is_empty() {
+                    events = found;
+                    break;
+                }
+            }
+        })
+        .await;
+    }
+    let next = events.last().map(|(s, _)| *s).unwrap_or_else(ring_last).max(since);
+    let mut list: Vec<serde_json::Value> = events
+        .into_iter()
+        .map(|(seq, ev)| serde_json::json!({ "seq": seq, "kind": ev.kind, "data": ev.data }))
+        .collect();
+    if resync {
+        list.insert(0, serde_json::json!({ "seq": next, "kind": "resync", "data": null }));
+    }
+    Json(serde_json::json!({ "events": list, "next": next }))
 }
 
 // ─── Interes por tema ───

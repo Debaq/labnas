@@ -74,7 +74,53 @@ export async function fetchFiles(path?: string): Promise<FileEntry[]> {
   return res.json()
 }
 
+// Tamaño de parte para subidas grandes (por el puente lo limita el hosting)
+let chunkSize: Promise<number> | null = null
+function getChunkSize(): Promise<number> {
+  if (!chunkSize) {
+    chunkSize = api('/api/health').then(r => r.json()).then((h: { max_request?: number }) =>
+      h.max_request ? Math.max(256 * 1024, Math.min(4 * 1024 * 1024, Math.floor(h.max_request * 0.8))) : 8 * 1024 * 1024,
+    ).catch(() => 4 * 1024 * 1024)
+  }
+  return chunkSize
+}
+
+/** Subida por partes: cualquier tamaño en pedidos chicos (y reanuda si una parte falla) */
+async function uploadChunked(file: File, path: string, size: number): Promise<void> {
+  const init = await api('/api/files/upload/chunked', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, name: file.name, size: file.size }),
+  })
+  if (!init.ok) throw new Error((await init.text()) || 'Error al iniciar la subida')
+  const { id } = await init.json() as { id: string }
+  let offset = 0
+  let retries = 0
+  while (offset < file.size) {
+    const part = file.slice(offset, offset + size)
+    const res = await api(`/api/files/upload/chunked/${id}?offset=${offset}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: part,
+    }).catch(() => null)
+    if (res?.ok) {
+      offset += part.size
+      retries = 0
+    } else if (res?.status === 409) {
+      // El servidor indica desde donde seguir
+      offset = parseInt(await res.text(), 10) || offset
+    } else if (++retries > 3) {
+      await api(`/api/files/upload/chunked/${id}`, { method: 'DELETE' }).catch(() => {})
+      throw new Error((res && await res.text()) || 'Error de red al subir')
+    }
+  }
+  const done = await api(`/api/files/upload/chunked/${id}/complete`, { method: 'POST' })
+  if (!done.ok) throw new Error((await done.text()) || 'Error al terminar la subida')
+}
+
 export async function uploadFile(file: File, path: string): Promise<void> {
+  const size = await getChunkSize()
+  if (file.size > size) return uploadChunked(file, path, size)
   const formData = new FormData()
   // "path" primero: el backend escribe el archivo en streaming y necesita el destino antes
   formData.append('path', path)

@@ -10,6 +10,9 @@ pub struct HealthResponse {
     /// "bridge" si el pedido llego por el puente PHP (la UI oculta terminal y admin)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub via: Option<&'static str>,
+    /// Por el puente: bytes maximos por pedido (el frontend sube por partes de este tamaño)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_request: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]

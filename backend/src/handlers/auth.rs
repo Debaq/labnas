@@ -132,6 +132,18 @@ fn with_cookie(mut resp: Response, token: &str, secure: bool) -> Response {
     resp
 }
 
+/// Aviso a las otras sesiones del usuario (toast y notificacion del visor): si no fue el, lo ve al instante
+pub fn notify_internet_login(state: &AppState, username: &str, ip: &str) {
+    crate::events::notify(
+        state,
+        crate::events::Audience::User(username.to_string()),
+        None,
+        crate::events::Level::Warning,
+        "Nuevo inicio de sesión por internet",
+        &format!("Se entró a tu cuenta por el puente desde {}. Si no fuiste tú, cambia la contraseña.", ip),
+    );
+}
+
 /// Abre una sesion y responde como el login (token + cookie). La usan las passkeys.
 pub async fn issue_login(
     state: &AppState,
@@ -384,6 +396,7 @@ pub async fn login(
         state
             .log_activity("login_puente", &format!("Inicio de sesion por el puente PHP desde {}", origin.client_ip), &username)
             .await;
+        notify_internet_login(&state, &username, &origin.client_ip);
     }
 
     let modules = crate::db::db_op(&state.db, |conn| Ok(crate::db::get_modules(conn))).await

@@ -1,6 +1,6 @@
 # Puente PHP: LabNAS desde internet sin abrir puertos
 
-> Estado: **etapa B1 implementada** (`bridge/` y `backend/src/bridge.rs`); B2–B4 pendientes. Versión 2, 2026-11-18 (ajustado al hosting real: PHP 7+, Apache, carpetas fuera de la web, un solo LabNAS).
+> Estado: **etapas B1–B4 implementadas** (`bridge/`, `backend/src/bridge.rs`, `handlers/uploads.rs`, long-poll en `events.rs`). Versión 2, 2026-11-18 (ajustado al hosting real: PHP 7+, Apache, carpetas fuera de la web, un solo LabNAS).
 
 ## 1. Objetivo
 
@@ -139,7 +139,8 @@ El puente rechaza cualquier llamada con más de 60 s de desfase o con un nonce r
 |---|---|
 | Archivos (explorar, subir y bajar en partes, previsualizar video con `Range`), papelera, links compartidos | Terminal web (WebSocket) |
 | Correo y propuestas de la IA, tareas, calendario, notas, inventario, portafolio | Todo lo de admin: usuarios, módulos, respaldos, actualizar, apagar, raíces, TLS |
-| Impresoras 3D (estado, cola, cámara como imagen), impresión, sensores, red (ver) | Tiempo real instantáneo: llega por el long-poll de la fase B4, con ~1 s de demora |
+| Impresoras 3D (estado, cola, cámara como imagen), impresión, sensores, red (ver) | — |
+| Tiempo real (avisos, propuestas, estado) por long-poll, con ~1 s de demora | — |
 | Login con 2FA, cambio de contraseña propia | WebDAV |
 
 ## 9. Cambios en LabNAS que esto requiere

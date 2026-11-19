@@ -34,6 +34,8 @@ export interface HealthInfo {
   upload_limit_mb: number
   /** 'bridge' si se entra por el puente PHP */
   via?: 'bridge'
+  /** Por el puente: bytes maximos por pedido */
+  max_request?: number
 }
 
 export async function fetchHealth(): Promise<HealthInfo> {

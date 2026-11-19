@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Globe2, Download, Loader2, Link2, Unlink } from 'lucide-react'
-import { fetchBridge, linkBridge, setBridgeEnabled, unlinkBridge, downloadBridgePackage, type BridgeInfo } from '../api'
+import { fetchBridge, linkBridge, setBridgeEnabled, unlinkBridge, downloadBridgePackage, updateBridge, fetchHealth, type BridgeInfo } from '../api'
 import { errorMessage } from '../lib/errors'
 
 const inputStyle = { backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }
@@ -18,6 +18,9 @@ export default function BridgeSection() {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [version, setVersion] = useState<string | null>(null)
+
+  useEffect(() => { fetchHealth().then(h => setVersion(h.version)).catch(() => {}) }, [])
 
   async function load() {
     try { setInfo(await fetchBridge()) } catch (e) { setMsg({ ok: false, text: errorMessage(e) }) }
@@ -78,7 +81,16 @@ export default function BridgeSection() {
                 </p>
               )}
             </div>
+            {remote?.version && version && remote.version !== version && (
+              <p className="text-xs" style={{ color: 'var(--warning)' }}>
+                El conector está en v{remote.version} y LabNAS en v{version}: se actualiza solo en unos minutos, o ahora con el botón.
+              </p>
+            )}
             <div className="flex items-center gap-3 flex-wrap">
+              <button onClick={() => run(updateBridge, 'Conector actualizado')} disabled={busy || !info.enabled}
+                className="px-4 py-2 rounded-lg text-sm font-medium" style={{ color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
+                Actualizar conector
+              </button>
               <button onClick={() => run(() => setBridgeEnabled(!info.enabled), info.enabled ? 'Puente desactivado' : 'Puente activado')} disabled={busy}
                 className="px-4 py-2 rounded-lg text-sm font-medium" style={{ color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
                 {info.enabled ? 'Desactivar' : 'Activar'}

@@ -136,6 +136,31 @@ async fn puente_php_de_punta_a_punta() {
     assert_eq!(r.status(), 201, "{}", r.text().await.unwrap());
     assert_eq!(std::fs::read(s.home.join("grande.bin")).unwrap().len(), 300_000);
 
+    // B2: descarga de 20 MB (mas que el post_max_size de 8 MB): llega en partes, completa
+    let big: Vec<u8> = (0..20 * 1024 * 1024u32).map(|i| (i % 251) as u8).collect();
+    std::fs::write(s.home.join("video.bin"), &big).unwrap();
+    let r = web.get(format!("{}/api/files/download?path={}", bridge, urlencoding::encode(&s.path("video.bin"))))
+        .bearer_auth(&token).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.headers()["content-length"], (20 * 1024 * 1024).to_string().as_str());
+    let got = r.bytes().await.unwrap();
+    assert!(got.len() == big.len() && got[..] == big[..], "descarga grande integra ({} bytes)", got.len());
+
+    // B2: subida de 20 MB por partes de 4 MB
+    assert_eq!(s.post("/api/system/upload-limit", &admin, json!({ "limit_mb": 100 })).await.status, 200);
+    let init: Value = web.post(format!("{}/api/files/upload/chunked", bridge)).bearer_auth(&token)
+        .json(&json!({ "path": s.path(""), "name": "subida.bin", "size": big.len() }))
+        .send().await.unwrap().json().await.unwrap();
+    let id = init["id"].as_str().expect("id de subida").to_string();
+    for (n, part) in big.chunks(4 * 1024 * 1024).enumerate() {
+        let r = web.put(format!("{}/api/files/upload/chunked/{}?offset={}", bridge, id, n * 4 * 1024 * 1024))
+            .bearer_auth(&token).header("content-type", "application/octet-stream").body(part.to_vec()).send().await.unwrap();
+        assert_eq!(r.status(), 200, "parte {}: {}", n, r.text().await.unwrap());
+    }
+    let r = web.post(format!("{}/api/files/upload/chunked/{}/complete", bridge, id)).bearer_auth(&token).send().await.unwrap();
+    assert_eq!(r.status(), 201);
+    assert!(std::fs::read(s.home.join("subida.bin")).unwrap() == big, "subida grande integra");
+
     // Politica: ni admin, ni terminal, ni registro, aunque sea el admin
     for (method, path) in [("GET", "/api/auth/users"), ("GET", "/api/terminal"), ("POST", "/api/live/ticket"), ("GET", "/api/bridge"), ("POST", "/api/auth/register")] {
         let r = web.request(method.parse().unwrap(), format!("{}{}", bridge, path)).bearer_auth(&token).send().await.unwrap();
@@ -157,6 +182,20 @@ async fn puente_php_de_punta_a_punta() {
     let st = s.get("/api/bridge", &admin).await.json();
     assert_eq!(st["status"]["connected"], true, "{}", st);
     assert!(st["status"]["served"].as_u64().unwrap() >= 5);
+
+    // B3: conector viejo -> LabNAS lo actualiza (firmado, verificado, con vuelta atras)
+    std::fs::write(public.join("VERSION"), "0.0.1").unwrap();
+    let r = s.post("/api/bridge/update", &admin, json!({})).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    assert_eq!(std::fs::read_to_string(public.join("VERSION")).unwrap(), crate::updater::CURRENT_VERSION);
+    assert!(public.join(".update-old/VERSION").is_file(), "queda la version anterior");
+    assert!(!public.join(".update-staging").exists());
+    // Sigue atendiendo despues de actualizarse
+    let r = web.get(format!("{}/api/health", bridge)).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    // Un manifiesto sin firma no se acepta
+    let r = web.post(format!("{}/_labnas/update_begin", bridge)).body("{}").send().await.unwrap();
+    assert_eq!(r.status(), 401);
 
     // Desenlazar corta el acceso
     assert_eq!(s.delete("/api/bridge", &admin).await.status, 204);

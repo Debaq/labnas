@@ -19,12 +19,15 @@
 - Tareas de respaldo tipo **restic**: repositorio cifrado y deduplicado en disco local o remoto (SFTP, S3, B2, REST...). Contraseña y credenciales cifradas en la base (migración 12), retención diaria, **verificación** de integridad y **restauración** a `<origen>/.labnas-restore/` sin pisar archivos. Las tareas rsync siguen igual
 - `install.sh --deps` instala también `restic`
 
-### Acceso remoto: puente PHP (etapa B1)
+### Acceso remoto: puente PHP (etapas B1–B4)
 
 - **Conector PHP** para hosting compartido (PHP 7.0 a 8.x, Apache) que permite usar LabNAS desde internet **sin abrir puertos**: LabNAS sale hacia el hosting, recoge los pedidos (long-poll) y devuelve las respuestas; todo el canal va firmado con HMAC-SHA256. Diseño en `docs/PUENTE_PHP.md`
 - Enlace con código de un solo uso (`instalar.php`); los datos del conector van fuera de `public_html`. LabNAS entrega el paquete (`GET /api/bridge/package`: PHP + frontend de la misma versión)
 - Por el puente se niegan la terminal, los WebSocket, el registro de cuentas y todo lo de admin; los inicios de sesión quedan en la auditoría con la IP real y no se revela la IP de la LAN
-- Límite B1: pedidos y respuestas hasta el `post_max_size` del hosting (los archivos más grandes llegan en B2)
+- **Archivos de cualquier tamaño** (B2): las respuestas viajan en partes del tamaño que acepta el hosting (con contrapresión y `Content-Length`, así funcionan video y descargas grandes) y las subidas grandes usan el nuevo `POST /api/files/upload/chunked` (también fuera del puente; reanudable)
+- **El conector se actualiza solo** (B3) cuando LabNAS cambia de versión: manifiesto firmado, verificación sha256 de cada archivo y reemplazo con vuelta atrás; `index.php` y `.htaccess` nunca se tocan. Botón «Actualizar conector»
+- **Tiempo real sin WebSocket** (B4): `GET /api/live/poll` (long-poll del mismo bus de eventos); el frontend lo usa por el puente o si el WebSocket no conecta. Aviso «nuevo inicio de sesión por internet» en las otras sesiones del usuario
+- La subida normal ya no sigue symlinks (temporal `create_new` + rename)
 
 ### Correo con IA
 

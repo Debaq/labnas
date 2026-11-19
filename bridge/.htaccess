@@ -11,7 +11,7 @@ Options -Indexes
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
     # Codigo interno y puntero a los datos: nunca accesibles directo
-    RewriteRule ^(app/|labnas-path\.php$|VERSION$) - [F,L]
+    RewriteRule ^(app/|labnas-path\.php$|VERSION$|\.update-) - [F,L]
 
     # Ya reescrito a web/: no seguir (evita bucles)
     RewriteRule ^web/ - [L]

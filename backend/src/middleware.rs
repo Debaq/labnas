@@ -77,7 +77,7 @@ fn is_public(path: &str) -> bool {
 
 /// Rutas que no se atienden por el puente PHP (devuelve el motivo)
 pub fn bridge_denied(method: &Method, path: &str) -> Option<&'static str> {
-    if WS_PATHS.contains(&path) || path.starts_with("/api/live") {
+    if WS_PATHS.contains(&path) || path == "/api/live/ticket" {
         return Some("No disponible por el puente: requiere conexion directa (LAN o Tailscale)");
     }
     if path == "/api/auth/register" {
@@ -120,7 +120,7 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         ("GET", ["modules"]) => User,
 
         // --- Eventos en tiempo real ---
-        ("POST", ["live", "ticket"]) | ("GET", ["live"]) => User,
+        ("POST", ["live", "ticket"]) | ("GET", ["live"]) | ("GET", ["live", "poll"]) => User,
 
         // --- Archivos ---
         ("GET", ["files"]) | ("GET", ["files", "download"]) | ("GET", ["files", "quickaccess"]) => User,
@@ -128,6 +128,7 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         // Escritura: el handler verifica el permiso de la carpeta (storage::Storage).
         // Por defecto escriben los usuarios con permiso de escritura, como antes.
         ("POST", ["files", "upload"]) | ("POST", ["files", "directory"]) | ("DELETE", ["files"]) => User,
+        (_, ["files", "upload", "chunked", ..]) => User,
         ("POST", ["download-url"]) => User,
         ("GET", ["trash"]) | ("POST", ["trash", _, "restore"]) | ("DELETE", ["trash", _]) => User,
         ("GET", ["shares"]) | ("POST", ["shares"]) | ("DELETE", ["shares", _]) => User,
@@ -339,6 +340,7 @@ mod tests {
         assert!(d(Method::GET, "/api/terminal"));
         assert!(d(Method::GET, "/api/live"));
         assert!(d(Method::POST, "/api/live/ticket"));
+        assert!(!d(Method::GET, "/api/live/poll"), "long-poll de eventos si pasa");
         assert!(d(Method::POST, "/api/auth/register"));
         assert!(d(Method::GET, "/api/auth/users"));
         assert!(d(Method::POST, "/api/system/update"));
