@@ -316,15 +316,34 @@ async fn stream_parts(state: &AppState, cfg: &BridgeConfig, id: &str, meta: &str
     Ok(())
 }
 
+/// Fallas pasajeras del hosting al enviar una parte: red, error 5xx o cuerpo cortado
+/// (que PHP ve como firma invalida si no alcanza a detectarlo). Reenviar es seguro:
+/// cada intento lleva firma y nonce nuevos, y la parte `seq` se reescribe igual.
+fn transient_part_error(e: &str) -> bool {
+    e.starts_with("No se pudo contactar")
+        || ["500", "502", "503", "504"].iter().any(|c| e.starts_with(&format!("El puente respondio {}", c)))
+        || e.contains("Cuerpo incompleto")
+        || e.contains("Firma invalida")
+}
+
+const PART_RETRIES: u32 = 4;
+
 /// Una parte, reintentando si el conector pide esperar (429: el navegador va lento)
+/// o si falla algo pasajero
 async fn send_part(state: &AppState, cfg: &BridgeConfig, query: &str, part: Vec<u8>) -> Result<(), String> {
     let mut waits = 0;
+    let mut retries = 0;
     loop {
         match call(&state.http_client, cfg, "respond", query, part.clone(), CALL_TIMEOUT).await {
             Ok(_) => return Ok(()),
             Err(e) if e.contains(" 429") && waits < 600 => {
                 waits += 1;
                 tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+            Err(e) if transient_part_error(&e) && retries < PART_RETRIES => {
+                retries += 1;
+                eprintln!("[Puente] Reintento {} de una parte: {}", retries, e);
+                tokio::time::sleep(Duration::from_millis(500 * u64::from(retries))).await;
             }
             Err(e) => return Err(e),
         }
@@ -625,6 +644,18 @@ mod tests {
         assert_ne!(s1, sign(&key, "status", 1_800_000_000, &"0".repeat(32), b"", ""));
         assert_eq!(hex_decode("0aff"), Some(vec![10, 255]));
         assert_eq!(hex_decode("0g"), None);
+    }
+
+    #[test]
+    fn reintenta_solo_fallas_pasajeras() {
+        assert!(transient_part_error("No se pudo contactar al puente: timeout"));
+        assert!(transient_part_error("El puente respondio 502 Bad Gateway: "));
+        assert!(transient_part_error("El puente respondio 401 Unauthorized: Cuerpo incompleto (0 de 9 bytes)"));
+        assert!(transient_part_error("El puente respondio 401 Unauthorized: Firma invalida"));
+        // El navegador se fue o el pedido expiro: no tiene sentido insistir
+        assert!(!transient_part_error("El puente respondio 410 Gone: El navegador cerro la descarga"));
+        assert!(!transient_part_error("El puente respondio 401 Unauthorized: Nodo desconocido"));
+        assert!(!transient_part_error("El puente respondio 507 Insufficient Storage: Sin espacio en el hosting"));
     }
 
     #[test]

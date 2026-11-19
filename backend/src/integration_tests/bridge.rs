@@ -50,6 +50,10 @@ async fn puente_php_de_punta_a_punta() {
     std::fs::create_dir_all(public.join("web/assets")).unwrap();
     std::fs::write(public.join("web/index.html"), "<html>LabNAS</html>").unwrap();
     std::fs::write(public.join("web/assets/app.js"), "console.log(1)").unwrap();
+    // Conector de esta misma version (como recien instalado): sin esto LabNAS lo ve como
+    // "dev" y lo autoactualiza a mitad del test, cambiando archivos mientras atiende pedidos.
+    // La autoactualizacion se prueba aparte (B3)
+    std::fs::write(public.join("VERSION"), crate::updater::CURRENT_VERSION).unwrap();
 
     let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
     let _php = Php(

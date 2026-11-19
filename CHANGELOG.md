@@ -1,5 +1,11 @@
 # Changelog
 
+## [Sin publicar]
+
+### Puente PHP
+
+- **Descargas grandes más robustas por internet:** si el hosting falla de forma pasajera al recibir una parte (red, error 500/502/503/504 o cuerpo cortado), LabNAS la reenvía hasta 4 veces en vez de cortar la descarga. El conector distingue un cuerpo incompleto de una firma inválida
+
 ## [3.2.0] — 2026-11-19
 
 Desde v3.1.0.

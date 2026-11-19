@@ -486,6 +486,11 @@ function lb_verify($dir, $cfg, $op, $body)
     if (preg_match('/^[a-f0-9]{32}$/', $nonce) !== 1) {
         return 'Nonce invalido';
     }
+    // Un cuerpo cortado (o descartado por post_max_size) no es una firma mala: LabNAS reintenta
+    $declared = isset($_SERVER['CONTENT_LENGTH']) ? (string) $_SERVER['CONTENT_LENGTH'] : '';
+    if ($declared !== '' && (int) $declared !== strlen($body)) {
+        return 'Cuerpo incompleto (' . strlen($body) . ' de ' . (int) $declared . ' bytes)';
+    }
     $query = isset($_SERVER['QUERY_STRING']) ? $_SERVER['QUERY_STRING'] : '';
     $data = $op . "\n" . $ts . "\n" . $nonce . "\n" . hash('sha256', $body) . "\n" . $query;
     $expected = hash_hmac('sha256', $data, hex2bin($cfg['key']));
