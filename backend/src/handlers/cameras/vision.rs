@@ -32,6 +32,33 @@ pub fn decode_jpeg(jpeg: &[u8]) -> Result<Rgb, String> {
     Ok(Rgb { w, h, data })
 }
 
+/// Reduce la imagen (promedio por bloques) para que su ancho no pase de `max_w`
+pub fn downscale(img: &Rgb, max_w: usize) -> Rgb {
+    if img.w <= max_w || max_w == 0 {
+        return Rgb { w: img.w, h: img.h, data: img.data.clone() };
+    }
+    let f = img.w.div_ceil(max_w);
+    let (w, h) = (img.w / f, (img.h / f).max(1));
+    let mut data = Vec::with_capacity(w * h * 3);
+    for y in 0..h {
+        for x in 0..w {
+            let mut acc = [0u32; 3];
+            for dy in 0..f {
+                let row = (y * f + dy) * img.w;
+                for dx in 0..f {
+                    let i = (row + x * f + dx) * 3;
+                    acc[0] += img.data[i] as u32;
+                    acc[1] += img.data[i + 1] as u32;
+                    acc[2] += img.data[i + 2] as u32;
+                }
+            }
+            let n = (f * f) as u32;
+            data.extend(acc.iter().map(|v| (v / n) as u8));
+        }
+    }
+    Rgb { w, h, data }
+}
+
 pub fn encode_jpeg(img: &Rgb, quality: u8) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     jpeg_encoder::Encoder::new(&mut out, quality)

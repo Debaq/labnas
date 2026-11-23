@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ScanEye, Plus, Pencil, Trash2, Play, Pause, Loader2, X, Camera, Send, Video, AlertTriangle, Download, Lock } from 'lucide-react'
+import { ScanEye, Plus, Pencil, Trash2, Play, Pause, Loader2, X, Camera, Send, Video, AlertTriangle, Lock } from 'lucide-react'
 import {
-  fetchDetectors, saveDetector, deleteDetector, testDetector, prepareDetectionModel, fetchDetections, cameraRecordingUrl,
+  fetchDetectors, saveDetector, deleteDetector, testDetector, prepareDetectionModel,
   saveDetectionWatchers, fetchWebUsers,
-  type DetectorsResponse, type DetectorInput, type DetectorRule, type DetectionRow,
+  type DetectorsResponse, type DetectorInput, type DetectorRule,
 } from '../api'
 import type { CameraView } from '../types'
 import { useEvent } from '../events/useEvents'
 import { useToast } from './ToastContext'
 import { errorMessage } from '../lib/errors'
+import DetectionHistory from './DetectionHistory'
 
 const card = { backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }
 const input = { backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border)' }
@@ -38,7 +39,6 @@ function scheduleText(r: DetectorInput, days: string[]): string {
 export default function DetectionSection({ cameras, isAdmin }: { cameras: CameraView[]; isAdmin: boolean }) {
   const { addToast } = useToast()
   const [data, setData] = useState<DetectorsResponse | null>(null)
-  const [history, setHistory] = useState<DetectionRow[]>([])
   const [form, setForm] = useState<{ id?: string; rule: DetectorInput } | null>(null)
   const [classFilter, setClassFilter] = useState('')
   const [busy, setBusy] = useState(false)
@@ -49,7 +49,6 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
 
   const load = useCallback(() => {
     fetchDetectors().then(setData).catch((e) => setError(errorMessage(e)))
-    fetchDetections().then(setHistory).catch(() => {})
   }, [])
   useEffect(() => { load() }, [load])
   useEffect(() => {
@@ -329,37 +328,11 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
       )}
 
       {/* Historial */}
-      <div className="rounded-xl overflow-x-auto" style={card}>
-        {history.length === 0 ? (
-          <p className="text-sm p-4" style={{ color: 'var(--text-secondary)' }}>Todavía no hay detecciones.</p>
-        ) : (
-          <table className="w-full text-xs">
-            <thead>
-              <tr style={{ color: 'var(--text-secondary)' }}>
-                <th className="text-left p-2">Fecha</th>
-                <th className="text-left p-2">Cámara</th>
-                <th className="text-left p-2">Tipo</th>
-                <th className="text-left p-2">Detectado</th>
-                <th className="p-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.map((d) => (
-                <tr key={d.id} style={{ borderTop: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-                  <td className="p-2 whitespace-nowrap">{new Date(d.at).toLocaleString()}</td>
-                  <td className="p-2">{d.camera_name}</td>
-                  <td className="p-2">{d.kind}</td>
-                  <td className="p-2">{d.labels}</td>
-                  <td className="p-2 whitespace-nowrap text-right">
-                    {d.photo_id && <a href={cameraRecordingUrl(d.photo_id)} title="Foto" className="inline-block p-1" style={{ color: 'var(--accent)' }}><Camera size={14} /></a>}
-                    {d.clip_id && <a href={cameraRecordingUrl(d.clip_id)} title="Clip" className="inline-block p-1" style={{ color: 'var(--accent)' }}><Download size={14} /></a>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      <DetectionHistory
+        rules={data.rules}
+        cameras={cameras}
+        ruleLabel={(r) => (r.kind === 'objetos' ? r.classes.map((c) => classNames.get(c) ?? c).join(', ') : r.kind)}
+      />
 
       {/* Resultado de la prueba */}
       {test && (

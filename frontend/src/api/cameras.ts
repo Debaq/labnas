@@ -77,4 +77,5 @@ export async function deleteCameraRecording(id: string): Promise<void> {
 
 export const cameraStreamUrl = (id: string) => `/api/cameras/${id}/stream`
 export const cameraFrameUrl = (id: string, t: number) => `/api/cameras/${id}/snapshot?t=${t}`
-export const cameraRecordingUrl = (id: string) => `/api/cameras/recordings/${id}/download`
+/** `view`: inline = verla en el navegador; thumb = miniatura de una foto; sin nada = descargar */
+export const cameraRecordingUrl = (id: string, view?: 'inline' | 'thumb') => `/api/cameras/recordings/${id}/download${view ? `?view=${view}` : ''}`

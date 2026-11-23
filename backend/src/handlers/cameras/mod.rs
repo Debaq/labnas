@@ -827,11 +827,23 @@ async fn recording_path(state: &AppState, id: &str) -> Result<(String, String, S
     .ok_or((StatusCode::NOT_FOUND, "Grabacion no encontrada".to_string()))
 }
 
-/// GET /api/cameras/recordings/{id}/download
+#[derive(Deserialize, Default)]
+pub struct DownloadQuery {
+    /// `inline`: verla en el navegador; `thumb`: miniatura de una foto (no queda en la
+    /// auditoria); sin nada: descargar
+    #[serde(default)]
+    view: Option<String>,
+}
+
+/// Ancho de las miniaturas de fotos
+const THUMB_W: usize = 320;
+
+/// GET /api/cameras/recordings/{id}/download[?view=inline|thumb]
 pub async fn download_recording(
     State(state): State<AppState>,
     Extension(session): Extension<SessionInfo>,
     Path(id): Path<String>,
+    Query(q): Query<DownloadQuery>,
 ) -> Result<Response, ApiError> {
     let (path, kind, status, user) = recording_path(&state, &id).await?;
     // Las de la IA solo para quienes ven la deteccion; el resto, admin u operador
@@ -846,16 +858,37 @@ pub async fn download_recording(
     if status == "borrado" {
         return Err((StatusCode::GONE, "La grabacion fue borrada".into()));
     }
+    let view = q.view.as_deref().unwrap_or("");
+    if view == "thumb" {
+        if kind != "foto" {
+            return Err((StatusCode::BAD_REQUEST, "Solo las fotos tienen miniatura".into()));
+        }
+        let bytes = tokio::fs::read(&path).await.map_err(|_| (StatusCode::NOT_FOUND, "El archivo ya no existe".to_string()))?;
+        let thumb = tokio::task::spawn_blocking(move || {
+            let img = vision::decode_jpeg(&bytes)?;
+            vision::encode_jpeg(&vision::downscale(&img, THUMB_W), 70)
+        })
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        return Ok((
+            [(header::CONTENT_TYPE, "image/jpeg".to_string()), (header::CACHE_CONTROL, "private, max-age=86400".to_string())],
+            thumb,
+        )
+            .into_response());
+    }
     let file = tokio::fs::File::open(&path).await.map_err(|_| (StatusCode::NOT_FOUND, "El archivo ya no existe".to_string()))?;
     let len = file.metadata().await.map(|m| m.len()).unwrap_or(0);
     let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    state.log_activity("Camara", &format!("Descargo {}", path), &session.username).await;
+    let inline = view == "inline";
+    state.log_activity("Camara", &format!("{} {}", if inline { "Vio" } else { "Descargo" }, path), &session.username).await;
     let ctype = if kind == "foto" { "image/jpeg" } else { "video/mp4" };
+    let disposition = if inline { "inline" } else { "attachment" };
     Ok((
         [
             (header::CONTENT_TYPE, ctype.to_string()),
             (header::CONTENT_LENGTH, len.to_string()),
-            (header::CONTENT_DISPOSITION, format!("attachment; filename*=UTF-8''{}", urlencoding::encode(&name))),
+            (header::CONTENT_DISPOSITION, format!("{}; filename*=UTF-8''{}", disposition, urlencoding::encode(&name))),
         ],
         Body::from_stream(tokio_util::io::ReaderStream::new(file)),
     )

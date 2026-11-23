@@ -370,6 +370,12 @@ const MIGRATIONS: &[&str] = &[
         notes TEXT NOT NULL DEFAULT '',
         PRIMARY KEY (machine_id, username)
     );",
+    // 21: detecciones de camaras: resultado del aviso por Telegram (tg_sent NULL = la regla
+    // no avisa; tg_error = por que no llego) e indices para filtrar por regla y camara
+    "ALTER TABLE camera_detections ADD COLUMN tg_sent INTEGER;
+    ALTER TABLE camera_detections ADD COLUMN tg_error TEXT;
+    CREATE INDEX IF NOT EXISTS idx_camera_detections_rule ON camera_detections(detector_id, at);
+    CREATE INDEX IF NOT EXISTS idx_camera_detections_cam ON camera_detections(camera_id, at);",
 ];
 
 /// Migracion 16. Publicada: no modificar (ver `MIGRATIONS`).

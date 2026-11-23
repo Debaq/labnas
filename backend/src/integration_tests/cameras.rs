@@ -8,6 +8,10 @@ use std::time::Duration;
 use super::harness::{wait_until, Server};
 use crate::handlers::cameras::hub::TEST_INPUT;
 
+async fn count_detections(s: &Server, token: &str, q: &str) -> usize {
+    s.get(&format!("/api/cameras/detections?{}", q), token).await.json().as_array().unwrap().len()
+}
+
 fn ffmpeg_ok() -> bool {
     std::process::Command::new("ffmpeg").arg("-version").output().map(|o| o.status.success()).unwrap_or(false)
 }
@@ -171,7 +175,7 @@ async fn deteccion_con_ia() {
     // Validacion y permisos
     let regla = json!({
         "camera_id": cam, "kind": "personas", "min_score": 0.5, "interval_s": 1, "cooldown_s": 30,
-        "schedule": null, "actions": { "photo": true, "telegram": false, "clip_s": 3 }, "enabled": true,
+        "schedule": null, "actions": { "photo": true, "telegram": true, "clip_s": 3 }, "enabled": true,
     });
     assert_eq!(s.post("/api/cameras/detectors", &op, regla.clone()).await.status, 403);
     let mut mala = regla.clone();
@@ -214,6 +218,19 @@ async fn deteccion_con_ia() {
     let det = s.get("/api/cameras/detections", &admin).await.json()[0].clone();
     assert_eq!((det["camera_name"].as_str(), det["kind"].as_str()), (Some("Sala"), Some("personas")));
     assert_eq!(det["labels"], "persona (87%)");
+    // Se sabe que regla disparo y que el aviso no llego (no hay bot en los tests)
+    assert_eq!(det["detector_id"], rule_id.as_str());
+    assert_eq!(det["tg_sent"], 0);
+    assert!(det["tg_error"].as_str().unwrap().contains("bot"), "{}", det["tg_error"]);
+    // Filtros y paginacion
+    assert_eq!(count_detections(&s, &admin, &format!("rule={}", rule_id)).await, 1);
+    assert_eq!(count_detections(&s, &admin, &"rule=otra".into()).await, 0);
+    assert_eq!(count_detections(&s, &admin, &format!("camera={}", cam)).await, 1);
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    assert_eq!(count_detections(&s, &admin, &format!("day={}", today)).await, 1);
+    assert_eq!(count_detections(&s, &admin, &"day=2020-01-01".into()).await, 0);
+    assert_eq!(count_detections(&s, &admin, &format!("before={}", urlencoding::encode(det["at"].as_str().unwrap()))).await, 0);
+    assert_eq!(s.get("/api/cameras/detections?day=ayer", &admin).await.status, 400);
     // El operador no ve ni descarga lo que hizo la IA
     let recs_op = s.get("/api/cameras/recordings", &op).await.json();
     assert!(recs_op.as_array().unwrap().iter().all(|r| !r["username"].as_str().unwrap().starts_with("IA (")));
@@ -223,6 +240,13 @@ async fn deteccion_con_ia() {
     assert_eq!(s.put("/api/cameras/detectors/watchers", &admin, json!({ "users": ["op"] })).await.status, 200);
     assert_eq!(s.get("/api/cameras/detections", &op).await.status, 200);
     assert_eq!(s.get(&format!("/api/cameras/recordings/{}/download", foto_id), &op).await.status, 200);
+    // Vista previa: en el navegador (queda en la auditoria) y miniatura
+    let inline = s.get(&format!("/api/cameras/recordings/{}/download?view=inline", foto_id), &op).await;
+    assert!(inline.header("content-disposition").starts_with("inline"));
+    let thumb = s.get(&format!("/api/cameras/recordings/{}/download?view=thumb", foto_id), &op).await;
+    assert_eq!(thumb.status, 200);
+    assert_eq!(thumb.header("content-type"), "image/jpeg");
+    assert!(!s.get("/api/audit?q=Vio", &admin).await.json().as_array().unwrap().is_empty());
     assert!(s.get("/api/cameras/detectors", &op).await.json()["watchers"].as_array().unwrap().is_empty(), "la lista solo la ve el admin");
     assert_eq!(s.get("/api/cameras/detectors", &admin).await.json()["watchers"], json!(["op"]));
     let recs = s.get("/api/cameras/recordings", &op).await.json();

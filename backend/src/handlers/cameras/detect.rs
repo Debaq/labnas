@@ -495,12 +495,18 @@ async fn fire(state: &AppState, rule: &Rule, cam: &CameraRow, frame: axum::body:
         }
     }
     let watchers = watchers(state).await;
+    // Resultado del aviso: (chats a los que llego, por que no llego)
+    let mut tg: (Option<i64>, Option<String>) = (None, None);
     if rule.input.actions.telegram {
         let extra: Vec<String> = if rule.input.actions.telegram_watchers { watchers.clone() } else { Vec::new() };
         let caption = format!("🔎 {} en {}: {}\n{}", kind_title(&rule.input.kind), cam.name, labels, at.format("%d-%m-%Y %H:%M:%S"));
-        if let Err(e) = crate::handlers::notifications::notify_admins_photo(state, marked, &caption, &extra).await {
-            errors.push(format!("telegram: {}", e));
-        }
+        tg = match crate::handlers::notifications::notify_admins_photo(state, marked, &caption, &extra).await {
+            Ok(n) => (Some(n as i64), None),
+            Err(e) => {
+                errors.push(format!("telegram: {}", e));
+                (Some(0), Some(e))
+            }
+        };
     }
 
     let (id, rid, cid, cname, kind, l2, at2) = (
@@ -515,9 +521,9 @@ async fn fire(state: &AppState, rule: &Rule, cam: &CameraRow, frame: axum::body:
     let (p2, c2) = (photo_id.clone(), clip_id.clone());
     let _ = db_op(&state.db, move |conn| {
         conn.execute(
-            "INSERT INTO camera_detections (id, detector_id, camera_id, camera_name, kind, labels, score, at, photo_id, clip_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![id, rid, cid, cname, kind, l2, best as f64, at2, p2, c2],
+            "INSERT INTO camera_detections (id, detector_id, camera_id, camera_name, kind, labels, score, at, photo_id, clip_id, tg_sent, tg_error)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![id, rid, cid, cname, kind, l2, best as f64, at2, p2, c2, tg.0, tg.1],
         )
         .map_err(|e| e.to_string())
     })
@@ -795,6 +801,8 @@ pub async fn prepare_model(State(state): State<AppState>, Extension(session): Ex
 #[derive(Serialize)]
 pub struct DetectionRow {
     pub id: String,
+    /// Regla que disparo
+    pub detector_id: String,
     pub camera_id: String,
     pub camera_name: String,
     pub kind: String,
@@ -803,39 +811,70 @@ pub struct DetectionRow {
     pub at: String,
     pub photo_id: Option<String>,
     pub clip_id: Option<String>,
+    /// Chats de Telegram a los que llego el aviso (null = la regla no avisa o es anterior a v3.4.2)
+    pub tg_sent: Option<i64>,
+    /// Por que no llego el aviso
+    pub tg_error: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct DetectionsQuery {
     camera: Option<String>,
+    /// Regla (detector)
+    rule: Option<String>,
+    /// Dia local `YYYY-MM-DD`
+    day: Option<String>,
+    /// Paginacion: solo las anteriores a este instante (el `at` de la ultima recibida)
+    before: Option<String>,
+    limit: Option<u32>,
 }
 
-/// GET /api/cameras/detections[?camera=id]
+/// Rango de texto `[dia, dia siguiente)` para comparar con `at` (RFC 3339 en hora local)
+fn day_range(day: &str) -> Option<(String, String)> {
+    let d = chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").ok()?;
+    let next = d.succ_opt()?;
+    Some((d.format("%Y-%m-%d").to_string(), next.format("%Y-%m-%d").to_string()))
+}
+
+/// GET /api/cameras/detections[?camera=id&rule=id&day=YYYY-MM-DD&before=at&limit=n]
 pub async fn list_detections(
     State(state): State<AppState>,
     Extension(session): Extension<SessionInfo>,
     Query(q): Query<DetectionsQuery>,
 ) -> Result<Json<Vec<DetectionRow>>, ApiError> {
     require_view(&state, &session).await?;
+    let (from, to) = match q.day.as_deref().filter(|d| !d.is_empty()) {
+        Some(d) => {
+            let (a, b) = day_range(d).ok_or((StatusCode::BAD_REQUEST, "Dia invalido (AAAA-MM-DD)".to_string()))?;
+            (Some(a), Some(b))
+        }
+        None => (None, None),
+    };
+    let limit = q.limit.unwrap_or(200).clamp(1, 500);
     let rows = db_op(&state.db, move |conn| {
         let mut stmt = conn
             .prepare(
-                "SELECT id, camera_id, camera_name, kind, labels, score, at, photo_id, clip_id FROM camera_detections
-                 WHERE (?1 IS NULL OR camera_id = ?1) ORDER BY at DESC LIMIT 300",
+                "SELECT id, detector_id, camera_id, camera_name, kind, labels, score, at, photo_id, clip_id, tg_sent, tg_error FROM camera_detections
+                 WHERE (?1 IS NULL OR camera_id = ?1) AND (?2 IS NULL OR detector_id = ?2)
+                   AND (?3 IS NULL OR at >= ?3) AND (?4 IS NULL OR at < ?4) AND (?5 IS NULL OR at < ?5)
+                 ORDER BY at DESC LIMIT ?6",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(params![q.camera], |r| {
+            .query_map(params![q.camera, q.rule, from, to, q.before, limit], |r| {
                 Ok(DetectionRow {
                     id: r.get(0)?,
-                    camera_id: r.get(1)?,
-                    camera_name: r.get(2)?,
-                    kind: r.get(3)?,
-                    labels: r.get(4)?,
-                    score: r.get(5)?,
-                    at: r.get(6)?,
-                    photo_id: r.get(7)?,
-                    clip_id: r.get(8)?,
+                    detector_id: r.get(1)?,
+                    camera_id: r.get(2)?,
+                    camera_name: r.get(3)?,
+                    kind: r.get(4)?,
+                    labels: r.get(5)?,
+                    score: r.get(6)?,
+                    at: r.get(7)?,
+                    photo_id: r.get(8)?,
+                    clip_id: r.get(9)?,
+                    tg_sent: r.get(10)?,
+                    tg_error: r.get(11)?,
                 })
             })
             .map_err(|e| e.to_string())?;

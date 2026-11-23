@@ -61,7 +61,9 @@ async fn migracion_cifra_secretos_en_claro() {
              ALTER TABLE backup_jobs DROP COLUMN kind;
              ALTER TABLE backup_jobs DROP COLUMN restic_password;
              ALTER TABLE backup_jobs DROP COLUMN restic_env;
-             ALTER TABLE machines DROP COLUMN requires_certification;",
+             ALTER TABLE machines DROP COLUMN requires_certification;
+             ALTER TABLE camera_detections DROP COLUMN tg_sent;
+             ALTER TABLE camera_detections DROP COLUMN tg_error;",
         )
         .unwrap();
         conn.pragma_update(None, "user_version", 4).unwrap();

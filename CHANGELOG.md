@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.4.2] — 2026-11-23
+
+Desde v3.4.1.
+
+### Cámaras: historial de detecciones con IA
+
+- **Vista previa** sin descargar: miniatura en cada fila y visor con la foto o el clip, con flechas para pasar entre detecciones
+- **Ordenado por día** («Hoy», «Ayer»…) y **agrupado en eventos**: detecciones seguidas de la misma regla se juntan («14:02–14:09 · 6 veces») y se expanden para ver cada una
+- **Filtros** por cámara, regla y día, y «Cargar más» en vez del tope de 300
+- **Indicador de Telegram** en cada detección: enviado, no enviado (con el motivo) o la regla no avisa
+- Cada detección guarda qué regla la disparó
+
+### Seguridad
+
+- Visor de escritorio: dependencia `url` actualizada a 2.5.9 (RUSTSEC-2026-0592)
+
 ## [3.4.1] — 2026-11-23
 
 Desde v3.4.0.

@@ -53,6 +53,8 @@ export interface DetectorsResponse {
 
 export interface DetectionRow {
   id: string
+  /** Regla que disparo */
+  detector_id: string
   camera_id: string
   camera_name: string
   kind: string
@@ -61,6 +63,20 @@ export interface DetectionRow {
   at: string
   photo_id: string | null
   clip_id: string | null
+  /** Chats de Telegram a los que llego (null = la regla no avisa, o deteccion antigua) */
+  tg_sent: number | null
+  /** Por que no llego el aviso */
+  tg_error: string | null
+}
+
+export interface DetectionsFilter {
+  camera?: string
+  rule?: string
+  /** `YYYY-MM-DD` */
+  day?: string
+  /** `at` de la ultima recibida, para cargar mas */
+  before?: string
+  limit?: number
 }
 
 async function failText(res: Response, fallback: string): Promise<never> {
@@ -102,8 +118,10 @@ export async function prepareDetectionModel(): Promise<void> {
   if (!res.ok) return failText(res, 'No se pudo descargar el modelo')
 }
 
-export async function fetchDetections(): Promise<DetectionRow[]> {
-  const res = await api('/api/cameras/detections')
+export async function fetchDetections(f: DetectionsFilter = {}): Promise<DetectionRow[]> {
+  const p = new URLSearchParams()
+  for (const [k, v] of Object.entries(f)) if (v !== undefined && v !== '') p.set(k, String(v))
+  const res = await api(`/api/cameras/detections?${p}`)
   if (!res.ok) return failText(res, 'Error al obtener las detecciones')
   return res.json()
 }
