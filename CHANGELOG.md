@@ -1,6 +1,8 @@
 # Changelog
 
-## [Sin publicar]
+## [3.4.0] — 2026-11-23
+
+Desde v3.3.1.
 
 ### Máquinas (módulo nuevo)
 
