@@ -215,17 +215,20 @@ pub struct Redirect {
 
 /// Marca que el visor de escritorio agrega a su User-Agent
 pub const VIEWER_UA: &str = "LabNAS-Viewer";
+/// Los visores desde v3.5 la agregan tambien: fijan el certificado la primera vez
+/// (como SSH) y aceptan el autofirmado, asi que se los manda a HTTPS como a todos.
+pub const VIEWER_TLS: &str = "tls-pin";
 
-/// Excepciones: sensores (ESP32 sin TLS), health, clientes locales y el visor de
-/// escritorio (WebKitGTK no acepta el autofirmado). No es una barrera de seguridad:
-/// el HTTP sigue disponible; solo evita romper a esos clientes.
+/// Excepciones: sensores (ESP32 sin TLS), health, clientes locales y los visores de
+/// escritorio viejos (sin `tls-pin`, su WebKitGTK no acepta el autofirmado). No es
+/// una barrera de seguridad: el HTTP sigue disponible; solo evita romper a esos clientes.
 fn exempt(req: &Request) -> bool {
     let path = req.uri().path();
     if path == "/api/sensors/data" || path == "/api/health" {
         return true;
     }
     let ua = req.headers().get(header::USER_AGENT).and_then(|h| h.to_str().ok()).unwrap_or("");
-    if ua.contains(VIEWER_UA) {
+    if ua.contains(VIEWER_UA) && !ua.contains(VIEWER_TLS) {
         return true;
     }
     let host = req.headers().get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
@@ -361,6 +364,21 @@ pub async fn download_cert(State(state): State<AppState>) -> Result<impl IntoRes
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn visor_viejo_exento_visor_nuevo_a_https() {
+        let req = |ua: &str| {
+            Request::builder()
+                .uri("/")
+                .header(header::HOST, "192.168.1.10:3001")
+                .header(header::USER_AGENT, ua)
+                .body(axum::body::Body::empty())
+                .unwrap()
+        };
+        assert!(exempt(&req("Mozilla/5.0 AppleWebKit/605.1.15 LabNAS-Viewer/3.4.3")));
+        assert!(!exempt(&req("Mozilla/5.0 AppleWebKit/605.1.15 LabNAS-Viewer/3.5.0 tls-pin")));
+        assert!(!exempt(&req("Mozilla/5.0 Firefox/140.0")));
+    }
 
     #[test]
     fn autofirmado_con_nombres_e_ips() {

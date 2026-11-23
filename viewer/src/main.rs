@@ -11,6 +11,12 @@
 //!
 //! Con bandeja del sistema (libappindicator), cerrar la ventana la oculta y el visor
 //! sigue recibiendo notificaciones; "Salir" desde la bandeja o Ctrl+Q lo cierra.
+//!
+//! HTTPS: si el servidor tiene HTTPS activo, redirige al visor (que se anuncia con
+//! `tls-pin` en el User-Agent). Un certificado autofirmado se acepta la primera vez y
+//! su huella SHA-256 queda guardada en ~/.local/share/labnas-viewer/tls-pins, como
+//! hace SSH. Si despues cambia, el visor no carga y muestra ambas huellas;
+//! `labnas-viewer --olvidar <host>` borra la huella guardada.
 
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
@@ -22,8 +28,10 @@ use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::platform::unix::{EventLoopBuilderExtUnix, WindowExtUnix};
 use tao::window::WindowBuilder;
+use sha2::{Digest, Sha256};
+use webkit2gtk::{WebContextExt, WebViewExt};
 use wry::http::Uri;
-use wry::{NewWindowResponse, WebContext, WebViewBuilder, WebViewBuilderExtUnix};
+use wry::{NewWindowResponse, WebContext, WebViewBuilder, WebViewBuilderExtUnix, WebViewExtUnix};
 
 const APP_ID: &str = "io.github.debaq.LabNAS";
 const DEFAULT_URL: &str = "http://localhost:3001";
@@ -58,6 +66,123 @@ fn discover_labnas() -> Option<String> {
     }
     let _ = mdns.shutdown();
     found
+}
+
+// ─── Certificados: confiar en el primer uso (TOFU) ───
+
+/// Marca del User-Agent: este visor sabe fijar certificados, el servidor puede
+/// mandarlo a HTTPS. Debe coincidir con `tls::VIEWER_TLS` del backend.
+const VIEWER_TLS: &str = "tls-pin";
+
+fn pins_path() -> Option<PathBuf> {
+    dirs::data_dir().map(|d| d.join("labnas-viewer/tls-pins"))
+}
+
+/// Huella SHA-256 del certificado (DER) en el formato que muestra LabNAS: AA:BB:...
+fn fingerprint(der: &[u8]) -> String {
+    Sha256::digest(der).iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":")
+}
+
+#[derive(Debug, PartialEq)]
+enum PinCheck {
+    /// Coincide con la huella guardada
+    Trusted,
+    /// Primera vez que vemos este host
+    New,
+    /// Hay otra huella guardada para el host (la devuelve)
+    Changed(String),
+}
+
+/// Lineas `host huella`; se ignoran las vacias y los comentarios
+fn check_pin(pins: &str, host: &str, fp: &str) -> PinCheck {
+    let saved = pins
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .filter_map(|l| l.split_once(' '))
+        .find(|(h, _)| *h == host)
+        .map(|(_, f)| f.trim());
+    match saved {
+        Some(f) if f.eq_ignore_ascii_case(fp) => PinCheck::Trusted,
+        Some(f) => PinCheck::Changed(f.to_string()),
+        None => PinCheck::New,
+    }
+}
+
+/// Contenido sin la huella de `host`
+fn forget_pin(pins: &str, host: &str) -> String {
+    pins.lines()
+        .filter(|l| l.split_once(' ').map(|(h, _)| h) != Some(host))
+        .map(|l| format!("{l}\n"))
+        .collect()
+}
+
+fn read_pins() -> String {
+    pins_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default()
+}
+
+fn save_pin(host: &str, fp: &str) {
+    let Some(path) = pins_path() else { return };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let mut pins = forget_pin(&read_pins(), host);
+    pins.push_str(&format!("{host} {fp}\n"));
+    if let Err(e) = std::fs::write(&path, pins) {
+        eprintln!("[labnas-viewer] no se pudo guardar la huella en {}: {e}", path.display());
+    }
+}
+
+fn cert_changed_page(host: &str, old: &str, new: &str) -> String {
+    format!(
+        r#"<!doctype html><html><head><meta charset="utf-8"><style>
+body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+background:#282a36;color:#f8f8f2;font-family:system-ui,sans-serif}}
+main{{max-width:720px;padding:24px}}h1{{color:#ff5555;font-size:1.4em}}
+code{{color:#8be9fd;word-break:break-all}}p{{line-height:1.5}}
+</style></head><body><main>
+<h1>El certificado de {host} cambió</h1>
+<p>El servidor presentó un certificado distinto al de la primera conexión. Puede ser que
+alguien haya regenerado el certificado en LabNAS, o que otra máquina se esté haciendo pasar por él.
+Por seguridad, el visor no se conectó.</p>
+<p>Huella guardada:<br><code>{old}</code></p>
+<p>Huella actual:<br><code>{new}</code></p>
+<p>Compara la huella actual con la que aparece en LabNAS, en Configuración &gt; HTTPS
+(míralo desde otro equipo o en el propio servidor). Si coinciden, ejecuta
+<code>labnas-viewer --olvidar {host}</code> y vuelve a abrir el visor.</p>
+</main></body></html>"#
+    )
+}
+
+/// Engancha la comprobacion de certificados a WebKit: un autofirmado conocido (o
+/// nuevo) se acepta para ese host; uno que cambio, no.
+fn pin_certificates(webview: &wry::WebView) {
+    webview.webview().connect_load_failed_with_tls_errors(|view, uri, cert, _errors| {
+        let Some(host) = uri.parse::<Uri>().ok().and_then(|u| u.host().map(str::to_string)) else {
+            return false;
+        };
+        let Some(der) = webkit2gtk::gio::prelude::TlsCertificateExt::certificate(cert) else {
+            return false;
+        };
+        let fp = fingerprint(&der);
+        match check_pin(&read_pins(), &host, &fp) {
+            PinCheck::Changed(old) => {
+                eprintln!("[labnas-viewer] el certificado de {host} cambio: guardada {old}, actual {fp}");
+                notify("dialog-warning", "LabNAS", &format!("El certificado de {host} cambió; no se conectó"));
+                view.load_html(&cert_changed_page(&host, &old, &fp), None);
+            }
+            check => {
+                if check == PinCheck::New {
+                    println!("[labnas-viewer] certificado de {host} guardado: {fp}");
+                    save_pin(&host, &fp);
+                }
+                if let Some(ctx) = view.context() {
+                    ctx.allow_tls_certificate_for_host(cert, &host);
+                }
+                view.load_uri(uri);
+            }
+        }
+        true
+    });
 }
 
 /// Icono de LabNAS (PNG embebido) como RGBA
@@ -127,6 +252,12 @@ fn resolve_url() -> String {
         return url;
     }
     DEFAULT_URL.to_string()
+}
+
+/// Host de una URL (sin puerto): HTTP y HTTPS del mismo LabNAS cuentan como propios.
+fn url_host(url: &str) -> Option<String> {
+    let uri: Uri = url.parse().ok()?;
+    uri.host().map(str::to_string)
 }
 
 /// host:port del servidor, para comprobar si ya acepta conexiones.
@@ -208,6 +339,25 @@ fn main() -> wry::Result<()> {
         }
         return Ok(());
     }
+    if std::env::args().nth(1).as_deref() == Some("--olvidar") {
+        let Some(host) = std::env::args().nth(2) else {
+            eprintln!("Uso: labnas-viewer --olvidar <host>");
+            std::process::exit(2);
+        };
+        if let Some(path) = pins_path() {
+            let pins = read_pins();
+            let rest = forget_pin(&pins, &host);
+            if rest == pins {
+                println!("No habia huella guardada para {host}");
+            } else if let Err(e) = std::fs::write(&path, rest) {
+                eprintln!("No se pudo escribir {}: {e}", path.display());
+                std::process::exit(1);
+            } else {
+                println!("Huella de {host} olvidada; la proxima conexion guarda la nueva");
+            }
+        }
+        return Ok(());
+    }
 
     let url = resolve_url();
     let addr = server_addr(&url);
@@ -232,12 +382,15 @@ fn main() -> wry::Result<()> {
     let data_dir: Option<PathBuf> = dirs::data_dir().map(|d| d.join("labnas-viewer"));
     let mut web_context = WebContext::new(data_dir);
 
-    let origin = server_addr(&url);
+    let origin = url_host(&url);
     let ipc_proxy = proxy.clone();
 
     let builder = WebViewBuilder::new_with_web_context(&mut web_context)
-        // El servidor no redirige al visor a HTTPS (WebKitGTK rechazaria el autofirmado)
-        .with_user_agent(format!("Mozilla/5.0 (X11; Linux) AppleWebKit/605.1.15 LabNAS-Viewer/{}", env!("CARGO_PKG_VERSION")))
+        // `tls-pin`: el servidor puede mandarnos a HTTPS (ver pin_certificates)
+        .with_user_agent(format!(
+            "Mozilla/5.0 (X11; Linux) AppleWebKit/605.1.15 LabNAS-Viewer/{} {VIEWER_TLS}",
+            env!("CARGO_PKG_VERSION")
+        ))
         .with_html(loading_page(&url))
         .with_initialization_script(INIT_SCRIPT)
         .with_devtools(cfg!(debug_assertions))
@@ -248,7 +401,7 @@ fn main() -> wry::Result<()> {
         })
         // Navegación a otro host (enlaces sin target) → navegador del sistema
         .with_navigation_handler(move |target| {
-            let same_origin = origin.is_some() && server_addr(&target) == origin;
+            let same_origin = origin.is_some() && url_host(&target) == origin;
             let internal = target.starts_with("about:")
                 || target.starts_with("data:")
                 || target.starts_with("blob:");
@@ -271,6 +424,7 @@ fn main() -> wry::Result<()> {
 
     let vbox = window.default_vbox().expect("ventana sin gtk::Box");
     let webview = builder.build_gtk(vbox)?;
+    pin_certificates(&webview);
 
     // Espera en segundo plano a que el servidor acepte conexiones
     std::thread::spawn(move || {
@@ -305,4 +459,31 @@ fn main() -> wry::Result<()> {
             _ => {}
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn huellas_tofu() {
+        let pins = "# comentario\n10.0.0.5 AA:BB\nnas.local CC:DD\n";
+        assert_eq!(check_pin(pins, "10.0.0.5", "aa:bb"), PinCheck::Trusted);
+        assert_eq!(check_pin(pins, "nas.local", "EE:FF"), PinCheck::Changed("CC:DD".into()));
+        assert_eq!(check_pin(pins, "10.0.0.6", "AA:BB"), PinCheck::New);
+        assert_eq!(forget_pin(pins, "10.0.0.5"), "# comentario\nnas.local CC:DD\n");
+    }
+
+    #[test]
+    fn huella_como_la_muestra_labnas() {
+        let fp = fingerprint(b"abc");
+        assert_eq!(fp.len(), 32 * 3 - 1);
+        assert!(fp.starts_with("BA:78:16:BF"), "{fp}");
+    }
+
+    #[test]
+    fn mismo_host_en_http_y_https() {
+        assert_eq!(url_host("http://10.0.0.5:3001/"), url_host("https://10.0.0.5:3443/x"));
+        assert_ne!(url_host("http://10.0.0.5:3001/"), url_host("https://evil.com/"));
+    }
 }

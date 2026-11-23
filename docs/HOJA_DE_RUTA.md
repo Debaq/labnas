@@ -351,7 +351,7 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
 - [x] Algunos procesos en segundo plano usan la base de datos de forma bloqueante. *(corregido: `db::bg`)*
 - [x] Límites de tiempo para yt-dlp, lp, rsync y ffmpeg.
 - [x] Registrar en la auditoría la apertura de la terminal web.
-- [ ] El visor de escritorio no verifica el certificado del NAS.
+- [x] El visor de escritorio no verifica el certificado del NAS. *(corregido: huella fijada al primer uso)*
 - [x] Revisión automática de dependencias en el CI (cargo-audit, dependabot).
 - [ ] Un tipo de error común en el backend.
 - [ ] SMB/NFS (lo necesita la idea 9).

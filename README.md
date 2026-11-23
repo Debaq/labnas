@@ -417,6 +417,7 @@ labnas-viewer http://192.168.1.10:3001
 - **Icono en la bandeja** (si el escritorio la tiene): cerrar la ventana la oculta y siguen llegando las notificaciones; "Salir" desde la bandeja o `Ctrl+Q` lo cierra
 - Si el servidor aún no responde, muestra una pantalla de espera y carga sola cuando levanta
 - Sesión persistente (localStorage/cookies en `~/.local/share/labnas-viewer`)
+- **HTTPS**: si el servidor tiene HTTPS con redirección, el visor pasa a HTTPS. Un certificado autofirmado se acepta la primera vez y su huella queda en `~/.local/share/labnas-viewer/tls-pins` (como SSH); si después cambia, no se conecta y muestra ambas huellas para compararlas con Configuración > HTTPS. `labnas-viewer --olvidar <host>` borra la huella guardada (por ejemplo, tras regenerar el certificado). Los visores anteriores a v3.5 siguen por HTTP
 - Descargas a `~/Descargas` con notificación; enlaces externos se abren con `xdg-open`
 - Atajos: `F5` recargar, `Ctrl+Q` salir
 
@@ -559,7 +560,7 @@ Activo por defecto en **`https://<servidor>:3443`** (y en 443 si el servicio tie
 
 - **Certificado autofirmado** generado solo para `localhost`, el nombre mDNS, el hostname y las IPs del equipo (10 años; se regenera si vence o con el botón "Regenerar"). El navegador avisa hasta instalarlo en cada equipo: se descarga desde la misma página (`/api/tls/cert.pem`) y se verifica comparando la huella SHA-256
 - **Certificado propio** (válido sin advertencias), por ejemplo con Tailscale: `sudo tailscale cert --cert-file ~/.labnas/tls/ts.crt --key-file ~/.labnas/tls/ts.key <equipo>.<tailnet>.ts.net` y cargar esas rutas. Se recarga en caliente
-- **Redirigir HTTP → HTTPS** (opcional): excluye la ingesta de sensores (un ESP32 rara vez maneja TLS), `/api/health`, `localhost` y el visor de escritorio. Activar/desactivar HTTPS o la redirección se aplica al reiniciar
+- **Redirigir HTTP → HTTPS** (opcional): excluye la ingesta de sensores (un ESP32 rara vez maneja TLS), `/api/health`, `localhost` y los visores de escritorio anteriores a v3.5 (los nuevos fijan el certificado y van por HTTPS). Activar/desactivar HTTPS o la redirección se aplica al reiniciar
 - TLS con rustls + ring (sin OpenSSL ni aws-lc en el servidor)
 
 ## WebDAV (montar como unidad)
