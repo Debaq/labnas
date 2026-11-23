@@ -7,12 +7,9 @@ use super::*;
 // =====================
 
 pub(super) async fn handle_printer_temps(state: &AppState) -> String {
-    let printers = {
-        let conn = match crate::db::get_conn(&state.db) {
-            Ok(c) => c,
-            Err(_) => return "Error de base de datos.".to_string(),
-        };
-        read_printers(&conn).unwrap_or_default()
+    let printers = match crate::db::bg(&state.db, |conn| read_printers(conn).unwrap_or_default()).await {
+        Ok(p) => p,
+        Err(_) => return "Error de base de datos.".to_string(),
     };
 
     if printers.is_empty() {
@@ -110,12 +107,9 @@ pub(super) fn read_printers(conn: &rusqlite::Connection) -> Result<Vec<crate::mo
 }
 
 pub(super) async fn handle_printer_control(state: &AppState, user: &str, text: &str, command: &str) -> String {
-    let printers = {
-        let conn = match crate::db::get_conn(&state.db) {
-            Ok(c) => c,
-            Err(_) => return "Error de base de datos.".to_string(),
-        };
-        read_printers(&conn).unwrap_or_default()
+    let printers = match crate::db::bg(&state.db, |conn| read_printers(conn).unwrap_or_default()).await {
+        Ok(p) => p,
+        Err(_) => return "Error de base de datos.".to_string(),
     };
 
     if printers.is_empty() {
@@ -260,15 +254,12 @@ pub(super) async fn handle_printer_control(state: &AppState, user: &str, text: &
 pub(super) async fn handle_camera(state: &AppState, token: &str, chat_id: i64, text: &str) {
     let arg = text.strip_prefix("/camara").or_else(|| text.strip_prefix("/foto")).unwrap_or("").trim();
 
-    let printers = {
-        let conn = match crate::db::get_conn(&state.db) {
-            Ok(c) => c,
-            Err(_) => {
-                let _ = send_telegram_message(&state.http_client, token, chat_id, "Error de base de datos.").await;
-                return;
-            }
-        };
-        read_printers(&conn).unwrap_or_default()
+    let printers = match crate::db::bg(&state.db, |conn| read_printers(conn).unwrap_or_default()).await {
+        Ok(p) => p,
+        Err(_) => {
+            let _ = send_telegram_message(&state.http_client, token, chat_id, "Error de base de datos.").await;
+            return;
+        }
     };
 
     if printers.is_empty() {

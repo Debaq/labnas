@@ -57,14 +57,8 @@ pub(super) async fn handle_event_command(state: &AppState, creator: &str, text: 
     }
 
     // Notify invitees - read token and chats from DB
-    let (token, chats) = {
-        let conn = match crate::db::get_conn(&state.db) {
-            Ok(c) => c,
-            Err(_) => return format!("📅 Evento *{}* creado\n{} {}\nID: `{}`", title, date, time, id),
-        };
-        let token = read_bot_token(&conn).unwrap_or(None);
-        let chats = read_all_chats(&conn).unwrap_or_default();
-        (token, chats)
+    let Ok((token, chats)) = crate::db::bg(&state.db, read_token_and_chats).await else {
+        return format!("📅 Evento *{}* creado\n{} {}\nID: `{}`", title, date, time, id);
     };
 
     if let Some(token) = token {

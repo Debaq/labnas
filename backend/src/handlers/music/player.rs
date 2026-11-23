@@ -80,17 +80,15 @@ pub(super) async fn spawn_player(state: &AppState, video_id: &str) {
     ];
 
     // Args extra de mpv desde la DB
-    {
-        if let Ok(conn) = crate::db::get_conn(&state.db) {
-            if let Some(args_json) = crate::db::get_setting(&conn, "mpv_extra_args") {
-                if let Ok(extra_args) = serde_json::from_str::<Vec<String>>(&args_json) {
-                    for arg in &extra_args {
-                        let trimmed = arg.trim();
-                        if !trimmed.is_empty() {
-                            args.push(trimmed.to_string());
-                        }
-                    }
-                }
+    let extra = crate::db::bg(&state.db, |conn| crate::db::get_setting(conn, "mpv_extra_args"))
+        .await
+        .ok()
+        .flatten();
+    if let Some(extra_args) = extra.and_then(|j| serde_json::from_str::<Vec<String>>(&j).ok()) {
+        for arg in &extra_args {
+            let trimmed = arg.trim();
+            if !trimmed.is_empty() {
+                args.push(trimmed.to_string());
             }
         }
     }

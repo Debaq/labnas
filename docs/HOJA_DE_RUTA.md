@@ -348,7 +348,7 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
 
 ## Pendientes técnicos (de la auditoría de noviembre 2026)
 
-- [ ] Algunos procesos en segundo plano usan la base de datos de forma bloqueante.
+- [x] Algunos procesos en segundo plano usan la base de datos de forma bloqueante. *(corregido: `db::bg`)*
 - [x] Límites de tiempo para yt-dlp, lp, rsync y ffmpeg.
 - [x] Registrar en la auditoría la apertura de la terminal web.
 - [ ] El visor de escritorio no verifica el certificado del NAS.

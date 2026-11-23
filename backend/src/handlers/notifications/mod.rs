@@ -35,6 +35,8 @@ use {api::*, telegram::*, bot::*, terminal::*, calendar::*, tasks::*, reminders:
 pub use api::{delete_bot_token, delete_chat, get_config, send_test, set_bot_token, set_chat_role, set_schedule};
 pub use bot::telegram_bot_loop;
 pub use reminders::{daily_notification_loop, task_reminder_loop};
+#[cfg(test)]
+pub(crate) use reminders::collect_reminders;
 pub use telegram::{notify_active_chats, notify_admins, notify_admins_photo, notify_staff, notify_users, send_tg_public};
 
 /// Permisos por defecto segun el rol (cuando no se envian explicitamente)
@@ -123,6 +125,11 @@ fn read_bot_token(conn: &rusqlite::Connection) -> Result<Option<String>, String>
     .optional()
     .map_err(|e| format!("DB: {}", e))
     .map(|o| o.flatten())
+}
+
+/// Token del bot y todos los chats, en una sola pasada (para `db::bg`).
+fn read_token_and_chats(conn: &rusqlite::Connection) -> (Option<String>, Vec<TelegramChat>) {
+    (read_bot_token(conn).unwrap_or(None), read_all_chats(conn).unwrap_or_default())
 }
 
 fn read_all_chats(conn: &rusqlite::Connection) -> Result<Vec<TelegramChat>, String> {

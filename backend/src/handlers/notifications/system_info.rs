@@ -67,15 +67,11 @@ pub async fn build_status_message(state: &AppState) -> String {
     let active_hosts = hosts.iter().filter(|h| h.is_alive).count();
     drop(hosts);
 
-    let printer_count = {
-        let conn = crate::db::get_conn(&state.db);
-        match conn {
-            Ok(c) => {
-                c.query_row("SELECT COUNT(*) FROM printers3d", [], |row| row.get::<_, i64>(0)).unwrap_or(0)
-            }
-            Err(_) => 0,
-        }
-    };
+    let printer_count = crate::db::bg(&state.db, |c| {
+        c.query_row("SELECT COUNT(*) FROM printers3d", [], |row| row.get::<_, i64>(0)).unwrap_or(0)
+    })
+    .await
+    .unwrap_or(0);
 
     format!(
         "*LabNAS - Reporte*\n\n\
@@ -226,12 +222,9 @@ pub(super) async fn build_network_message(state: &AppState) -> String {
 }
 
 pub(super) async fn build_printers_message(state: &AppState) -> String {
-    let printers = {
-        let conn = match crate::db::get_conn(&state.db) {
-            Ok(c) => c,
-            Err(_) => return "Error de base de datos.".to_string(),
-        };
-        read_printers(&conn).unwrap_or_default()
+    let printers = match crate::db::bg(&state.db, |conn| read_printers(conn).unwrap_or_default()).await {
+        Ok(p) => p,
+        Err(_) => return "Error de base de datos.".to_string(),
     };
 
     if printers.is_empty() {

@@ -85,3 +85,28 @@ async fn fotos_a_los_admins() {
 
     *TEST_TELEGRAM_BASE.lock().unwrap() = None;
 }
+
+/// Los recordatorios se arman fuera del runtime async y dejan marcado el aviso
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn recordatorio_de_tarea_insistente() {
+    let s = Server::start().await;
+    let collect = || crate::db::bg(&s.state.db, crate::handlers::notifications::collect_reminders);
+
+    // Sin bot no hay nada que mandar
+    assert_eq!(collect().await, Ok(None));
+
+    exec(&s, "UPDATE notification_config SET bot_token = labnas_encrypt('123:abc') WHERE id = 1;
+              INSERT INTO telegram_chats (chat_id, name, role) VALUES (5, 'Ana', 'operador');
+              INSERT INTO tasks (id, title, assigned_to, created_by, insistent, reminder_minutes, created_at)
+              VALUES ('t1', 'Cambiar filamento', '[\"Ana\"]', 'admin', 1, 10, '2026-01-01T00:00:00Z');");
+
+    let (token, msgs) = collect().await.unwrap().expect("debe haber recordatorio");
+    assert_eq!(token, "123:abc");
+    assert_eq!(msgs.len(), 1);
+    assert!(msgs[0].0.contains("Cambiar filamento"), "{}", msgs[0].0);
+    assert_eq!(msgs[0].1, vec![5]);
+
+    // Quedo marcado: en el siguiente minuto no se repite
+    let (_, msgs) = collect().await.unwrap().unwrap();
+    assert!(msgs.is_empty());
+}

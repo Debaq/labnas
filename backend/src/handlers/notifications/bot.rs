@@ -12,18 +12,13 @@ pub async fn telegram_bot_loop(state: AppState) {
 
     loop {
         // Read bot_token and chats from DB (fresh each iteration)
-        let (token, chats) = {
-            let conn = match crate::db::get_conn(&state.db) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("[Telegram] Error DB: {}", e);
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                    continue;
-                }
-            };
-            let token = read_bot_token(&conn).unwrap_or(None);
-            let chats = read_all_chats(&conn).unwrap_or_default();
-            (token, chats)
+        let (token, chats) = match crate::db::bg(&state.db, read_token_and_chats).await {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[Telegram] Error DB: {}", e);
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
         };
 
         let Some(token) = token else {
@@ -101,16 +96,16 @@ pub(super) async fn handle_message(state: &AppState, token: &str, msg: &TgMessag
     if text.starts_with("/start") {
         register_chat(state, token, msg).await;
         // Check if they're pending
-        let role = {
-            let conn = match crate::db::get_conn(&state.db) {
-                Ok(c) => c,
-                Err(_) => return,
-            };
-            read_chat(&conn, chat_id)
+        let Ok(role) = crate::db::bg(&state.db, move |conn| {
+            read_chat(conn, chat_id)
                 .ok()
                 .flatten()
                 .map(|c| c.role)
                 .unwrap_or(UserRole::Pendiente)
+        })
+        .await
+        else {
+            return;
         };
 
         let response = match role {
@@ -123,12 +118,8 @@ pub(super) async fn handle_message(state: &AppState, token: &str, msg: &TgMessag
     }
 
     // Check user role
-    let chat = {
-        let conn = match crate::db::get_conn(&state.db) {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-        read_chat(&conn, chat_id).ok().flatten()
+    let Ok(chat) = crate::db::bg(&state.db, move |conn| read_chat(conn, chat_id).ok().flatten()).await else {
+        return;
     };
 
     let Some(chat) = chat else {
@@ -319,28 +310,29 @@ pub(super) async fn register_chat(state: &AppState, token: &str, msg: &TgMessage
     let username = msg.chat.username.clone();
 
     // Read current state from DB
-    let conn = match crate::db::get_conn(&state.db) {
-        Ok(c) => c,
+    let state_now = crate::db::bg(&state.db, move |conn| {
+        let existing = read_chat(conn, chat_id).unwrap_or(None);
+        let all_chats = read_all_chats(conn).unwrap_or_default();
+        (existing, all_chats)
+    })
+    .await;
+    let (existing, all_chats) = match state_now {
+        Ok(v) => v,
         Err(e) => {
             eprintln!("[Telegram] Error DB en register_chat: {}", e);
             return;
         }
     };
 
-    let existing = read_chat(&conn, chat_id).unwrap_or(None);
-    let all_chats = read_all_chats(&conn).unwrap_or_default();
-    drop(conn);
-
-    if let Some(_existing) = existing {
+    if existing.is_some() {
         // Update existing chat name/username
-        let conn = match crate::db::get_conn(&state.db) {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-        let _ = conn.execute(
-            "UPDATE telegram_chats SET name = ?1, username = ?2 WHERE chat_id = ?3",
-            params![name, username, chat_id],
-        );
+        let _ = crate::db::bg(&state.db, move |conn| {
+            conn.execute(
+                "UPDATE telegram_chats SET name = ?1, username = ?2 WHERE chat_id = ?3",
+                params![name, username, chat_id],
+            )
+        })
+        .await;
         return;
     }
 
@@ -380,14 +372,13 @@ pub(super) async fn register_chat(state: &AppState, token: &str, msg: &TgMessage
     }
 
     // Insert new chat
-    let conn = match crate::db::get_conn(&state.db) {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-    let _ = conn.execute(
-        "INSERT OR REPLACE INTO telegram_chats (chat_id, name, username, role, perm_terminal, perm_impresion, perm_archivos_escritura, linked_web_user, daily_enabled, daily_hour, daily_minute) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, 0, 8, 0)",
-        params![chat_id, name, username, role_str, perms.terminal, perms.impresion, perms.archivos_escritura],
-    );
+    let _ = crate::db::bg(&state.db, move |conn| {
+        conn.execute(
+            "INSERT OR REPLACE INTO telegram_chats (chat_id, name, username, role, perm_terminal, perm_impresion, perm_archivos_escritura, linked_web_user, daily_enabled, daily_hour, daily_minute) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, 0, 8, 0)",
+            params![chat_id, name, username, role_str, perms.terminal, perms.impresion, perms.archivos_escritura],
+        )
+    })
+    .await;
 }
 
 
@@ -614,12 +605,9 @@ pub(super) async fn handle_schedule_command(state: &AppState, chat_id: i64, text
 
     if arg.is_empty() {
         // Show current schedule
-        let chat = {
-            let conn = match crate::db::get_conn(&state.db) {
-                Ok(c) => c,
-                Err(_) => return "Error de base de datos.".to_string(),
-            };
-            read_chat(&conn, chat_id).unwrap_or(None)
+        let chat = match crate::db::bg(&state.db, move |conn| read_chat(conn, chat_id).unwrap_or(None)).await {
+            Ok(c) => c,
+            Err(_) => return "Error de base de datos.".to_string(),
         };
 
         if let Some(chat) = chat {
@@ -633,14 +621,18 @@ pub(super) async fn handle_schedule_command(state: &AppState, chat_id: i64, text
     }
 
     if arg == "off" {
-        let conn = match crate::db::get_conn(&state.db) {
-            Ok(c) => c,
+        let updated = match crate::db::bg(&state.db, move |conn| {
+            conn.execute(
+                "UPDATE telegram_chats SET daily_enabled = 0 WHERE chat_id = ?1",
+                params![chat_id],
+            )
+            .unwrap_or(0)
+        })
+        .await
+        {
+            Ok(n) => n,
             Err(_) => return "Error de base de datos.".to_string(),
         };
-        let updated = conn.execute(
-            "UPDATE telegram_chats SET daily_enabled = 0 WHERE chat_id = ?1",
-            params![chat_id],
-        ).unwrap_or(0);
         if updated > 0 {
             return "Reporte diario *desactivado*.".to_string();
         }
@@ -662,14 +654,18 @@ pub(super) async fn handle_schedule_command(state: &AppState, chat_id: i64, text
         _ => return "Minuto invalido (0-59)".to_string(),
     };
 
-    let conn = match crate::db::get_conn(&state.db) {
-        Ok(c) => c,
+    let updated = match crate::db::bg(&state.db, move |conn| {
+        conn.execute(
+            "UPDATE telegram_chats SET daily_enabled = 1, daily_hour = ?1, daily_minute = ?2 WHERE chat_id = ?3",
+            params![hour, minute, chat_id],
+        )
+        .unwrap_or(0)
+    })
+    .await
+    {
+        Ok(n) => n,
         Err(_) => return "Error de base de datos.".to_string(),
     };
-    let updated = conn.execute(
-        "UPDATE telegram_chats SET daily_enabled = 1, daily_hour = ?1, daily_minute = ?2 WHERE chat_id = ?3",
-        params![hour, minute, chat_id],
-    ).unwrap_or(0);
 
     if updated > 0 {
         format!("Reporte diario activado a las *{:02}:{:02}*", hour, minute)

@@ -927,9 +927,21 @@ where
     })?
 }
 
-/// Get a synchronous connection - for use in background loops
-pub fn get_conn(pool: &DbPool) -> Result<r2d2::PooledConnection<SqliteConnectionManager>, String> {
-    pool.get().map_err(|e| format!("DB pool: {}", e))
+/// Para tareas de fondo y el bot: corre `f` con una conexion en un hilo bloqueante,
+/// asi SQLite no frena a los demas futuros del runtime. Nunca guardes la conexion
+/// mas alla del closure (nada de `.await` con ella en la mano).
+pub async fn bg<F, T>(pool: &DbPool, f: F) -> Result<T, String>
+where
+    F: FnOnce(&Connection) -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let pool = pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get().map_err(|e| format!("DB pool: {}", e))?;
+        Ok(f(&conn))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 // ═══════════════════════════════════════

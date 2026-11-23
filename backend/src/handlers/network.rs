@@ -230,23 +230,22 @@ pub async fn network_scan_loop(state: AppState) {
 
             let mac_map = get_arp_table().await;
 
-            // Load known devices from DB (synchronous)
-            let known: Vec<KnownDevice> = match crate::db::get_conn(&state.db) {
-                Ok(conn) => {
-                    let mut stmt = conn.prepare("SELECT mac, label, icon FROM known_devices")
-                        .unwrap_or_else(|_| conn.prepare("SELECT 1 WHERE 0").unwrap());
-                    stmt.query_map([], |row| {
-                        Ok(KnownDevice {
-                            mac: row.get(0)?,
-                            label: row.get(1)?,
-                            icon: row.get(2)?,
-                        })
+            let known: Vec<KnownDevice> = crate::db::bg(&state.db, |conn| {
+                let Ok(mut stmt) = conn.prepare("SELECT mac, label, icon FROM known_devices") else {
+                    return Vec::new();
+                };
+                stmt.query_map([], |row| {
+                    Ok(KnownDevice {
+                        mac: row.get(0)?,
+                        label: row.get(1)?,
+                        icon: row.get(2)?,
                     })
-                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
-                    .unwrap_or_default()
-                }
-                Err(_) => Vec::new(),
-            };
+                })
+                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                .unwrap_or_default()
+            })
+            .await
+            .unwrap_or_default();
 
             for host in &mut hosts {
                 if let Some(mac) = mac_map.get(&host.ip) {

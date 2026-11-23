@@ -737,16 +737,12 @@ pub async fn receiver_status(
 
 pub async fn serial_listener_loop(state: AppState) {
     loop {
-        let port_path = {
-            let conn = match crate::db::get_conn(&state.db) {
-                Ok(c) => c,
-                Err(_) => {
-                    tokio::time::sleep(Duration::from_secs(10)).await;
-                    continue;
-                }
-            };
-            crate::db::get_setting(&conn, "sensor_serial_port")
-        };
+        let port_path = crate::db::bg(&state.db, |conn| {
+            crate::db::get_setting(conn, "sensor_serial_port")
+        })
+        .await
+        .ok()
+        .flatten();
 
         let Some(port_path) = port_path else {
             tokio::time::sleep(Duration::from_secs(10)).await;
@@ -823,12 +819,12 @@ pub async fn sensor_monitor_loop(state: AppState) {
     loop {
         tokio::time::sleep(Duration::from_secs(3600)).await;
 
-        let retention_days = {
-            let conn = match crate::db::get_conn(&state.db) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-            crate::db::get_setting_u32(&conn, "sensor_retention_days", 30)
+        let Ok(retention_days) = crate::db::bg(&state.db, |conn| {
+            crate::db::get_setting_u32(conn, "sensor_retention_days", 30)
+        })
+        .await
+        else {
+            continue;
         };
 
         let cutoff = (Utc::now() - chrono::Duration::days(retention_days as i64)).to_rfc3339();
