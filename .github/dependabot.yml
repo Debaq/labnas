@@ -1,4 +1,6 @@
-# Actualizaciones de dependencias: un PR semanal por ecosistema (agrupado)
+# Actualizaciones de dependencias: un PR semanal por ecosistema (agrupado), solo parches y
+# versiones menores. Los saltos mayores rompen la API y se hacen a mano (los avisos de
+# seguridad de Dependabot llegan igual: no dependen de esta configuracion).
 version: 2
 updates:
   - package-ecosystem: cargo
@@ -6,6 +8,9 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       rust:
         patterns: ["*"]
@@ -16,6 +21,9 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       npm:
         patterns: ["*"]
