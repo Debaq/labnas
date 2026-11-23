@@ -1,6 +1,7 @@
 //! Playlists guardadas en la base
 
 use super::*;
+use crate::error::db_err;
 
 // ══════════════════════════════════════════
 // Playlists (persisted in DB)
@@ -119,7 +120,7 @@ pub async fn update_playlist(
             params![id],
             row_to_playlist,
         ).optional()
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            .map_err(db_err)?
             .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
 
         if let Some(name) = req.name { pl.name = name; }
@@ -129,7 +130,7 @@ pub async fn update_playlist(
         conn.execute(
             "UPDATE playlists SET name=?1, description=?2, updated_at=?3 WHERE id=?4",
             params![pl.name, pl.description, pl.updated_at, pl.id],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+        ).map_err(db_err)?;
 
         Ok(pl)
     }).await?;
@@ -143,7 +144,7 @@ pub async fn delete_playlist(
 ) -> Result<StatusCode, (StatusCode, String)> {
     crate::db::db_op_status(&state.db, move |conn| {
         let changes = conn.execute("DELETE FROM playlists WHERE id = ?1", params![&id])
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+            .map_err(db_err)?;
         if changes == 0 {
             return Err((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()));
         }
@@ -179,7 +180,7 @@ pub async fn add_track_to_playlist(
             params![id],
             row_to_playlist,
         ).optional()
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            .map_err(db_err)?
             .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
 
         pl.tracks.push(PlaylistTrack {
@@ -196,7 +197,7 @@ pub async fn add_track_to_playlist(
         conn.execute(
             "UPDATE playlists SET tracks=?1, updated_at=?2 WHERE id=?3",
             params![tracks_json, pl.updated_at, pl.id],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+        ).map_err(db_err)?;
 
         Ok(pl)
     }).await?;
@@ -216,7 +217,7 @@ pub async fn remove_track_from_playlist(
             params![id],
             row_to_playlist,
         ).optional()
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            .map_err(db_err)?
             .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
 
         if index >= pl.tracks.len() {
@@ -229,7 +230,7 @@ pub async fn remove_track_from_playlist(
         conn.execute(
             "UPDATE playlists SET tracks=?1, updated_at=?2 WHERE id=?3",
             params![tracks_json, pl.updated_at, pl.id],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+        ).map_err(db_err)?;
 
         Ok(pl)
     }).await?;
@@ -256,7 +257,7 @@ pub async fn move_track_in_playlist(
             params![id],
             row_to_playlist,
         ).optional()
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            .map_err(db_err)?
             .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))?;
 
         if req.from >= pl.tracks.len() || req.to >= pl.tracks.len() {
@@ -270,7 +271,7 @@ pub async fn move_track_in_playlist(
         conn.execute(
             "UPDATE playlists SET tracks=?1, updated_at=?2 WHERE id=?3",
             params![tracks_json, pl.updated_at, pl.id],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+        ).map_err(db_err)?;
 
         Ok(pl)
     }).await?;
@@ -291,7 +292,7 @@ pub async fn load_playlist(
             params![id],
             row_to_playlist,
         ).optional()
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            .map_err(db_err)?
             .ok_or((StatusCode::NOT_FOUND, "Playlist no encontrada".to_string()))
     }).await?;
 

@@ -8,6 +8,7 @@ use crate::models::system::{AutostartStatus, DiskInfo, HealthResponse, SystemInf
 use crate::state::AppState;
 
 use crate::updater::CURRENT_VERSION;
+use crate::error::internal;
 
 fn parse_semver(v: &str) -> Option<(u32, u32, u32)> {
     let v = v.strip_prefix('v').unwrap_or(v);
@@ -122,7 +123,7 @@ pub async fn storage_info() -> Result<Json<Vec<DiskInfo>>, (StatusCode, String)>
         result
     })
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(internal)?;
 
     Ok(Json(disks_info))
 }
@@ -152,7 +153,7 @@ pub async fn system_info_handler() -> Result<Json<SystemInfoResponse>, (StatusCo
         }
     })
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(internal)?;
 
     Ok(Json(info))
 }
@@ -333,7 +334,7 @@ pub async fn do_update(
         .ok_or((StatusCode::NOT_FOUND, "El ultimo release no tiene binario para esta arquitectura".to_string()))?;
 
     crate::updater::install(&state.http_client, &assets).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        .map_err(internal)?;
 
     state.log_activity("Actualizacion", &format!("v{} -> {}", CURRENT_VERSION, assets.tag), "sistema").await;
     request_restart(&state);
@@ -352,7 +353,7 @@ pub async fn reinstall(
         .ok_or((StatusCode::NOT_FOUND, format!("El release {} no tiene binario para esta arquitectura", tag)))?;
 
     crate::updater::install(&state.http_client, &assets).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        .map_err(internal)?;
 
     state.log_activity("Reinstalacion", &tag, "sistema").await;
     request_restart(&state);
@@ -377,7 +378,7 @@ pub async fn do_rollback(
     State(state): State<AppState>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
     let restored = tokio::task::spawn_blocking(crate::updater::swap_rollback).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(internal)?
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
     state.log_activity("Rollback", &format!("v{} -> v{}", CURRENT_VERSION, restored), "sistema").await;
@@ -593,14 +594,14 @@ pub async fn add_service(
             "SELECT COUNT(*) > 0 FROM services WHERE port = ?1",
             params![new_svc.port],
             |row| row.get(0),
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         if exists {
             return Err((StatusCode::CONFLICT, "Ya existe un servicio en ese puerto".to_string()));
         }
         conn.execute(
             "INSERT INTO services (port, name, description, icon) VALUES (?1, ?2, ?3, ?4)",
             params![new_svc.port, new_svc.name, new_svc.description, new_svc.icon],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         Ok(())
     }).await?;
 
@@ -636,7 +637,7 @@ pub async fn update_service(
         let changed = conn.execute(
             "UPDATE services SET name = ?1, port = ?2, description = ?3, icon = ?4 WHERE port = ?5",
             params![updated.name, updated.port, updated.description, updated.icon, port],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         if changed == 0 {
             return Err((StatusCode::NOT_FOUND, "Servicio no encontrado".to_string()));
         }
@@ -653,7 +654,7 @@ pub async fn delete_service(
         let changed = conn.execute(
             "DELETE FROM services WHERE port = ?1",
             params![port],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         if changed == 0 {
             return Err((StatusCode::NOT_FOUND, "Servicio no encontrado".to_string()));
         }

@@ -8,6 +8,7 @@ use rusqlite::params;
 
 use crate::models::portfolio::*;
 use crate::state::AppState;
+use crate::error::internal;
 
 // ── Helpers ──
 
@@ -197,7 +198,7 @@ pub async fn delete_entry(
         let changed = conn.execute(
             "DELETE FROM portfolio_entries WHERE id = ?1",
             params![id],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         if changed == 0 {
             return Err((StatusCode::NOT_FOUND, "Entrada no encontrada".to_string()));
         }
@@ -228,18 +229,18 @@ pub async fn toggle_requirement(
         req.completed = !req.completed;
 
         let new_json = serde_json::to_string(&requirements)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            .map_err(internal)?;
         conn.execute(
             "UPDATE portfolio_entries SET requirements = ?1 WHERE id = ?2",
             params![new_json, id],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
 
         // Return updated full entry
         let entry = conn.query_row(
             &format!("{} WHERE id = ?1", ENTRY_SELECT),
             params![id],
             row_to_entry,
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         Ok(entry)
     }).await?;
 
@@ -268,18 +269,18 @@ pub async fn toggle_milestone(
         mil.completed = !mil.completed;
 
         let new_json = serde_json::to_string(&milestones)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            .map_err(internal)?;
         conn.execute(
             "UPDATE portfolio_entries SET milestones = ?1 WHERE id = ?2",
             params![new_json, id],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
 
         // Return updated full entry
         let entry = conn.query_row(
             &format!("{} WHERE id = ?1", ENTRY_SELECT),
             params![id],
             row_to_entry,
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         Ok(entry)
     }).await?;
 

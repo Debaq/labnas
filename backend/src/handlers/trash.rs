@@ -15,17 +15,12 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use crate::state::{AppState, SessionInfo};
-
-type ApiError = (StatusCode, String);
+use crate::error::{ApiError, internal};
 
 pub const TRASH_DIR: &str = ".labnas-trash";
 const DEFAULT_RETENTION_DAYS: u32 = 30;
 /// Tope de entradas al calcular el tamaño de una carpeta
 const SIZE_WALK_LIMIT: usize = 100_000;
-
-fn internal(e: impl std::fmt::Display) -> ApiError {
-    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TrashItem {

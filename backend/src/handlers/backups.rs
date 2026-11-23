@@ -23,8 +23,7 @@ use std::sync::{LazyLock, Mutex as StdMutex};
 
 use crate::db::DbPool;
 use crate::state::{AppState, SessionInfo};
-
-type ApiError = (StatusCode, String);
+use crate::error::{ApiError, internal};
 
 /// Copias diarias automaticas de labnas.db que se conservan
 const DB_BACKUPS_KEEP: usize = 7;
@@ -286,12 +285,12 @@ pub async fn update_backup(
                  restic_env = COALESCE(labnas_encrypt(?12), restic_env) WHERE id=?9",
                 params![name2, src2, dest2, hour, minute, keep, include_db, enabled, id2, kind, pass, env],
             )
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            .map_err(internal)?;
         if n == 0 {
             return Err((StatusCode::NOT_FOUND, "Respaldo no encontrado".to_string()));
         }
         load_job(conn, &id2)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+            .map_err(internal)?
             .ok_or((StatusCode::NOT_FOUND, "Respaldo no encontrado".to_string()))
     })
     .await?;
@@ -311,10 +310,10 @@ pub async fn delete_backup(
         let name: Option<String> = conn
             .query_row("SELECT name FROM backup_jobs WHERE id = ?1", [&id2], |r| r.get(0))
             .optional()
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            .map_err(internal)?;
         let name = name.ok_or((StatusCode::NOT_FOUND, "Respaldo no encontrado".to_string()))?;
         conn.execute("DELETE FROM backup_jobs WHERE id = ?1", [&id2])
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            .map_err(internal)?;
         Ok(name)
     })
     .await?;
@@ -356,7 +355,7 @@ pub async fn list_snapshots(
             crate::handlers::restic::Repo { repo: &repo, password: &creds.0, env: &creds.1 }.snapshots()
         })
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(internal)?
         .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
         return Ok(Json(snaps));
     }
@@ -414,7 +413,7 @@ pub async fn restore_snapshot(
         crate::handlers::restic::Repo { repo: &repo, password: &creds.0, env: &creds.1 }.restore(&s, &t, Path::new(&src))
     })
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map_err(internal)?
     .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
     state.log_activity("Respaldo restaurado", &format!("{}: {}", job.name, msg), &session.username).await;
     Ok((StatusCode::OK, msg))

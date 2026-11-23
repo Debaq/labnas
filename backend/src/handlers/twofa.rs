@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use super::auth::{bcrypt_hash, bcrypt_verify, login_failed, LOGIN_LOCK_SECS, MAX_LOGIN_FAILURES};
 use crate::state::{AppState, SessionInfo};
 use crate::totp;
+use crate::error::internal;
 
 type ApiResult<T> = Result<T, (StatusCode, String)>;
 
@@ -151,7 +152,7 @@ pub async fn setup(
 
     let secret = totp::new_secret();
     let uri = totp::otpauth_uri(ISSUER, &user, &secret);
-    let qr = totp::qr_svg(&uri).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let qr = totp::qr_svg(&uri).map_err(internal)?;
     if let Ok(mut p) = PENDING.lock() {
         p.retain(|_, (_, at)| at.elapsed() < PENDING_TTL);
         p.insert(user, (secret.clone(), Instant::now()));
@@ -182,7 +183,7 @@ pub async fn enable(
         return Err((StatusCode::UNAUTHORIZED, "Codigo incorrecto: revisa la hora del telefono".to_string()));
     };
 
-    let encrypted = crate::secrets::encrypt(&pending).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let encrypted = crate::secrets::encrypt(&pending).map_err(internal)?;
     let u = user.clone();
     let codes = crate::db::db_op(&state.db, move |conn| {
         conn.execute(

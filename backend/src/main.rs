@@ -17,6 +17,7 @@ mod textutil;
 mod module_tasks;
 mod ledger;
 mod proc;
+mod error;
 
 use axum::{
     http::Method,

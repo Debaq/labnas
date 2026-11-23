@@ -4,6 +4,7 @@ use super::*;
 use crate::db::db_op_status;
 use crate::state::SessionInfo;
 use axum::Extension;
+use crate::error::internal;
 
 // =====================
 // Email filters
@@ -52,7 +53,7 @@ pub async fn add_filter(
             "SELECT filters FROM email_accounts WHERE username = ?1",
             params![&uname],
             |row| row.get(0),
-        ).optional().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).optional().map_err(internal)?;
         let filters_str = row_opt
             .ok_or((StatusCode::NOT_FOUND, "Cuenta de correo no configurada".to_string()))?;
         let mut filters: Vec<EmailFilter> = serde_json::from_str(&filters_str).unwrap_or_default();
@@ -73,7 +74,7 @@ pub async fn add_filter(
         conn.execute(
             "UPDATE email_accounts SET filters = ?1 WHERE username = ?2",
             params![new_json, &uname],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         Ok(())
     }).await?;
     Ok(StatusCode::CREATED)
@@ -93,7 +94,7 @@ pub async fn delete_filter(
             "SELECT filters FROM email_accounts WHERE username = ?1",
             params![&uname],
             |row| row.get(0),
-        ).optional().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).optional().map_err(internal)?;
         let filters_str = row_opt
             .ok_or((StatusCode::NOT_FOUND, "Cuenta no configurada".to_string()))?;
         let mut filters: Vec<EmailFilter> = serde_json::from_str(&filters_str).unwrap_or_default();
@@ -108,7 +109,7 @@ pub async fn delete_filter(
         conn.execute(
             "UPDATE email_accounts SET filters = ?1 WHERE username = ?2",
             params![new_json, &uname],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         Ok(())
     }).await?;
     Ok(StatusCode::NO_CONTENT)

@@ -19,8 +19,7 @@ use crate::db::{db_op, db_op_status};
 use crate::events::{Audience, Level};
 use crate::models::notifications::UserRole;
 use crate::state::{AppState, SessionInfo};
-
-type ApiError = (StatusCode, String);
+use crate::error::{ApiError, internal};
 
 pub(crate) const MODULE: Option<&str> = Some("machines");
 const TIME_FMT: &str = "%Y-%m-%dT%H:%M";
@@ -580,7 +579,7 @@ pub async fn machine_qr(
         return Err(not_found());
     }
     let url = format!("{}/machines/{}", origin, id);
-    let svg = crate::totp::qr_svg(&url).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let svg = crate::totp::qr_svg(&url).map_err(internal)?;
     Ok(Json(QrResp { url, svg }))
 }
 

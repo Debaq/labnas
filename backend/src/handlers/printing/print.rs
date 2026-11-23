@@ -1,6 +1,7 @@
 //! Imprimir (subida o archivo del NAS) y lp
 
 use super::*;
+use crate::error::internal;
 
 // --- Print upload ---
 
@@ -81,10 +82,10 @@ pub async fn print_upload(
     let tmp_file = format!("{}/{}", tmp_path, file_name);
     tokio::fs::create_dir_all(&tmp_path)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(internal)?;
     tokio::fs::write(&tmp_file, &file_data)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(internal)?;
 
     let session = extract_session(&state, &headers).await;
     let is_admin = matches!(&session, Some((_, r)) if *r == crate::models::notifications::UserRole::Admin);

@@ -16,8 +16,7 @@ use crate::db::db_op_status;
 use crate::events::{Audience, Level};
 use crate::handlers::machines::{bad, conflict, db_err, forbidden, is_staff, load_machine, md, not_found, publish, MODULE};
 use crate::state::{AppState, SessionInfo};
-
-type ApiError = (StatusCode, String);
+use crate::error::ApiError;
 
 fn today() -> String {
     Local::now().date_naive().format("%Y-%m-%d").to_string()

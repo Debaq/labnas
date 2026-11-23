@@ -8,6 +8,7 @@ use super::*;
 use axum::Extension;
 
 use crate::state::SessionInfo;
+use crate::error::internal;
 
 const SETTING: &str = "timelapse_config";
 const DEFAULT_INTERVAL: u64 = 30;
@@ -142,7 +143,7 @@ pub async fn set_timelapse(
             .map_err(|_| (StatusCode::BAD_REQUEST, "La carpeta debe estar dentro de las carpetas accesibles".to_string()))?;
         req.dir = resolved.to_string_lossy().to_string();
     }
-    let json = serde_json::to_string(&req).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let json = serde_json::to_string(&req).map_err(internal)?;
     db_op(&state.db, move |conn| crate::db::set_setting(conn, SETTING, &json)).await?;
     state
         .log_activity("Timelapse", &format!("{} impresoras, cada {} s", req.printers.len(), req.interval_secs), &session.username)

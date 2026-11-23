@@ -1,6 +1,7 @@
 //! Trabajos: subir gcode, controlar impresion, archivos de la impresora
 
 use super::*;
+use crate::error::internal;
 
 // =====================
 // Upload gcode
@@ -50,7 +51,7 @@ pub async fn upload_gcode(
             let part = reqwest::multipart::Part::bytes(file_data)
                 .file_name(file_name.clone())
                 .mime_str("application/octet-stream")
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                .map_err(internal)?;
 
             let form = reqwest::multipart::Form::new()
                 .part("file", part)
@@ -86,7 +87,7 @@ pub async fn upload_gcode(
             let part = reqwest::multipart::Part::bytes(file_data)
                 .file_name(file_name.clone())
                 .mime_str("application/octet-stream")
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                .map_err(internal)?;
 
             let form = reqwest::multipart::Form::new().part("file", part);
 
@@ -116,7 +117,7 @@ pub async fn upload_gcode(
             let part = reqwest::multipart::Part::bytes(file_data)
                 .file_name(file_name.clone())
                 .mime_str("application/octet-stream")
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                .map_err(internal)?;
 
             let form = reqwest::multipart::Form::new().part("file", part);
 

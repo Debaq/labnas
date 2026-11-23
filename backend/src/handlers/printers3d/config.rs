@@ -1,6 +1,7 @@
 //! Alta, edicion, secciones, orden y prueba de home
 
 use super::*;
+use crate::error::db_err;
 
 // =====================
 // CRUD básico
@@ -70,7 +71,7 @@ pub async fn update_printer(
             params![id],
             row_to_printer,
         ).optional()
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            .map_err(db_err)?
             .ok_or((StatusCode::NOT_FOUND, "Impresora no encontrada".to_string()))?;
 
         if let Some(name) = req.name { printer.name = name; }
@@ -87,7 +88,7 @@ pub async fn update_printer(
         conn.execute(
             "UPDATE printers3d SET name=?1, ip=?2, port=?3, printer_type=?4, api_key=labnas_encrypt(?5), camera_url=?6, power_watts=?7, electricity_cost_kwh=?8, section_id=?9, \"order\"=?10 WHERE id=?11",
             params![printer.name, printer.ip, printer.port, pt, printer.api_key, printer.camera_url, printer.power_watts, printer.electricity_cost_kwh, printer.section_id, printer.order, printer.id],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+        ).map_err(db_err)?;
 
         Ok(printer)
     }).await?;
@@ -106,12 +107,12 @@ pub async fn delete_printer(
             params![&id],
             |row| row.get(0),
         ).optional()
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+            .map_err(db_err)?;
 
         let name = name.ok_or((StatusCode::NOT_FOUND, "Impresora no encontrada".to_string()))?;
 
         conn.execute("DELETE FROM printers3d WHERE id = ?1", params![&id])
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+            .map_err(db_err)?;
 
         Ok(name)
     }).await?;
@@ -184,7 +185,7 @@ pub async fn update_section(
             params![id],
             |row| Ok(Printer3DSection { id: row.get(0)?, name: row.get(1)?, order: row.get(2)? }),
         ).optional()
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            .map_err(db_err)?
             .ok_or((StatusCode::NOT_FOUND, "Seccion no encontrada".to_string()))?;
 
         if let Some(name) = req.name { section.name = name; }
@@ -193,7 +194,7 @@ pub async fn update_section(
         conn.execute(
             "UPDATE printer3d_sections SET name=?1, \"order\"=?2 WHERE id=?3",
             params![section.name, section.order, section.id],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+        ).map_err(db_err)?;
 
         Ok(section)
     }).await?;
@@ -206,7 +207,7 @@ pub async fn delete_section(
 ) -> Result<StatusCode, (StatusCode, String)> {
     db_op_status(&state.db, move |conn| {
         let changes = conn.execute("DELETE FROM printer3d_sections WHERE id = ?1", params![&id])
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+            .map_err(db_err)?;
         if changes == 0 {
             return Err((StatusCode::NOT_FOUND, "Seccion no encontrada".to_string()));
         }
@@ -225,7 +226,7 @@ pub async fn reorder_printer(
         let changes = conn.execute(
             "UPDATE printers3d SET section_id=?1, \"order\"=?2 WHERE id=?3",
             params![req.section_id, req.order, &id],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+        ).map_err(db_err)?;
         if changes == 0 {
             return Err((StatusCode::NOT_FOUND, "Impresora no encontrada".to_string()));
         }
@@ -233,7 +234,7 @@ pub async fn reorder_printer(
             "SELECT id, name, ip, port, printer_type, labnas_decrypt(api_key), camera_url, power_watts, electricity_cost_kwh, section_id, \"order\" FROM printers3d WHERE id = ?1",
             params![&id],
             row_to_printer,
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))
+        ).map_err(db_err)
     }).await?;
     Ok(Json(updated))
 }

@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use crate::state::{AppState, SessionInfo};
+use crate::error::{ApiError, internal};
 
 pub const HTTPS_PORT: u16 = 3443;
 const SETTING: &str = "tls_config";
@@ -30,7 +31,6 @@ const SELF_SIGNED_YEARS: i32 = 10;
 /// Se regenera si vence antes de esto
 const RENEW_BEFORE_DAYS: i64 = 30;
 
-type ApiError = (StatusCode, String);
 
 /// Config viva del listener HTTPS (para recargar el certificado sin reiniciar)
 static LIVE: OnceLock<axum_server::tls_rustls::RustlsConfig> = OnceLock::new();
@@ -310,11 +310,11 @@ pub async fn set_tls(
             .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
     }
 
-    let json = serde_json::to_string(&req).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let json = serde_json::to_string(&req).map_err(internal)?;
     crate::db::db_op(&state.db, move |conn| crate::db::set_setting(conn, SETTING, &json)).await?;
 
     let (cert, key) = crate::db::db_op(&state.db, |conn| active_paths(conn).map(|(c, k, _)| (c, k))).await?;
-    reload_live(&cert, &key).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    reload_live(&cert, &key).await.map_err(internal)?;
 
     state
         .log_activity(
@@ -340,7 +340,7 @@ pub async fn regenerate(
     let (c2, k2) = (cert.clone(), key.clone());
     crate::db::db_op(&state.db, move |conn| generate_self_signed(local_names(conn), &c2, &k2)).await?;
     let (active_cert, active_key) = crate::db::db_op(&state.db, |conn| active_paths(conn).map(|(c, k, _)| (c, k))).await?;
-    reload_live(&active_cert, &active_key).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    reload_live(&active_cert, &active_key).await.map_err(internal)?;
     state.log_activity("HTTPS", "certificado autofirmado regenerado", &session.username).await;
     Ok(Json(status(&state).await?))
 }

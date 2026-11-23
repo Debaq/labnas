@@ -10,10 +10,10 @@ use rusqlite::Connection;
 use std::path::{Component, Path, PathBuf};
 
 use crate::db::DbPool;
+use crate::error::ApiError;
 
 const SETTING_KEY: &str = "storage_roots";
 
-type ApiError = (StatusCode, String);
 
 fn forbidden(msg: &str) -> ApiError {
     (StatusCode::FORBIDDEN, msg.to_string())

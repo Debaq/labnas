@@ -13,6 +13,7 @@ use std::time::Instant;
 use crate::models::notes::Note;
 use crate::models::notifications::UserRole;
 use crate::state::AppState;
+use crate::error::internal;
 
 fn get_session_user(
     state: &AppState,
@@ -244,7 +245,7 @@ pub async fn download_url(
 
     tokio::fs::create_dir_all(&dest)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(internal)?;
 
     // Se escribe a un temporal nuevo (create_new no sigue symlinks) y se renombra al final
     let file_path = dest.join(&file_name);
@@ -254,7 +255,7 @@ pub async fn download_url(
         .create_new(true)
         .open(&part_path)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(internal)?;
 
     let result: Result<u64, (StatusCode, String)> = async {
         use tokio::io::AsyncWriteExt;
@@ -270,9 +271,9 @@ pub async fn download_url(
             }
             part.write_all(&chunk)
                 .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                .map_err(internal)?;
         }
-        part.flush().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        part.flush().await.map_err(internal)?;
         Ok(size)
     }
     .await;
@@ -597,7 +598,7 @@ pub async fn delete_note(
         let rows = conn.execute(
             "DELETE FROM notes WHERE id = ?1",
             params![&id],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
 
         if rows == 0 {
             return Err((StatusCode::NOT_FOUND, "Nota no encontrada".to_string()));

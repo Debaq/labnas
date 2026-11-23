@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex as StdMutex};
 use std::time::Instant;
+use crate::error::internal;
 
 #[cfg_attr(test, allow(dead_code))]
 const LIST_TIMEOUT: Duration = Duration::from_secs(40);
@@ -614,7 +615,7 @@ pub async fn scan_page(
         Ok::<_, String>((jpeg, (r.width, r.height, r.channels == 1)))
     })
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map_err(internal)?
     .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Imagen del escaner no valida: {}", e)))?;
 
     // Sesion: existente del usuario o nueva
@@ -626,7 +627,7 @@ pub async fn scan_page(
         None => {
             let id = uuid::Uuid::new_v4().simple().to_string();
             let dir = std::env::temp_dir().join(format!("labnas-scan-{}", id));
-            tokio::fs::create_dir_all(&dir).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
             if let Ok(mut s) = SESSIONS.lock() {
                 s.insert(id.clone(), ScanSession { owner: session.username.clone(), dir, pages: Vec::new(), touched: Instant::now() });
             }
@@ -636,7 +637,7 @@ pub async fn scan_page(
     let dir = SESSIONS.lock().ok().and_then(|s| s.get(&id).map(|x| x.dir.clone()));
     let Some(dir) = dir else { return Err((StatusCode::NOT_FOUND, "Sesion vencida".into())) };
     let path = dir.join(format!("{}.jpg", uuid::Uuid::new_v4().simple()));
-    tokio::fs::write(&path, &jpeg).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    tokio::fs::write(&path, &jpeg).await.map_err(internal)?;
     let (width, height, gray) = raster_info;
     let page = ScanPage { path, width, height, dpi, gray, size: jpeg.len() as u64 };
     if let Ok(mut s) = SESSIONS.lock() {
@@ -664,7 +665,7 @@ pub async fn scan_page_image(
 ) -> Result<Response, (StatusCode, String)> {
     let pages = session_pages(&id, &session.username)?;
     let page = pages.get(n).ok_or((StatusCode::NOT_FOUND, "Pagina no encontrada".to_string()))?;
-    let data = tokio::fs::read(&page.path).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let data = tokio::fs::read(&page.path).await.map_err(internal)?;
     Ok((
         [(axum::http::header::CONTENT_TYPE, "image/jpeg"), (axum::http::header::CACHE_CONTROL, "private, max-age=3600")],
         data,
@@ -714,7 +715,7 @@ async fn render(pages: &[ScanPage], format: ScanFormat, base: &str) -> Result<Ve
     }
     let mut jpegs = Vec::with_capacity(pages.len());
     for p in pages {
-        jpegs.push(tokio::fs::read(&p.path).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?);
+        jpegs.push(tokio::fs::read(&p.path).await.map_err(internal)?);
     }
     Ok(match format {
         ScanFormat::Pdf => {
@@ -763,8 +764,8 @@ pub async fn download_scan(
     } else {
         let zip = tokio::task::spawn_blocking(move || zip_files(&files))
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+            .map_err(internal)?
+            .map_err(internal)?;
         (format!("{}.zip", base), zip, "application/zip")
     };
     let disposition = format!("attachment; filename*=UTF-8''{}", urlencoding::encode(&name));

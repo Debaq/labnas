@@ -13,6 +13,7 @@ use rusqlite::params;
 use crate::db::{db_op, db_op_status};
 use crate::models::printers3d::*;
 use crate::state::AppState;
+use crate::error::db_err;
 
 
 mod creality;
@@ -83,7 +84,7 @@ async fn find_printer(
             row_to_printer,
         )
         .optional()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+        .map_err(db_err)?
         .ok_or((StatusCode::NOT_FOUND, "Impresora no encontrada".to_string()))
     })
     .await

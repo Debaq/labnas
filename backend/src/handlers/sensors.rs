@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use crate::models::sensors::*;
 use crate::state::AppState;
+use crate::error::internal;
 
 // ═══════════════════════════════════════
 // Dispositivos
@@ -76,7 +77,7 @@ pub async fn register_device(
             "INSERT INTO sensor_devices (id, name, mac, device_type, connection, status, config, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![d.id, d.name, d.mac, d.device_type, d.connection, d.status, d.config, d.created_at],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         Ok(())
     }).await?;
 
@@ -91,7 +92,7 @@ pub async fn delete_device(
     let id_clone = id.clone();
     crate::db::db_op_status(&state.db, move |conn| {
         let changed = conn.execute("DELETE FROM sensor_devices WHERE id = ?1", params![id_clone])
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            .map_err(internal)?;
         if changed == 0 {
             return Err((StatusCode::NOT_FOUND, "Dispositivo no encontrado".to_string()));
         }
@@ -120,7 +121,7 @@ pub async fn update_device_status(
         let changed = conn.execute(
             "UPDATE sensor_devices SET status = ?1 WHERE id = ?2",
             params![status, id_clone],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         if changed == 0 {
             return Err((StatusCode::NOT_FOUND, "Dispositivo no encontrado".to_string()));
         }
@@ -145,7 +146,7 @@ pub async fn update_device_name(
         let changed = conn.execute(
             "UPDATE sensor_devices SET name = ?1 WHERE id = ?2",
             params![name, id_clone],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         if changed == 0 {
             return Err((StatusCode::NOT_FOUND, "Dispositivo no encontrado".to_string()));
         }
@@ -306,7 +307,7 @@ pub async fn process_sensor_data(
                     "INSERT INTO sensor_devices (id, name, mac, connection, status, created_at)
                      VALUES (?1, '', ?2, 'espnow', 'pending', ?3)",
                     params![id, mac_clone, now_clone],
-                ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                ).map_err(internal)?;
                 Ok(id)
             }
         }
@@ -503,7 +504,7 @@ pub async fn get_readings(
 
         let params_ref: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|p| p.as_ref()).collect();
         let mut stmt = conn.prepare(&sql)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            .map_err(internal)?;
         let rows = stmt.query_map(params_ref.as_slice(), |row| {
             Ok(SensorReading {
                 id: row.get(0)?,
@@ -513,10 +514,10 @@ pub async fn get_readings(
                 unit: row.get(4)?,
                 timestamp: row.get(5)?,
             })
-        }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        }).map_err(internal)?;
         let mut result = Vec::new();
         for row in rows {
-            result.push(row.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?);
+            result.push(row.map_err(internal)?);
         }
         Ok(result)
     }).await?;
@@ -631,7 +632,7 @@ pub async fn create_alert(
             "INSERT INTO sensor_alerts (id, device_id, key, condition, threshold, enabled, cooldown_minutes)
              VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)",
             params![a.id, a.device_id, a.key, a.condition, a.threshold, a.cooldown_minutes],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         Ok(())
     }).await?;
     Ok(Json(alert))
@@ -672,7 +673,7 @@ pub async fn update_alert(
         let sql = format!("UPDATE sensor_alerts SET {} WHERE id = ?", sets.join(", "));
         let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|p| p.as_ref()).collect();
         let changed = conn.execute(&sql, params_ref.as_slice())
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            .map_err(internal)?;
         if changed == 0 {
             return Err((StatusCode::NOT_FOUND, "Alerta no encontrada".to_string()));
         }
@@ -687,7 +688,7 @@ pub async fn delete_alert(
 ) -> Result<StatusCode, (StatusCode, String)> {
     crate::db::db_op_status(&state.db, move |conn| {
         let changed = conn.execute("DELETE FROM sensor_alerts WHERE id = ?1", params![id])
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            .map_err(internal)?;
         if changed == 0 {
             return Err((StatusCode::NOT_FOUND, "Alerta no encontrada".to_string()));
         }
@@ -709,7 +710,7 @@ pub async fn configure_receiver(
         conn.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES ('sensor_serial_port', ?1)",
             params![port],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         Ok(())
     }).await?;
 

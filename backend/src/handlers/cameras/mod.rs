@@ -22,13 +22,13 @@ use std::time::{Duration, Instant};
 use crate::db::db_op;
 use crate::events::Audience;
 use crate::state::{AppState, SessionInfo};
+use crate::error::{ApiError, internal};
 
 pub mod hub;
 pub mod vision;
 pub mod detect;
 use hub::{Audio, CamSpec, Input};
 
-type ApiError = (StatusCode, String);
 
 const FOLDER_SETTING: &str = "cameras_folder";
 const MAX_MINUTES_SETTING: &str = "cameras_max_minutes";
@@ -284,7 +284,7 @@ pub async fn create_camera(
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
     validate(&body, false)?;
     let id = uuid::Uuid::new_v4().simple().to_string();
-    let url = if body.kind == "ip" { Some(crate::secrets::encrypt(body.url.trim()).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?) } else { None };
+    let url = if body.kind == "ip" { Some(crate::secrets::encrypt(body.url.trim()).map_err(internal)?) } else { None };
     let (id2, name) = (id.clone(), body.name.trim().to_string());
     let resolution = if body.kind == "usb" { body.resolution.clone() } else { String::new() };
     let device = if body.kind == "usb" { body.device.clone() } else { String::new() };
@@ -321,7 +321,7 @@ pub async fn update_camera(
         _ => None,
     };
     let url_enc = match url {
-        Some(u) => Some(crate::secrets::encrypt(&u).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?),
+        Some(u) => Some(crate::secrets::encrypt(&u).map_err(internal)?),
         None => None,
     };
     let name = body.name.trim().to_string();
@@ -642,9 +642,9 @@ pub async fn take_photo(
     let cam = find_camera(&state, &id).await?;
     let (dir, _) = target_dir(&state, &cam).await?;
     let frame = current_frame(&state, &cam).await?;
-    tokio::fs::create_dir_all(&dir).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
     let path = dir.join(format!("{}.jpg", file_stamp(&session.username)));
-    tokio::fs::write(&path, &frame).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    tokio::fs::write(&path, &frame).await.map_err(internal)?;
     let rid = uuid::Uuid::new_v4().simple().to_string();
     insert_record(&state, &rid, &cam, "foto", &session.username, &path, Some(frame.len() as u64)).await?;
     state.log_activity("Camara", &format!("Tomo una foto con {} ({})", cam.name, path.display()), &session.username).await;
@@ -869,8 +869,8 @@ pub async fn download_recording(
             vision::encode_jpeg(&vision::downscale(&img, THUMB_W), 70)
         })
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        .map_err(internal)?
+        .map_err(internal)?;
         return Ok((
             [(header::CONTENT_TYPE, "image/jpeg".to_string()), (header::CACHE_CONTROL, "private, max-age=86400".to_string())],
             thumb,

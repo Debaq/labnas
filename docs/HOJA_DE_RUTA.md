@@ -353,7 +353,7 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
 - [x] Registrar en la auditoría la apertura de la terminal web.
 - [x] El visor de escritorio no verifica el certificado del NAS. *(corregido: huella fijada al primer uso)*
 - [x] Revisión automática de dependencias en el CI (cargo-audit, dependabot).
-- [ ] Un tipo de error común en el backend.
+- [x] Un tipo de error común en el backend. *(`error.rs`: `ApiError`, `internal`, `db_err`)*
 - [ ] SMB/NFS (lo necesita la idea 9).
 - [ ] Partir las páginas grandes del frontend (impresoras 3D, tareas, ajustes).
 

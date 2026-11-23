@@ -13,6 +13,7 @@ use std::{
 
 use crate::models::network::{KnownDevice, LabelRequest, NetworkHost};
 use crate::state::AppState;
+use crate::error::internal;
 
 /// Dispositivos conocidos que no respondieron: se listan apagados (con su ultima IP
 /// conocida) para poder encenderlos por Wake-on-LAN.
@@ -322,7 +323,7 @@ pub async fn unlabel_host(
         let rows = conn.execute(
             "DELETE FROM known_devices WHERE UPPER(mac) = ?1",
             params![&mac_clone],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
 
         if rows == 0 {
             return Err((StatusCode::NOT_FOUND, "Dispositivo no encontrado".to_string()));
@@ -603,8 +604,8 @@ pub async fn wake_host(
 
     let socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    socket.set_broadcast(true).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(internal)?;
+    socket.set_broadcast(true).map_err(internal)?;
 
     // broadcast global y de la subred local (/24), puertos habituales 9 y 7
     let mut targets = vec!["255.255.255.255".to_string()];

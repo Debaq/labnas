@@ -23,6 +23,7 @@ use tokio::sync::broadcast;
 
 use crate::models::notifications::UserRole;
 use crate::state::{AppState, SessionInfo};
+use crate::error::internal;
 
 const BUS_CAPACITY: usize = 256;
 const TICKET_TTL: Duration = Duration::from_secs(30);
@@ -254,7 +255,7 @@ pub async fn create_ticket(Extension(token): Extension<SessionToken>) -> Result<
     let ticket = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
     let mut tickets = TICKETS
         .lock()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(internal)?;
     tickets.retain(|_, (_, created)| created.elapsed() < TICKET_TTL);
     tickets.insert(ticket.clone(), (token.0, Instant::now()));
     Ok(Json(ticket))

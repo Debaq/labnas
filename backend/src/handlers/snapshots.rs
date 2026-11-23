@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use crate::db::db_op;
 use crate::state::{AppState, SessionInfo};
+use crate::error::{ApiError, internal};
 
 const WRAPPER: &str = "/usr/local/lib/labnas/snapshot";
 
@@ -21,7 +22,6 @@ const WRAPPER: &str = "/usr/local/lib/labnas/snapshot";
 #[cfg(test)]
 pub static TEST_COMMAND: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
 
-type ApiError = (StatusCode, String);
 
 fn run(args: &[&str]) -> Result<String, String> {
     #[cfg(test)]
@@ -109,7 +109,7 @@ fn collect() -> (bool, Option<String>, Vec<PathSnapshots>) {
 /// GET /api/snapshots
 pub async fn get_snapshots(State(state): State<AppState>) -> Result<Json<SnapshotsView>, ApiError> {
     let config = db_op(&state.db, |conn| Ok(load_config(conn))).await?;
-    let (ready, error, paths) = tokio::task::spawn_blocking(collect).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let (ready, error, paths) = tokio::task::spawn_blocking(collect).await.map_err(internal)?;
     Ok(Json(SnapshotsView { ready, error, config, paths }))
 }
 
@@ -176,7 +176,7 @@ pub async fn snapshot_now(
     let keep = db_op(&state.db, |conn| Ok(load_config(conn).keep)).await?;
     let (created, errors) = tokio::task::spawn_blocking(move || snapshot_all(keep))
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(internal)?;
     state.log_activity("snapshot_manual", &format!("{} creados, {} errores", created.len(), errors.len()), &session.username).await;
     if created.is_empty() && !errors.is_empty() {
         return Err((StatusCode::BAD_GATEWAY, errors.join(" | ")));

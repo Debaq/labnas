@@ -17,8 +17,7 @@ use std::path::Path;
 use crate::ledger::{self, Entry, VerifyReport, KIND_ANNUL, KIND_NOTE};
 use crate::state::{AppState, SessionInfo};
 use crate::storage::{Op, Storage};
-
-type ApiError = (StatusCode, String);
+use crate::error::{ApiError, internal};
 
 const MAX_PAGE: u32 = 500;
 const MAX_TITLE: usize = 200;
@@ -173,7 +172,7 @@ fn hash_file(path: &Path) -> std::io::Result<(String, u64)> {
 async fn hash_file_async(path: std::path::PathBuf) -> Result<(String, u64), ApiError> {
     tokio::task::spawn_blocking(move || hash_file(&path))
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(internal)?
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("No se pudo leer el archivo: {}", e)))
 }
 

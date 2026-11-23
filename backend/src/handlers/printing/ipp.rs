@@ -22,6 +22,7 @@ use std::net::SocketAddr;
 use std::sync::{LazyLock, Mutex as StdMutex};
 use std::time::Instant;
 use tokio::io::AsyncWriteExt;
+use crate::error::internal;
 
 pub const IPP_PORT_DEFAULT: u16 = 8631;
 /// Cabecera IPP maxima (los atributos; el documento va aparte)
@@ -278,7 +279,7 @@ pub async fn regenerate_ipp_token(
     axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
 ) -> Result<Json<IppInfo>, (StatusCode, String)> {
     let token = new_token();
-    let enc = crate::secrets::encrypt(&token).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let enc = crate::secrets::encrypt(&token).map_err(internal)?;
     let (u, hash) = (session.username.clone(), token_hash(&token));
     db_op(&state.db, move |conn| {
         conn.execute(

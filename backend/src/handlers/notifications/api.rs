@@ -1,6 +1,7 @@
 //! Endpoints HTTP de configuracion del bot
 
 use super::*;
+use crate::error::db_err;
 
 // =====================
 // API Handlers
@@ -104,7 +105,7 @@ pub async fn set_chat_role(
                 params![chat_id],
                 |row| row.get::<_, i64>(0),
             )
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            .map_err(db_err)?
             > 0;
 
         if !exists {
@@ -115,7 +116,7 @@ pub async fn set_chat_role(
             "UPDATE telegram_chats SET role = ?1, perm_terminal = ?2, perm_impresion = ?3, perm_archivos_escritura = ?4 WHERE chat_id = ?5",
             params![role_str, perms_clone.terminal, perms_clone.impresion, perms_clone.archivos_escritura, chat_id],
         )
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+        .map_err(db_err)?;
 
         // Get linked web user
         let linked: Option<String> = conn
@@ -125,7 +126,7 @@ pub async fn set_chat_role(
                 |row| row.get(0),
             )
             .optional()
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?
+            .map_err(db_err)?
             .flatten();
 
         // Sync role to linked web user
@@ -134,7 +135,7 @@ pub async fn set_chat_role(
                 "UPDATE web_users SET role = ?1, perm_terminal = ?2, perm_impresion = ?3, perm_archivos_escritura = ?4 WHERE username = ?5",
                 params![role_str, perms_clone.terminal, perms_clone.impresion, perms_clone.archivos_escritura, username],
             )
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+            .map_err(db_err)?;
         }
 
         Ok(linked)
@@ -162,7 +163,7 @@ pub async fn delete_chat(
     crate::db::db_op_status(&state.db, move |conn| {
         let deleted = conn
             .execute("DELETE FROM telegram_chats WHERE chat_id = ?1", params![chat_id])
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB: {}", e)))?;
+            .map_err(db_err)?;
 
         if deleted == 0 {
             return Err((StatusCode::NOT_FOUND, "Chat no encontrado".to_string()));

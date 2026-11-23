@@ -8,6 +8,7 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use crate::state::AppState;
+use crate::error::internal;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserReport {
@@ -183,7 +184,7 @@ pub async fn respond_report(
             "UPDATE user_reports SET status = ?1, admin_response = ?2, responded_at = ?3 WHERE id = ?4",
             params![req.status, req.admin_response, now, id],
         )
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(internal)?;
 
         conn.query_row(
             "SELECT id, report_type, title, description, submitted_by, status, admin_response, created_at, responded_at

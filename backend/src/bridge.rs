@@ -26,6 +26,7 @@ use tower::ServiceExt;
 
 use crate::db::db_op;
 use crate::state::{AppState, SessionInfo};
+use crate::error::internal;
 
 /// Marca de los pedidos que llegaron por el puente
 #[derive(Debug, Clone)]
@@ -649,8 +650,8 @@ pub async fn download_package() -> Result<impl IntoResponse, (StatusCode, String
     let dir = crate::static_dir();
     let data = tokio::task::spawn_blocking(move || build_package(dir.as_deref()))
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        .map_err(internal)?
+        .map_err(internal)?;
     let name = format!("labnas-conector-{}.zip", crate::updater::CURRENT_VERSION);
     Ok((
         [

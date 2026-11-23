@@ -27,6 +27,7 @@ use std::time::{Duration, Instant};
 
 use crate::db::{db_op, db_op_status};
 use crate::state::{AppState, SessionInfo};
+use crate::error::{ApiError, internal};
 
 const CHALLENGE_TTL: Duration = Duration::from_secs(300);
 const ALG_ES256: i64 = -7;
@@ -34,7 +35,6 @@ const ALG_RS256: i64 = -257;
 const FLAG_UP: u8 = 0x01;
 const FLAG_AT: u8 = 0x40;
 
-type ApiError = (StatusCode, String);
 
 fn bad(m: &str) -> ApiError {
     (StatusCode::BAD_REQUEST, m.to_string())
@@ -308,7 +308,7 @@ pub async fn register(
         let exists: Option<String> = conn
             .query_row("SELECT id FROM webauthn_credentials WHERE id = ?1", [&id], |r| r.get(0))
             .optional()
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            .map_err(internal)?;
         if exists.is_some() {
             return Err((StatusCode::CONFLICT, "Esa passkey ya esta registrada".to_string()));
         }
@@ -317,7 +317,7 @@ pub async fn register(
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![id, u, nm, r, alg, key, count as i64, chrono::Utc::now().to_rfc3339()],
         )
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(internal)?;
         Ok(())
     })
     .await?;

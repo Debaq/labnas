@@ -9,6 +9,7 @@ use serde::Deserialize;
 
 use crate::models::inventory::*;
 use crate::state::AppState;
+use crate::error::internal;
 
 // ── Categories ──
 
@@ -83,7 +84,7 @@ pub async fn update_category(
         let changed = conn.execute(
             "UPDATE inventory_categories SET name = ?1, icon = ?2, description = ?3 WHERE id = ?4",
             params![name, icon, description, id_clone],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         if changed == 0 {
             return Err((StatusCode::NOT_FOUND, "Categoria no encontrada".to_string()));
         }
@@ -100,7 +101,7 @@ pub async fn delete_category(
         let changed = conn.execute(
             "DELETE FROM inventory_categories WHERE id = ?1",
             params![id],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         if changed == 0 {
             return Err((StatusCode::NOT_FOUND, "Categoria no encontrada".to_string()));
         }
@@ -257,7 +258,7 @@ pub async fn delete_item(
         let changed = conn.execute(
             "DELETE FROM inventory_items WHERE id = ?1",
             params![id],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         if changed == 0 {
             return Err((StatusCode::NOT_FOUND, "Item no encontrado".to_string()));
         }
@@ -358,7 +359,7 @@ pub async fn delete_print_history(
         let changed = conn.execute(
             "DELETE FROM print_history WHERE id = ?1",
             params![id],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
         if changed == 0 {
             return Err((StatusCode::NOT_FOUND, "Entrada no encontrada".to_string()));
         }

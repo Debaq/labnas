@@ -9,6 +9,7 @@ use rusqlite::{params, OptionalExtension};
 use crate::models::auth::*;
 use crate::models::notifications::{UserPermissions, UserRole};
 use crate::state::{now_unix, AppState, LoginFailures, SessionInfo, SESSION_TTL_SECS};
+use crate::error::internal;
 
 /// Intentos fallidos antes de bloquear el login de un usuario
 pub(crate) const MAX_LOGIN_FAILURES: u32 = 5;
@@ -107,7 +108,7 @@ pub(crate) async fn bcrypt_verify(password: String, hash: String) -> bool {
 pub(crate) async fn bcrypt_hash(password: String) -> Result<String, (StatusCode, String)> {
     tokio::task::spawn_blocking(move || bcrypt::hash(&password, 10))
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(internal)?
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Error hasheando contrasena".to_string()))
 }
 
@@ -222,7 +223,7 @@ pub async fn register(
     let (role, permissions) = crate::db::db_op_status(&state.db, move |conn| {
         // IMMEDIATE: dos registros simultaneos no pueden crear dos admins
         let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            .map_err(internal)?;
         let conn = &*tx;
 
         // Check if user already exists
@@ -230,7 +231,7 @@ pub async fn register(
             "SELECT COUNT(*) FROM web_users WHERE username = ?1",
             params![&username_clone],
             |row| row.get::<_, i64>(0),
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        ).map_err(internal)?
         > 0;
 
         if exists {
@@ -240,7 +241,7 @@ pub async fn register(
         // Primer usuario = admin; el resto queda pendiente hasta que un admin lo apruebe
         let user_count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM web_users", [], |row| row.get(0),
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
 
         let is_first = user_count == 0;
         let (role, permissions) = if is_first {
@@ -260,9 +261,9 @@ pub async fn register(
                 &username_clone, &password_hash, role_to_str(&role),
                 permissions.terminal, permissions.impresion, permissions.archivos_escritura,
             ],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
 
-        tx.commit().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        tx.commit().map_err(internal)?;
         Ok((role, permissions))
     }).await?;
 
@@ -514,7 +515,7 @@ pub async fn change_password(
             params![&username_clone],
             |row| row.get::<_, String>(0),
         ).optional()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(internal)?
         .ok_or((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()))
     }).await?;
 
@@ -631,7 +632,7 @@ pub async fn set_user_role(
                     params![&username_clone],
                     |r| Ok((r.get::<_, Option<bool>>(0)?.unwrap_or(false), r.get(1)?)),
                 )
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                .map_err(internal)?;
             if was_admin && admins <= 1 {
                 return Err((StatusCode::BAD_REQUEST, "Es el unico administrador: nombra a otro antes".to_string()));
             }
@@ -641,7 +642,7 @@ pub async fn set_user_role(
             "UPDATE web_users SET role = ?1, perm_terminal = ?2, perm_impresion = ?3, perm_archivos_escritura = ?4
              WHERE username = ?5",
             params![&role_str, permissions.terminal, permissions.impresion, permissions.archivos_escritura, &username_clone],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
 
         if rows == 0 {
             return Err((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()));
@@ -653,7 +654,7 @@ pub async fn set_user_role(
             params![&username_clone],
             |row| row.get(0),
         ).optional()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(internal)?
         .flatten();
 
         // Sync role to linked telegram chat
@@ -662,7 +663,7 @@ pub async fn set_user_role(
                 "UPDATE telegram_chats SET role = ?1, perm_terminal = ?2, perm_impresion = ?3, perm_archivos_escritura = ?4
                  WHERE chat_id = ?5",
                 params![&role_str, new_perms.terminal, new_perms.impresion, new_perms.archivos_escritura, tg_id],
-            ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            ).map_err(internal)?;
         }
 
         Ok(linked)
@@ -696,7 +697,7 @@ pub async fn delete_user(
         let rows = conn.execute(
             "DELETE FROM web_users WHERE username = ?1",
             params![&username_clone],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
 
         if rows == 0 {
             return Err((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()));
@@ -746,7 +747,7 @@ pub async fn rename_user(
             "SELECT COUNT(*) FROM web_users WHERE username = ?1",
             params![&new_clone],
             |row| row.get::<_, i64>(0),
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        ).map_err(internal)?
         > 0;
 
         if exists {
@@ -761,7 +762,7 @@ pub async fn rename_user(
                 params![&old_clone],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
             ).optional()
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .map_err(internal)?
             .ok_or((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()))?;
 
         // Insert new row with new username
@@ -769,25 +770,25 @@ pub async fn rename_user(
             "INSERT INTO web_users (username, password_hash, role, perm_terminal, perm_impresion, perm_archivos_escritura, linked_telegram)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![&new_clone, &password_hash, &role_str, perm_t, perm_i, perm_a, linked_tg],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
 
         // Mover sesiones a la fila nueva antes de borrar la vieja (FK ON DELETE CASCADE)
         conn.execute(
             "UPDATE sessions SET username = ?1 WHERE username = ?2",
             params![&new_clone, &old_clone],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
 
         // Delete old row
         conn.execute(
             "DELETE FROM web_users WHERE username = ?1",
             params![&old_clone],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
 
         // Update linked_web_user in telegram_chats
         conn.execute(
             "UPDATE telegram_chats SET linked_web_user = ?1 WHERE linked_web_user = ?2",
             params![&new_clone, &old_clone],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
 
         let role = role_from_str(&role_str);
         let permissions = UserPermissions {
@@ -871,7 +872,7 @@ pub async fn admin_link_chat(
             params![&web_username],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         ).optional()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(internal)?
         .ok_or((StatusCode::NOT_FOUND, "Usuario web no encontrado".to_string()))?;
 
         // Check chat exists
@@ -879,7 +880,7 @@ pub async fn admin_link_chat(
             "SELECT COUNT(*) FROM telegram_chats WHERE chat_id = ?1",
             params![chat_id],
             |row| row.get::<_, i64>(0),
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        ).map_err(internal)?
         > 0;
 
         if !chat_exists {
@@ -891,13 +892,13 @@ pub async fn admin_link_chat(
             "UPDATE telegram_chats SET linked_web_user = ?1, role = ?2, perm_terminal = ?3, perm_impresion = ?4, perm_archivos_escritura = ?5
              WHERE chat_id = ?6",
             params![&web_username, &role_str, perm_t, perm_i, perm_a, chat_id],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
 
         // Link web user back
         conn.execute(
             "UPDATE web_users SET linked_telegram = ?1 WHERE username = ?2",
             params![chat_id, &web_username],
-        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        ).map_err(internal)?;
 
         Ok(())
     }).await?;

@@ -29,6 +29,7 @@ use super::{bad, find_camera, hub, insert_record, safe_component, target_dir, Ap
 use crate::db::db_op;
 use crate::events::Audience;
 use crate::state::{AppState, SessionInfo};
+use crate::error::internal;
 
 const MODEL_URL: &str = "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.onnx";
 const MODEL_SHA256: &str = "c789161ed43c8269fcd4e67c67eeeb4e80c622da2eb296a20bc6007bd18a0b7d";
@@ -785,7 +786,7 @@ pub async fn test_detector(State(state): State<AppState>, Json(input): Json<Rule
         vision::encode_jpeg(&img, 80)
     })
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map_err(internal)?
     .map_err(bad_gw)?;
     use base64::Engine;
     Ok(Json(TestResult { detections: dets, image: base64::engine::general_purpose::STANDARD.encode(image) }))

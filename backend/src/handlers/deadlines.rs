@@ -19,8 +19,7 @@ use crate::events::{Audience, Level};
 use crate::models::notifications::UserRole;
 use crate::models::portfolio::Milestone;
 use crate::state::{AppState, SessionInfo};
-
-type ApiError = (StatusCode, String);
+use crate::error::ApiError;
 
 const MODULE: Option<&str> = Some("deadlines");
 pub const CATEGORIES: &[&str] = &[

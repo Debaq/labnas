@@ -25,8 +25,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::state::{AppState, SessionInfo};
 use crate::storage::{self, Op};
-
-type ApiError = (StatusCode, String);
+use crate::error::{ApiError, internal};
 
 /// Una subida sin actividad por este tiempo se descarta
 const IDLE_TTL: Duration = Duration::from_secs(3600);
@@ -43,10 +42,6 @@ struct Upload {
 }
 
 static UPLOADS: LazyLock<StdMutex<HashMap<String, Upload>>> = LazyLock::new(Default::default);
-
-fn internal(e: impl std::fmt::Display) -> ApiError {
-    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-}
 
 /// Borra subidas abandonadas (y sus temporales)
 fn purge_idle() {

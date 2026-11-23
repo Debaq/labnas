@@ -1,6 +1,7 @@
 //! Asistente de doble cara manual
 
 use super::*;
+use crate::error::internal;
 
 /// Valida que un temp_id tenga formato UUID seguro
 pub(super) fn validate_temp_id(id: &str) -> Result<(), (StatusCode, String)> {
@@ -67,10 +68,10 @@ pub async fn duplex_prepare(
 
     tokio::fs::create_dir_all(&tmp_path)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(internal)?;
     tokio::fs::write(&tmp_file, &file_data)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(internal)?;
 
     let page_count = count_file_pages(&tmp_file).await;
 

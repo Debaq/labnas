@@ -13,12 +13,7 @@ use crate::config::resolve_home;
 use crate::models::files::{FileEntry, MkdirRequest, PathQuery, QuickAccess};
 use crate::state::{AppState, SessionInfo};
 use crate::storage::{self, Op};
-
-type ApiError = (StatusCode, String);
-
-fn internal(e: impl std::fmt::Display) -> ApiError {
-    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-}
+use crate::error::{ApiError, internal};
 
 /// Las raices como carpetas (vista de "/" cuando "/" no es una raiz)
 fn roots_as_entries(roots: &[PathBuf]) -> Vec<FileEntry> {
