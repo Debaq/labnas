@@ -224,11 +224,11 @@ async fn deteccion_con_ia() {
     assert!(det["tg_error"].as_str().unwrap().contains("bot"), "{}", det["tg_error"]);
     // Filtros y paginacion
     assert_eq!(count_detections(&s, &admin, &format!("rule={}", rule_id)).await, 1);
-    assert_eq!(count_detections(&s, &admin, &"rule=otra".into()).await, 0);
+    assert_eq!(count_detections(&s, &admin, "rule=otra").await, 0);
     assert_eq!(count_detections(&s, &admin, &format!("camera={}", cam)).await, 1);
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     assert_eq!(count_detections(&s, &admin, &format!("day={}", today)).await, 1);
-    assert_eq!(count_detections(&s, &admin, &"day=2020-01-01".into()).await, 0);
+    assert_eq!(count_detections(&s, &admin, "day=2020-01-01").await, 0);
     assert_eq!(count_detections(&s, &admin, &format!("before={}", urlencoding::encode(det["at"].as_str().unwrap()))).await, 0);
     assert_eq!(s.get("/api/cameras/detections?day=ayer", &admin).await.status, 400);
     // El operador no ve ni descarga lo que hizo la IA

@@ -251,8 +251,10 @@ function DetectionViewer({ list, start, describe, onClose }: {
   onClose: () => void
 }) {
   const [i, setI] = useState(start)
-  const [showClip, setShowClip] = useState(false)
+  // Deteccion en la que se eligio ver el clip en vez de la foto
+  const [clipOf, setClipOf] = useState<string | null>(null)
   const d = list[i]
+  const showClip = !!d && (clipOf === d.id || !d.photo_id)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -263,7 +265,6 @@ function DetectionViewer({ list, start, describe, onClose }: {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [list.length, onClose])
-  useEffect(() => { setShowClip(!d?.photo_id) }, [d])
 
   if (!d) return null
   const media = showClip && d.clip_id ? d.clip_id : d.photo_id
@@ -278,7 +279,7 @@ function DetectionViewer({ list, start, describe, onClose }: {
           {d.tg_error && <span className="text-xs" style={{ color: 'var(--danger)' }}>{d.tg_error}</span>}
           <span className="ml-auto flex items-center gap-2">
             {d.photo_id && d.clip_id && (
-              <button onClick={() => setShowClip((v) => !v)} className="px-2 py-1 rounded text-xs border border-white/40">
+              <button onClick={() => setClipOf(showClip ? null : d.id)} className="px-2 py-1 rounded text-xs border border-white/40">
                 {showClip ? 'Ver foto' : 'Ver clip'}
               </button>
             )}
