@@ -334,6 +334,29 @@ const MIGRATIONS: &[&str] = &[
         created_by TEXT NOT NULL,
         created_at TEXT NOT NULL
     );",
+    // 19: plazos con cuenta regresiva (contadores sueltos; los del Portafolio se calculan)
+    // y registro de avisos enviados por umbral (30, 7, 1 y 0 dias)
+    "CREATE TABLE IF NOT EXISTS deadlines (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'otro',
+        due_date TEXT NOT NULL,
+        notes TEXT NOT NULL DEFAULT '',
+        notify TEXT NOT NULL DEFAULT 'creador',
+        portfolio_id TEXT,
+        done_at TEXT,
+        done_by TEXT,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_deadlines_due ON deadlines(done_at, due_date);
+    CREATE TABLE IF NOT EXISTS deadline_alerts (
+        key TEXT NOT NULL,
+        due_date TEXT NOT NULL,
+        threshold INTEGER NOT NULL,
+        sent_at TEXT NOT NULL,
+        PRIMARY KEY (key, due_date, threshold)
+    );",
 ];
 
 /// Migracion 16. Publicada: no modificar (ver `MIGRATIONS`).
@@ -970,6 +993,7 @@ const DEFAULT_MODULES: &[(&str, i32, bool)] = &[
     // Camaras: apagado hasta que el admin lo active (privacidad)
     ("cameras", 13, false),
     ("machines", 14, true),
+    ("deadlines", 15, true),
 ];
 
 fn seed_modules(conn: &Connection) {

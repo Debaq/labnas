@@ -10,6 +10,14 @@
 - **Reporte de fallas con foto**: la máquina queda fuera de servicio hasta que un operador la marca reparada; avisos por Telegram a operadores y a quienes tenían reservas. Historial de fallas por máquina
 - Detalle en `docs/MAQUINAS.md`
 
+### Plazos (módulo nuevo)
+
+- **Cuenta regresiva** para cierres de proyecto, informes, rendiciones, garantías, convocatorias, tesis y licencias. Tarjetas que cambian de color: verde con más de 30 días, amarillo con 30 o menos, rojo con 7 o menos y cuando ya venció
+- Toma solos la **fecha de término y los hitos pendientes** de los proyectos propios en curso del Portafolio; además se pueden crear **contadores sueltos**, opcionalmente vinculados a un proyecto
+- **Avisos por Telegram** a los 30, 7 y 1 día, y el mismo día (entre 9:00 y 21:00), a quien lo creó, a operadores y administradores o a todo el equipo
+- Tarjeta **Plazos** en el dashboard con lo que vence en los próximos 60 días
+- Detalle en `docs/PLAZOS.md`
+
 ## [3.3.1] — 2026-11-19
 
 Desde v3.3.0.

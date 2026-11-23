@@ -24,6 +24,7 @@ const MODULE_ROUTE_PREFIXES: &[(&str, &[&str])] = &[
     ("music",      &["/api/music"]),
     ("cameras",    &["/api/cameras"]),
     ("machines",   &["/api/machines"]),
+    ("deadlines",  &["/api/deadlines"]),
 ];
 
 fn resolve_module_for_path(path: &str) -> Option<&'static str> {
@@ -209,6 +210,10 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         ("POST", ["machines", "bookings", _, "cancel"]) => User,
         ("DELETE", ["machines", _]) => Admin,
         (_, ["machines", ..]) => Operator,
+
+        // --- Plazos: todos ven y crean; el handler limita editar, cumplir y borrar a quien
+        // lo creo o al staff ---
+        (_, ["deadlines", ..]) => User,
 
         // Todo lo demas: admin (usuarios, modulos, telegram, apagar, actualizar, branding,
         // mdns, servicios, limite de subida, raices de almacenamiento...)

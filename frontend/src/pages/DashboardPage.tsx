@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { HardDrive, Wifi, Activity, Database, Box, ExternalLink, ClipboardList, Calendar, Clock, Users, FolderOpen } from 'lucide-react'
 import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus, getServices, fetchTasks, fetchEvents, fetchProjects, type LabService } from '../api'
 import { useAuth } from '../auth/AuthContext'
+import DeadlinesWidget from '../components/deadlines/DeadlinesWidget'
 import type { DiskInfo, SystemInfo, NetworkHost, Printer3DConfig, Printer3DStatus, Task, CalendarEvent, Project } from '../types'
 
 function formatBytes(bytes: number): string {
@@ -170,6 +171,9 @@ export default function DashboardPage() {
           {formattedDate}
         </p>
       </div>
+
+      {/* Plazos con cuenta regresiva */}
+      {isModuleEnabled('deadlines') && <DeadlinesWidget />}
 
       {/* Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

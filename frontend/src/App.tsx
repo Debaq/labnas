@@ -27,6 +27,7 @@ const SensorsPage = lazy(() => import('./pages/SensorsPage'))
 const CamerasPage = lazy(() => import('./pages/CamerasPage'))
 const MachinesPage = lazy(() => import('./pages/MachinesPage'))
 const MachineDetailPage = lazy(() => import('./pages/MachineDetailPage'))
+const DeadlinesPage = lazy(() => import('./pages/DeadlinesPage'))
 const SetupWizard = lazy(() => import('./components/SetupWizard'))
 
 // Registro de modulos: mapea module_id -> ruta + componente
@@ -45,6 +46,7 @@ const MODULE_ROUTES: Record<string, { path: string; component: React.ComponentTy
   terminal:   { path: '/terminal',   component: TerminalPage },
   cameras:    { path: '/cameras',    component: CamerasPage },
   machines:   { path: '/machines',   component: MachinesPage },
+  deadlines:  { path: '/deadlines',  component: DeadlinesPage },
 }
 
 function LoadingScreen() {

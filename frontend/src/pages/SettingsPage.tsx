@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine, Pencil, Music, Video, HelpCircle, X, RefreshCw, Shield, LayoutDashboard, FolderOpen, Network, Printer, Box, ClipboardList, FileText, Mail, Package, GraduationCap, Thermometer, ChevronUp, ChevronDown, AlertTriangle, Bell, Server, SlidersHorizontal, RotateCcw, Archive, Wrench } from 'lucide-react'
+import { Palette, HardDrive, Info, Power, Loader2, MessageCircle, Trash2, Send, Clock, TerminalSquare, Bot, Key, Users, UserCheck, Link2, Globe, Building2, ExternalLink, Plus, Radio, PenLine, Pencil, Music, Video, HelpCircle, X, RefreshCw, Shield, LayoutDashboard, FolderOpen, Network, Printer, Box, ClipboardList, FileText, Mail, Package, GraduationCap, Thermometer, ChevronUp, ChevronDown, AlertTriangle, Bell, Server, SlidersHorizontal, RotateCcw, Archive, Wrench, Hourglass } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import SetupWizard from '../components/SetupWizard'
 import TwoFactorSection from '../components/TwoFactorSection'
@@ -38,6 +38,7 @@ const MODULE_META: Record<string, { label: string; icon: IconComponent; descript
   music:      { label: 'Musica',           icon: Music,           description: 'Reproductor de musica (yt-dlp + mpv)' },
   cameras:    { label: 'Camaras',          icon: Video,           description: 'Webcams del servidor y camaras IP: vista, fotos y grabaciones (viene apagado)' },
   machines:   { label: 'Maquinas',         icon: Wrench,          description: 'Catalogo de maquinas con QR, reservas sin choques y reporte de fallas' },
+  deadlines:  { label: 'Plazos',           icon: Hourglass,       description: 'Cuenta regresiva de cierres de proyecto, informes, rendiciones y otros plazos, con avisos por Telegram' },
 }
 
 type TabId = 'general' | 'lab' | 'users' | 'notifications' | 'network' | 'media' | 'system' | 'backups' | 'admin'

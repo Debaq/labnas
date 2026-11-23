@@ -733,6 +733,12 @@ fn api_routes() -> Router<AppState> {
         .route("/api/machines/{id}/qr", get(handlers::machines::machine_qr))
         .route("/api/machines/{id}/bookings", post(handlers::machines::create_booking))
         .route("/api/machines/{id}/faults", post(handlers::machines::report_fault))
+        // Plazos
+        .route("/api/deadlines", get(handlers::deadlines::list_deadlines))
+        .route("/api/deadlines", post(handlers::deadlines::create_deadline))
+        .route("/api/deadlines/{id}", put(handlers::deadlines::update_deadline))
+        .route("/api/deadlines/{id}", delete(handlers::deadlines::delete_deadline))
+        .route("/api/deadlines/{id}/done", post(handlers::deadlines::set_done))
         // Portfolio
         .route("/api/portfolio", get(handlers::portfolio::list_entries))
         .route("/api/portfolio", post(handlers::portfolio::create_entry))

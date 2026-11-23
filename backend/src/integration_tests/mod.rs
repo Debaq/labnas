@@ -11,6 +11,7 @@ mod email_oauth;
 mod events;
 mod ledger;
 mod machines;
+mod deadlines;
 mod files;
 mod folders;
 mod https;

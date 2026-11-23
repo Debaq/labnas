@@ -185,14 +185,15 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       respaldos anexos.
 - [ ] **65. Calendario de hitos:** informes técnicos y financieros, garantías y
       cierre de cada proyecto. Los hitos del Portafolio ya existen; falta llevarlos
-      al calendario con avisos.
-- [ ] **73. Contadores de tiempo** (cuenta regresiva) para el cierre de cada proyecto
+      al calendario. *(Los avisos ya están: módulo Plazos, idea 73.)*
+- [x] **73. Contadores de tiempo** (cuenta regresiva) para el cierre de cada proyecto
       y otros plazos: informes técnicos y financieros, rendiciones, garantías,
       convocatorias a fondos, entregas de tesis, vencimiento de licencias o
       certificaciones. Tarjetas en el dashboard que cambian de color al acercarse la
       fecha (por ejemplo verde > 30 días, amarillo < 30, rojo < 7) y avisos por
       Telegram en hitos fijos (30, 7 y 1 día). Se alimenta de los hitos de la idea 65
       y del Portafolio, y también permite crear contadores sueltos.
+      *Hecho: módulo Plazos (`docs/PLAZOS.md`), con aviso también el mismo día.*
 - [ ] **66. Expediente por proyecto exportable** (ZIP con índice y huellas) y acceso
       de solo lectura con fecha de término para un auditor.
 - [ ] **67. Manual de procedimientos con historial de versiones:** cómo se mueve el
