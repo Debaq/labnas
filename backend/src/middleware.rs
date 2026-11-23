@@ -23,6 +23,7 @@ const MODULE_ROUTE_PREFIXES: &[(&str, &[&str])] = &[
     ("terminal",   &["/api/terminal"]),
     ("music",      &["/api/music"]),
     ("cameras",    &["/api/cameras"]),
+    ("machines",   &["/api/machines"]),
 ];
 
 fn resolve_module_for_path(path: &str) -> Option<&'static str> {
@@ -200,6 +201,14 @@ pub fn required_access(method: &Method, path: &str) -> Access {
 
         // --- Sensores ---
         ("GET", ["sensors", ..]) => User,
+
+        // --- Maquinas: todos ven, reservan y reportan fallas (el handler limita cancelar
+        // a lo propio y bloquear horarios al staff); operadores editan, aprueban y reparan ---
+        ("GET", ["machines", ..]) => User,
+        ("POST", ["machines", _, "bookings"]) | ("POST", ["machines", _, "faults"]) => User,
+        ("POST", ["machines", "bookings", _, "cancel"]) => User,
+        ("DELETE", ["machines", _]) => Admin,
+        (_, ["machines", ..]) => Operator,
 
         // Todo lo demas: admin (usuarios, modulos, telegram, apagar, actualizar, branding,
         // mdns, servicios, limite de subida, raices de almacenamiento...)

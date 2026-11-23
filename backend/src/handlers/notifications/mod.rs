@@ -35,7 +35,7 @@ use {api::*, telegram::*, bot::*, terminal::*, calendar::*, tasks::*, reminders:
 pub use api::{delete_bot_token, delete_chat, get_config, send_test, set_bot_token, set_chat_role, set_schedule};
 pub use bot::telegram_bot_loop;
 pub use reminders::{daily_notification_loop, task_reminder_loop};
-pub use telegram::{notify_active_chats, notify_admins, notify_admins_photo, send_tg_public};
+pub use telegram::{notify_active_chats, notify_admins, notify_admins_photo, notify_staff, notify_users, send_tg_public};
 
 /// Permisos por defecto segun el rol (cuando no se envian explicitamente)
 pub fn default_permissions_for_role(role: &UserRole) -> UserPermissions {

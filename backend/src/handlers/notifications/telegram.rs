@@ -54,6 +54,31 @@ pub async fn notify_admins(state: &AppState, text: &str) -> usize {
 const ADMIN_CHATS: &str =
     "role = 'admin' OR linked_web_user IN (SELECT username FROM web_users WHERE role = 'admin')";
 
+/// Administradores y operadores (p.ej. fallas de maquinas, reservas por aprobar)
+const STAFF_CHATS: &str = "role IN ('admin', 'operador') OR linked_web_user IN (SELECT username FROM web_users WHERE role IN ('admin', 'operador'))";
+
+/// Envia un mensaje (Markdown) a los chats de administradores y operadores
+pub async fn notify_staff(state: &AppState, text: &str) -> usize {
+    notify_chats_where(state, STAFF_CHATS, text).await
+}
+
+/// Envia un mensaje (Markdown) a los chats vinculados a esas cuentas web
+pub async fn notify_users(state: &AppState, users: &[String], text: &str) -> usize {
+    if users.is_empty() {
+        return 0;
+    }
+    let marks: Vec<String> = (1..=users.len()).map(|i| format!("?{}", i)).collect();
+    let filter = format!("linked_web_user IN ({})", marks.join(", "));
+    let Some((token, chats)) = tg_targets_with(state, filter, users.to_vec()).await else { return 0 };
+    let mut sent = 0;
+    for chat_id in chats {
+        if send_telegram_message(&state.http_client, &token, chat_id, text).await.is_ok() {
+            sent += 1;
+        }
+    }
+    sent
+}
+
 /// Token del bot y chats que cumplen `where_sql` (None si no hay bot)
 async fn tg_targets(state: &AppState, where_sql: &'static str) -> Option<(String, Vec<i64>)> {
     tg_targets_with(state, where_sql.to_string(), Vec::new()).await

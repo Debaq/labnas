@@ -25,6 +25,7 @@ pub mod system;
 pub mod tasks;
 pub mod terminal;
 pub mod inventory;
+pub mod machines;
 pub mod portfolio;
 pub mod reports;
 pub mod sensors;

@@ -281,6 +281,59 @@ const MIGRATIONS: &[&str] = &[
         clip_id TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_camera_detections_at ON camera_detections(at);",
+    // 18: maquinas del laboratorio (catalogo con QR, reservas y fallas)
+    "CREATE TABLE IF NOT EXISTS machines (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'otra',
+        location TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        instructions TEXT NOT NULL DEFAULT '',
+        responsible TEXT,
+        status TEXT NOT NULL DEFAULT 'disponible',
+        requires_approval INTEGER NOT NULL DEFAULT 0,
+        max_hours REAL,
+        inventory_item_id TEXT,
+        printer3d_id TEXT,
+        photo_id TEXT,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS machine_bookings (
+        id TEXT PRIMARY KEY,
+        machine_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'reserva',
+        start TEXT NOT NULL,
+        end TEXT NOT NULL,
+        purpose TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL,
+        decided_by TEXT,
+        decided_at TEXT,
+        reminded INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_machine_bookings_start ON machine_bookings(machine_id, start);
+    CREATE TABLE IF NOT EXISTS machine_faults (
+        id TEXT PRIMARY KEY,
+        machine_id TEXT NOT NULL,
+        reported_by TEXT NOT NULL,
+        description TEXT NOT NULL,
+        photo_id TEXT,
+        created_at TEXT NOT NULL,
+        resolved_by TEXT,
+        resolved_at TEXT,
+        resolution_note TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_machine_faults_machine ON machine_faults(machine_id, created_at);
+    CREATE TABLE IF NOT EXISTS machine_photos (
+        id TEXT PRIMARY KEY,
+        machine_id TEXT NOT NULL,
+        data BLOB NOT NULL,
+        mime TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );",
 ];
 
 /// Migracion 16. Publicada: no modificar (ver `MIGRATIONS`).
@@ -916,6 +969,7 @@ const DEFAULT_MODULES: &[(&str, i32, bool)] = &[
     ("music", 12, true),
     // Camaras: apagado hasta que el admin lo active (privacidad)
     ("cameras", 13, false),
+    ("machines", 14, true),
 ];
 
 fn seed_modules(conn: &Connection) {

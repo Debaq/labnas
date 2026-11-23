@@ -1,6 +1,6 @@
 import { Suspense, lazy, useState, useEffect } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight, Mail, Download, Package, GraduationCap, Thermometer, Loader2, Video } from 'lucide-react'
+import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight, Mail, Download, Package, GraduationCap, Thermometer, Loader2, Video, Wrench } from 'lucide-react'
 import { useViaBridge } from '../lib/bridge'
 import { useAuth } from '../auth/AuthContext'
 import { shutdownServer, getBranding, fetchHealth, checkUpdate } from '../api'
@@ -21,6 +21,7 @@ const pageTitles: Record<string, string> = {
   '/inventory': 'Inventario',
   '/portfolio': 'Portafolio Academico',
   '/sensors': 'Sensores',
+  '/machines': 'Maquinas',
   '/settings': 'Configuracion',
   '/playlists': 'Editor de Playlist',
 }
@@ -129,6 +130,7 @@ export default function Layout() {
     sensors:    { to: '/sensors',    label: 'Sensores',        icon: Thermometer },
     terminal:   { to: '/terminal',   label: 'Terminal',        icon: TerminalSquare },
     cameras:    { to: '/cameras',    label: 'Camaras',         icon: Video },
+    machines:   { to: '/machines',   label: 'Maquinas',        icon: Wrench },
   }
 
   const viaBridge = useViaBridge()

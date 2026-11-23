@@ -10,6 +10,7 @@ mod email_ai;
 mod email_oauth;
 mod events;
 mod ledger;
+mod machines;
 mod files;
 mod folders;
 mod https;

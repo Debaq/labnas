@@ -1,5 +1,15 @@
 # Changelog
 
+## [Sin publicar]
+
+### Máquinas (módulo nuevo)
+
+- **Catálogo de máquinas** del laboratorio con ficha: foto, tipo, ubicación, responsable, descripción e instrucciones de uso y seguridad
+- **Etiqueta QR** para imprimir y pegar en cada máquina: al escanearla se abre la ficha (pide iniciar sesión si hace falta)
+- **Reservas sin choques de horario**, con máximo de horas por máquina y aprobación opcional de un operador (aviso por Telegram). Los operadores pueden bloquear horarios para mantención o clases. Recordatorio por Telegram 15 minutos antes
+- **Reporte de fallas con foto**: la máquina queda fuera de servicio hasta que un operador la marca reparada; avisos por Telegram a operadores y a quienes tenían reservas. Historial de fallas por máquina
+- Detalle en `docs/MAQUINAS.md`
+
 ## [3.3.1] — 2026-11-19
 
 Desde v3.3.0.

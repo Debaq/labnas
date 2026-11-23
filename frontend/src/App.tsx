@@ -25,6 +25,8 @@ const PortfolioPage = lazy(() => import('./pages/PortfolioPage'))
 const PlaylistEditorPage = lazy(() => import('./pages/PlaylistEditorPage'))
 const SensorsPage = lazy(() => import('./pages/SensorsPage'))
 const CamerasPage = lazy(() => import('./pages/CamerasPage'))
+const MachinesPage = lazy(() => import('./pages/MachinesPage'))
+const MachineDetailPage = lazy(() => import('./pages/MachineDetailPage'))
 const SetupWizard = lazy(() => import('./components/SetupWizard'))
 
 // Registro de modulos: mapea module_id -> ruta + componente
@@ -42,6 +44,7 @@ const MODULE_ROUTES: Record<string, { path: string; component: React.ComponentTy
   sensors:    { path: '/sensors',    component: SensorsPage },
   terminal:   { path: '/terminal',   component: TerminalPage },
   cameras:    { path: '/cameras',    component: CamerasPage },
+  machines:   { path: '/machines',   component: MachinesPage },
 }
 
 function LoadingScreen() {
@@ -96,6 +99,8 @@ function AppRoutes() {
             .map(([id, { path, component: Comp }]) => (
               <Route key={id} path={path} element={<Comp />} />
             ))}
+          {/* Ficha de una maquina: a ella lleva el QR pegado en la maquina */}
+          {isModuleEnabled('machines') && <Route path="/machines/:id" element={<MachineDetailPage />} />}
           {/* Rutas no-modulo: siempre disponibles */}
           <Route path="/playlists/:id" element={<PlaylistEditorPage />} />
           <Route path="/settings" element={<SettingsPage />} />

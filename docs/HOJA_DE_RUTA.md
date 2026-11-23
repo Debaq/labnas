@@ -138,8 +138,9 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       fecha de término).
 - [ ] **Niveles de acceso** privado / con autorización / público, aplicables a
       cualquier registro o archivo.
-- [ ] **Catálogo único de máquinas y bienes con QR:** cada equipo tiene una ficha
+- [x] **Catálogo único de máquinas y bienes con QR:** cada equipo tiene una ficha
       a la que llevan las ideas de reservas, mantenimiento, inventario y uso.
+      *(hecho: módulo Máquinas, ver `docs/MAQUINAS.md`; los bienes de inventario aún no tienen QR)*
 ### Registro y catálogo
 - [x] **57. Bitácora que no se puede alterar.** Cada movimiento queda encadenado al
       anterior con su huella digital (hash). Nada se borra ni se edita: un error se
@@ -233,9 +234,9 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
 - [ ] **19. Medidor de corriente en cada máquina** (ESP32 + sensor de pinza): sabe
       si la máquina trabaja de verdad, cuenta horas de uso y consumo eléctrico.
       Alimenta la idea 59.
-- [ ] **22. Máquina fuera de servicio:** se escanea el QR, se reporta la falla con
+- [x] **22. Máquina fuera de servicio:** se escanea el QR, se reporta la falla con
       foto y se bloquean las reservas hasta la reparación. Puede reutilizar los
-      reportes que ya existen.
+      reportes que ya existen. *(hecho en el módulo Máquinas, con foto y aviso por Telegram)*
 - [ ] **17. Seguridad laboral:** inducciones, capacitaciones vigentes, fichas de
       seguridad y registro de incidentes.
 
@@ -247,8 +248,9 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       habilita la máquina solo a quien tiene la certificación vigente y registra
       quién la usó y cuánto tiempo.
 - [ ] **2. Reserva de equipos** con calendario sin choques de horario, exigencia de
-      certificación y registro de horas. Se construye sobre el calendario del módulo
-      Tareas, agregando el equipo como «recurso» del evento.
+      certificación y registro de horas. *(en parte: el módulo Máquinas ya reserva sin
+      choques, con aprobación opcional y recordatorio; falta exigir la certificación
+      —idea 21— y registrar las horas reales de uso —idea 19—)*
 - [ ] **5. Mantenimiento y calibración:** bitácora por equipo y recordatorios (por
       fecha o por horas de uso: boquilla tras X kg, lente láser tras X horas).
 - [ ] **23. Una sola cola para todas las máquinas** (3D, láser, CNC, vinilo) con
@@ -337,10 +339,10 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
 ## Pendientes técnicos (de la auditoría de noviembre 2026)
 
 - [ ] Algunos procesos en segundo plano usan la base de datos de forma bloqueante.
-- [ ] Límites de tiempo para yt-dlp, lp, rsync y ffmpeg.
-- [ ] Registrar en la auditoría la apertura de la terminal web.
+- [x] Límites de tiempo para yt-dlp, lp, rsync y ffmpeg.
+- [x] Registrar en la auditoría la apertura de la terminal web.
 - [ ] El visor de escritorio no verifica el certificado del NAS.
-- [ ] Revisión automática de dependencias en el CI (cargo-audit, dependabot).
+- [x] Revisión automática de dependencias en el CI (cargo-audit, dependabot).
 - [ ] Un tipo de error común en el backend.
 - [ ] SMB/NFS (lo necesita la idea 9).
 - [ ] Partir las páginas grandes del frontend (impresoras 3D, tareas, ajustes).
