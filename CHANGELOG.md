@@ -1,8 +1,8 @@
 # Changelog
 
-## [3.4.2] — 2026-11-23
+## [3.4.3] — 2026-11-23
 
-Desde v3.4.1.
+Desde v3.4.1. La v3.4.2 no alcanzó a compilarse para x86_64 ni aarch64; esta versión trae lo mismo.
 
 ### Cámaras: historial de detecciones con IA
 
