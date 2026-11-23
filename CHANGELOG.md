@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.4.1] — 2026-11-23
+
+Desde v3.4.0.
+
+### Seguridad
+
+- Dependencia `url` actualizada a 2.5.9 (RUSTSEC-2026-0592: desbordamiento de pila con direcciones `blob:` anidadas)
+
 ## [3.4.0] — 2026-11-23
 
 Desde v3.3.1.
