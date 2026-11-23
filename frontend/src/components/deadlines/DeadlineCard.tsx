@@ -40,7 +40,8 @@ export default function DeadlineCard({ d, editable, compact, onEdit, onDone, onD
             <div className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>
               {longDate(d.due_date)}
               {d.project && <> · {d.portfolio_id ? <Link to="/portfolio" className="hover:underline">{d.project}</Link> : d.project}</>}
-              {!compact && d.source !== 'manual' && ' · desde el Portafolio'}
+              {!compact && (d.source === 'proyecto' || d.source === 'hito') && ' · desde el Portafolio'}
+              {!compact && d.source === 'induccion' && ' · desde Máquinas'}
             </div>
             {!compact && d.notes && (
               <div className="text-xs mt-1 line-clamp-2" style={{ color: 'var(--text-secondary)' }}>{d.notes}</div>

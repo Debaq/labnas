@@ -9,6 +9,7 @@ import {
   createBooking,
   deleteMachine,
   fetchBookings,
+  fetchCertifications,
   fetchMachine,
   fetchMachineQr,
   hhmm,
@@ -19,6 +20,7 @@ import {
   resolveFault,
   setMachinePhoto,
   type MachineBooking,
+  type MachineCertification,
   type MachineDetail,
   type MachineFault,
 } from '../api'
@@ -27,6 +29,7 @@ import { useEvent } from '../events/useEvents'
 import { useToast } from '../components/ToastContext'
 import MachineFormModal from '../components/machines/MachineFormModal'
 import MachineStatusChip from '../components/machines/MachineStatusChip'
+import InductionPanel from '../components/machines/InductionPanel'
 
 const inputStyle = { backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }
 const card = { backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }
@@ -76,6 +79,7 @@ export default function MachineDetailPage() {
   const [missing, setMissing] = useState(false)
   const [day, setDay] = useState(() => localDate(new Date()))
   const [bookings, setBookings] = useState<MachineBooking[]>([])
+  const [certs, setCerts] = useState<MachineCertification[]>([])
   const [from, setFrom] = useState(nextHalfHour)
   const [to, setTo] = useState(() => plusHour(nextHalfHour()))
   const [purpose, setPurpose] = useState('')
@@ -88,12 +92,14 @@ export default function MachineDetailPage() {
 
   const load = useCallback(async () => {
     try {
-      const [detail, list] = await Promise.all([
+      const [detail, list, c] = await Promise.all([
         fetchMachine(id),
         fetchBookings({ machine: id, from: `${day}T00:00`, to: `${addDays(day, 1)}T00:00` }),
+        fetchCertifications(id),
       ])
       setM(detail)
       setBookings(list)
+      setCerts(c)
     } catch {
       setMissing(true)
     }
@@ -166,6 +172,7 @@ export default function MachineDetailPage() {
   const unusable = m.status !== 'disponible'
   const resolved = m.faults.filter((f) => f.resolved_at)
   const isPast = day < localDate(new Date())
+  const certified = !m.requires_certification || staff || certs.some((c) => c.username === user?.username && c.status === 'vigente')
 
   return (
     <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-4">
@@ -198,6 +205,7 @@ export default function MachineDetailPage() {
             {m.responsible && <span className="flex items-center gap-1"><User size={13} /> Responsable: {m.responsible}</span>}
             {m.max_hours && <span>Max. {m.max_hours} h por reserva</span>}
             {m.requires_approval && <span className="flex items-center gap-1"><Lock size={13} /> Requiere aprobacion</span>}
+            {m.requires_certification && <span>🎓 Requiere induccion</span>}
           </div>
           {m.description && <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--text-primary)' }}>{m.description}</p>}
           <div className="flex gap-2 pt-1 flex-wrap">
@@ -236,6 +244,8 @@ export default function MachineDetailPage() {
           <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--text-primary)' }}>{m.instructions}</p>
         </div>
       )}
+
+      <InductionPanel machine={m} certs={certs} me={user?.username ?? ''} staff={staff} onChange={load} />
 
       {/* Reservas del dia */}
       <div className="rounded-xl p-4 space-y-3" style={card}>
@@ -289,6 +299,8 @@ export default function MachineDetailPage() {
           <p className="text-sm" style={{ color: 'var(--danger)' }}>
             {m.status === 'retirada' ? 'Esta maquina fue retirada.' : 'No se puede reservar mientras este fuera de servicio.'}
           </p>
+        ) : !certified ? (
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>🎓 Necesitas la induccion para reservar esta maquina (mas arriba puedes pedirla).</p>
         ) : (
           <div className="pt-2 space-y-2" style={{ borderTop: '1px solid var(--border)' }}>
             <div className="flex items-end gap-2 flex-wrap">

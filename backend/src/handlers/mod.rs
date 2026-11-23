@@ -26,6 +26,7 @@ pub mod tasks;
 pub mod terminal;
 pub mod inventory;
 pub mod machines;
+pub mod machine_certs;
 pub mod deadlines;
 pub mod portfolio;
 pub mod reports;

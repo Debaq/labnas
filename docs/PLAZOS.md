@@ -13,6 +13,9 @@ Viene encendido. Se apaga en **Configuración > Laboratorio > Módulos**.
   postulado salen su **fecha de término** («Cierre de …») y sus **hitos no cumplidos** que
   tengan fecha. Cuando el proyecto se cierra o el hito se marca cumplido, desaparecen.
   Se editan en el Portafolio.
+- **Máquinas** (automático): el vencimiento de cada inducción que tenga fecha
+  («Inducción de ana en Laser CO2»). Se ve hasta 30 días después de vencer; se renueva o
+  quita desde la ficha de la máquina.
 - **Contadores sueltos**: botón **Nuevo plazo**. Nombre, tipo, fecha límite, notas,
   proyecto vinculado (opcional) y a quién avisar. Se marcan **cumplidos** (quedan en el
   historial, botón *Ver cumplidos*) y se pueden reabrir.
@@ -41,6 +44,7 @@ siguientes umbrales.
 | Contador suelto, «Operadores y administradores» | Quien lo creó, operadores y administradores |
 | Contador suelto, «Todo el equipo» | Todos los chats aprobados del bot |
 | Del Portafolio | Operadores, administradores y participantes del proyecto |
+| Inducción de máquina | Operadores, administradores y la persona |
 
 Los avisos personales llegan a los chats **vinculados a la cuenta web** (Configuración >
 Notificaciones); además aparecen en la web.

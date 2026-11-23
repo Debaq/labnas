@@ -208,6 +208,9 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         ("GET", ["machines", ..]) => User,
         ("POST", ["machines", _, "bookings"]) | ("POST", ["machines", _, "faults"]) => User,
         ("POST", ["machines", "bookings", _, "cancel"]) => User,
+        // Induccion: pedirla (y retirar la propia solicitud, el handler lo limita)
+        ("POST", ["machines", _, "certifications", "request"]) => User,
+        ("DELETE", ["machines", _, "certifications", _]) => User,
         ("DELETE", ["machines", _]) => Admin,
         (_, ["machines", ..]) => Operator,
 

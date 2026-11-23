@@ -3,7 +3,10 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Check, Loader2, MapPin, Plus, Wrench, X } from 'lucide-react'
 import {
   bookingAction,
+  fetchAllCertifications,
   fetchBookings,
+  grantCertification,
+  revokeCertification,
   fetchMachines,
   kindInfo,
   localDateTime,
@@ -13,6 +16,7 @@ import {
   hhmm,
   type Machine,
   type MachineBooking,
+  type MachineCertification,
   type MachineKind,
 } from '../api'
 import { useAuth } from '../auth/AuthContext'
@@ -32,6 +36,7 @@ export default function MachinesPage() {
   const [machines, setMachines] = useState<Machine[]>([])
   const [mine, setMine] = useState<MachineBooking[]>([])
   const [pending, setPending] = useState<MachineBooking[]>([])
+  const [certReqs, setCertReqs] = useState<MachineCertification[]>([])
   const [loading, setLoading] = useState(true)
   const [kind, setKind] = useState<MachineKind | ''>('')
   const [creating, setCreating] = useState(false)
@@ -39,14 +44,16 @@ export default function MachinesPage() {
   const load = useCallback(async () => {
     try {
       const now = localDateTime(new Date())
-      const [m, b, p] = await Promise.all([
+      const [m, b, p, c] = await Promise.all([
         fetchMachines(),
         fetchBookings({ mine: true, from: now }),
         staff ? fetchBookings({ status: 'pendiente', from: now }) : Promise.resolve([]),
+        staff ? fetchAllCertifications({ status: 'solicitada' }) : Promise.resolve([]),
       ])
       setMachines(m)
       setMine(b)
       setPending(p)
+      setCertReqs(c)
     } catch (e) {
       addToast((e as Error).message, 'error')
     } finally {
@@ -67,13 +74,24 @@ export default function MachinesPage() {
     }
   }
 
+  const certAct = async (c: MachineCertification, grant: boolean) => {
+    try {
+      if (grant) await grantCertification(c.machine_id, { username: c.username })
+      else await revokeCertification(c.machine_id, c.username)
+      addToast(grant ? `Induccion dada a ${c.username}` : 'Solicitud rechazada', 'success')
+      load()
+    } catch (e) {
+      addToast((e as Error).message, 'error')
+    }
+  }
+
   const shown = useMemo(() => machines.filter((m) => !kind || m.kind === kind), [machines, kind])
   const kindsPresent = useMemo(() => MACHINE_KINDS.filter((k) => machines.some((m) => m.kind === k.id)), [machines])
 
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: 'machines', label: 'Maquinas' },
     { id: 'mine', label: 'Mis reservas', count: mine.length },
-    ...(staff ? [{ id: 'pending' as Tab, label: 'Por aprobar', count: pending.length }] : []),
+    ...(staff ? [{ id: 'pending' as Tab, label: 'Por aprobar', count: pending.length + certReqs.length }] : []),
   ]
 
   return (
@@ -128,10 +146,37 @@ export default function MachinesPage() {
       ) : tab === 'mine' ? (
         <BookingList list={mine} empty="No tienes reservas proximas" actions={(b) => [{ label: 'Cancelar', icon: X, danger: true, run: () => act(b, 'cancel') }]} />
       ) : (
-        <BookingList list={pending} empty="No hay reservas esperando aprobacion" showUser actions={(b) => [
-          { label: 'Aprobar', icon: Check, run: () => act(b, 'approve') },
-          { label: 'Rechazar', icon: X, danger: true, run: () => act(b, 'reject') },
-        ]} />
+        <div className="space-y-6">
+          {(pending.length > 0 || certReqs.length === 0) && (
+            <BookingList list={pending} empty="No hay reservas ni inducciones esperando aprobacion" showUser actions={(b) => [
+              { label: 'Aprobar', icon: Check, run: () => act(b, 'approve') },
+              { label: 'Rechazar', icon: X, danger: true, run: () => act(b, 'reject') },
+            ]} />
+          )}
+          {certReqs.length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>🎓 Inducciones pedidas</h3>
+              {certReqs.map((c) => (
+                <div key={`${c.machine_id}:${c.username}`} className="flex items-center gap-3 px-4 py-3 rounded-xl flex-wrap"
+                  style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
+                  <div className="flex-1 min-w-[12rem]">
+                    <div className="text-sm" style={{ color: 'var(--text-primary)' }}>
+                      <span className="font-medium">{c.username}</span> pide la induccion de{' '}
+                      <Link to={`/machines/${c.machine_id}`} className="font-medium hover:underline">{c.machine_name}</Link>
+                    </div>
+                    {c.notes && <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{c.notes}</div>}
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => certAct(c, true)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs"
+                      style={{ border: '1px solid var(--border)', color: 'var(--success)' }}><Check size={13} /> Ya la hizo</button>
+                    <button onClick={() => certAct(c, false)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs"
+                      style={{ border: '1px solid var(--border)', color: 'var(--danger)' }}><X size={13} /> Rechazar</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {creating && (
@@ -164,6 +209,9 @@ function MachineCard({ m }: { m: Machine }) {
           <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
             Proxima: {shortDateTime(m.next.start)}–{hhmm(m.next.end)}{m.next.kind === 'reserva' ? ` · ${m.next.username}` : ' · bloqueo'}
           </div>
+        )}
+        {m.requires_certification && (
+          <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>🎓 Requiere induccion</div>
         )}
         {m.open_faults.length > 0 && (
           <div className="text-xs truncate" style={{ color: 'var(--danger)' }}>🔧 {m.open_faults[0].description}</div>

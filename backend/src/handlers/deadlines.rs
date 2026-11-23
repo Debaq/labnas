@@ -87,7 +87,7 @@ fn publish(state: &AppState) {
 pub struct Deadline {
     /// Unico entre todas las fuentes: `d:<id>`, `p:<proyecto>` o `m:<proyecto>:<hito>`
     pub key: String,
-    /// manual | proyecto | hito
+    /// manual | proyecto | hito | induccion
     pub source: &'static str,
     /// Id del contador suelto (solo `manual`)
     pub id: Option<String>,
@@ -199,6 +199,45 @@ fn portfolio_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Result<
     Ok(out)
 }
 
+/// Vencimientos de inducciones de maquinas (hasta 30 dias despues de vencer)
+fn certification_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Result<Vec<Deadline>> {
+    if !module_on(conn, "machines") {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare(
+        "SELECT c.machine_id, c.username, c.expires_on, m.name FROM machine_certifications c
+         JOIN machines m ON m.id = c.machine_id
+         WHERE c.status = 'vigente' AND c.expires_on IS NOT NULL AND m.status != 'retirada'",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (machine, user, expires, name) = row?;
+        let d = Deadline {
+            key: format!("c:{}:{}", machine, user),
+            source: "induccion",
+            id: None,
+            title: format!("Inducción de {} en {}", user, name),
+            project: None,
+            portfolio_id: None,
+            category: "licencia".into(),
+            due_date: expires,
+            days_left: 0,
+            level: "ok",
+            notes: String::new(),
+            notify: "staff".into(),
+            created_by: None,
+            done_at: None,
+            done_by: None,
+            participants: vec![user],
+        };
+        out.extend(finish(d, today).filter(|d| d.days_left >= -30));
+    }
+    Ok(out)
+}
+
 /// Todos los plazos activos (sin los cumplidos), ordenados por fecha
 fn active_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Result<Vec<Deadline>> {
     let mut stmt = conn.prepare(&format!("{} WHERE d.done_at IS NULL", SELECT))?;
@@ -209,6 +248,7 @@ fn active_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Result<Vec
         .filter_map(|d| finish(d, today))
         .collect();
     list.extend(portfolio_deadlines(conn, today)?);
+    list.extend(certification_deadlines(conn, today)?);
     list.sort_by(|a, b| a.due_date.cmp(&b.due_date).then_with(|| a.title.cmp(&b.title)));
     Ok(list)
 }

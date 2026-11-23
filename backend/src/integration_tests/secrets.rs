@@ -60,7 +60,8 @@ async fn migracion_cifra_secretos_en_claro() {
              ALTER TABLE email_accounts DROP COLUMN last_check;
              ALTER TABLE backup_jobs DROP COLUMN kind;
              ALTER TABLE backup_jobs DROP COLUMN restic_password;
-             ALTER TABLE backup_jobs DROP COLUMN restic_env;",
+             ALTER TABLE backup_jobs DROP COLUMN restic_env;
+             ALTER TABLE machines DROP COLUMN requires_certification;",
         )
         .unwrap();
         conn.pragma_update(None, "user_version", 4).unwrap();

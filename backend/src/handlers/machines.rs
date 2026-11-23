@@ -22,7 +22,7 @@ use crate::state::{AppState, SessionInfo};
 
 type ApiError = (StatusCode, String);
 
-const MODULE: Option<&str> = Some("machines");
+pub(crate) const MODULE: Option<&str> = Some("machines");
 const TIME_FMT: &str = "%Y-%m-%dT%H:%M";
 pub const KINDS: &[&str] = &["laser", "cnc", "impresora3d", "electronica", "otra"];
 const STATUSES: &[&str] = &["disponible", "fuera_servicio", "retirada"];
@@ -32,23 +32,23 @@ const MAX_DAYS_AHEAD: i64 = 90;
 /// Aviso por Telegram antes de que empiece una reserva
 const REMIND_MIN: i64 = 15;
 
-fn bad(msg: impl Into<String>) -> ApiError {
+pub(crate) fn bad(msg: impl Into<String>) -> ApiError {
     (StatusCode::BAD_REQUEST, msg.into())
 }
-fn forbidden(msg: &str) -> ApiError {
+pub(crate) fn forbidden(msg: &str) -> ApiError {
     (StatusCode::FORBIDDEN, msg.into())
 }
-fn not_found() -> ApiError {
+pub(crate) fn not_found() -> ApiError {
     (StatusCode::NOT_FOUND, "Maquina no encontrada".into())
 }
-fn conflict(msg: impl Into<String>) -> ApiError {
+pub(crate) fn conflict(msg: impl Into<String>) -> ApiError {
     (StatusCode::CONFLICT, msg.into())
 }
-fn db_err(e: rusqlite::Error) -> ApiError {
+pub(crate) fn db_err(e: rusqlite::Error) -> ApiError {
     (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
 }
 
-fn is_staff(s: &SessionInfo) -> bool {
+pub(crate) fn is_staff(s: &SessionInfo) -> bool {
     matches!(s.role, UserRole::Admin | UserRole::Operador)
 }
 
@@ -69,7 +69,7 @@ fn parse_time(s: &str) -> Result<NaiveDateTime, ApiError> {
 }
 
 /// Texto de usuario dentro de un mensaje Markdown de Telegram
-fn md(s: &str) -> String {
+pub(crate) fn md(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         if matches!(c, '_' | '*' | '`' | '[') {
@@ -85,7 +85,7 @@ fn short_time(s: &str) -> String {
     NaiveDateTime::parse_from_str(s, TIME_FMT).map(|t| t.format("%d-%m %H:%M").to_string()).unwrap_or_else(|_| s.to_string())
 }
 
-fn publish(state: &AppState) {
+pub(crate) fn publish(state: &AppState) {
     state.events.publish("machines", (), Audience::All, MODULE);
 }
 
@@ -102,6 +102,8 @@ pub struct Machine {
     pub responsible: Option<String>,
     pub status: String,
     pub requires_approval: bool,
+    /// Solo reserva quien tiene la induccion vigente (el staff no la necesita)
+    pub requires_certification: bool,
     pub max_hours: Option<f64>,
     pub inventory_item_id: Option<String>,
     pub printer3d_id: Option<String>,
@@ -152,7 +154,7 @@ pub struct MachineDetail {
     pub faults: Vec<Fault>,
 }
 
-const MACHINE_COLS: &str = "id, name, kind, location, description, instructions, responsible, status, requires_approval, max_hours, inventory_item_id, printer3d_id, photo_id, created_by, created_at";
+const MACHINE_COLS: &str = "id, name, kind, location, description, instructions, responsible, status, requires_approval, max_hours, inventory_item_id, printer3d_id, photo_id, created_by, created_at, requires_certification";
 const BOOKING_SELECT: &str = "SELECT b.id, b.machine_id, COALESCE(m.name, ''), b.username, b.kind, b.start, b.end, b.purpose, b.status, b.decided_by, b.decided_at, b.created_at
      FROM machine_bookings b LEFT JOIN machines m ON m.id = b.machine_id";
 const FAULT_COLS: &str = "id, machine_id, reported_by, description, photo_id, created_at, resolved_by, resolved_at, resolution_note";
@@ -198,7 +200,7 @@ fn load_faults(conn: &Connection, machine_id: &str, only_open: bool) -> rusqlite
     rows.collect()
 }
 
-fn load_machine(conn: &Connection, id: &str) -> rusqlite::Result<Option<Machine>> {
+pub(crate) fn load_machine(conn: &Connection, id: &str) -> rusqlite::Result<Option<Machine>> {
     let base = conn
         .query_row(&format!("SELECT {} FROM machines WHERE id = ?1", MACHINE_COLS), [id], |r| {
             Ok(Machine {
@@ -217,6 +219,7 @@ fn load_machine(conn: &Connection, id: &str) -> rusqlite::Result<Option<Machine>
                 photo_id: r.get(12)?,
                 created_by: r.get(13)?,
                 created_at: r.get(14)?,
+                requires_certification: r.get::<_, i64>(15)? != 0,
                 current: None,
                 next: None,
                 open_faults: Vec::new(),
@@ -346,6 +349,8 @@ pub struct MachineReq {
     #[serde(default)]
     pub requires_approval: bool,
     #[serde(default)]
+    pub requires_certification: bool,
+    #[serde(default)]
     pub max_hours: Option<f64>,
     #[serde(default)]
     pub inventory_item_id: Option<String>,
@@ -399,12 +404,12 @@ pub async fn create_machine(
     let user = session.username.clone();
     let m = db_op_status(&state.db, move |conn| {
         conn.execute(
-            "INSERT INTO machines (id, name, kind, location, description, instructions, responsible, status, requires_approval, max_hours, inventory_item_id, printer3d_id, created_by, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            "INSERT INTO machines (id, name, kind, location, description, instructions, responsible, status, requires_approval, max_hours, inventory_item_id, printer3d_id, created_by, created_at, requires_certification)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 id, req.name, req.kind, req.location.trim(), req.description.trim(), req.instructions.trim(), req.responsible,
                 req.status.as_deref().unwrap_or("disponible"), req.requires_approval as i64, req.max_hours,
-                req.inventory_item_id, req.printer3d_id, user, chrono::Utc::now().to_rfc3339()
+                req.inventory_item_id, req.printer3d_id, user, chrono::Utc::now().to_rfc3339(), req.requires_certification as i64
             ],
         )
         .map_err(db_err)?;
@@ -428,11 +433,13 @@ pub async fn update_machine(
         let n = conn
             .execute(
                 "UPDATE machines SET name = ?2, kind = ?3, location = ?4, description = ?5, instructions = ?6, responsible = ?7,
-                 status = COALESCE(?8, status), requires_approval = ?9, max_hours = ?10, inventory_item_id = ?11, printer3d_id = ?12
+                 status = COALESCE(?8, status), requires_approval = ?9, max_hours = ?10, inventory_item_id = ?11, printer3d_id = ?12,
+                 requires_certification = ?13
                  WHERE id = ?1",
                 params![
                     id, req.name, req.kind, req.location.trim(), req.description.trim(), req.instructions.trim(), req.responsible,
-                    req.status, req.requires_approval as i64, req.max_hours, req.inventory_item_id, req.printer3d_id
+                    req.status, req.requires_approval as i64, req.max_hours, req.inventory_item_id, req.printer3d_id,
+                    req.requires_certification as i64
                 ],
             )
             .map_err(db_err)?;
@@ -459,7 +466,7 @@ pub async fn delete_machine(
             .optional()
             .map_err(db_err)?
             .ok_or_else(not_found)?;
-        for table in ["machine_bookings", "machine_faults", "machine_photos"] {
+        for table in ["machine_bookings", "machine_faults", "machine_photos", "machine_certifications"] {
             conn.execute(&format!("DELETE FROM {} WHERE machine_id = ?1", table), [&id]).map_err(db_err)?;
         }
         conn.execute("DELETE FROM machines WHERE id = ?1", [&id]).map_err(db_err)?;
@@ -687,6 +694,9 @@ pub async fn create_booking(
                 "fuera_servicio" => return Err(conflict("La maquina esta fuera de servicio hasta que la reparen")),
                 "retirada" => return Err(conflict("La maquina fue retirada")),
                 _ => {}
+            }
+            if m.requires_certification && !staff && !crate::handlers::machine_certs::is_certified(&tx, &machine_id, &user).map_err(db_err)? {
+                return Err(forbidden(&format!("Para reservar {} necesitas la induccion. Pidela desde la ficha de la maquina.", m.name)));
             }
             if let Some(max) = m.max_hours {
                 if hours > max + 1e-9 && !staff {

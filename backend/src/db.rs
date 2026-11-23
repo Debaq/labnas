@@ -357,6 +357,19 @@ const MIGRATIONS: &[&str] = &[
         sent_at TEXT NOT NULL,
         PRIMARY KEY (key, due_date, threshold)
     );",
+    // 20: induccion por maquina (idea 21). `status`: solicitada | vigente
+    "ALTER TABLE machines ADD COLUMN requires_certification INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE IF NOT EXISTS machine_certifications (
+        machine_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        status TEXT NOT NULL,
+        requested_at TEXT,
+        granted_by TEXT,
+        granted_at TEXT,
+        expires_on TEXT,
+        notes TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (machine_id, username)
+    );",
 ];
 
 /// Migracion 16. Publicada: no modificar (ver `MIGRATIONS`).

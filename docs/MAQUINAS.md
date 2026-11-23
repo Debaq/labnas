@@ -11,9 +11,10 @@ Viene encendido. Se apaga en **Configuración > Laboratorio > Módulos**.
 
 | Acción | Quién |
 |---|---|
-| Ver máquinas y reservas, reservar, cancelar sus reservas, reportar fallas | Todos los usuarios aprobados |
+| Ver máquinas y reservas, reservar, cancelar sus reservas, reportar fallas, pedir la inducción | Todos los usuarios aprobados |
 | Crear y editar máquinas, cambiar la foto, imprimir el QR | Operadores y administradores |
 | Aprobar o rechazar reservas, bloquear horarios, cancelar reservas ajenas, marcar fallas reparadas | Operadores y administradores |
+| Dar, renovar o quitar inducciones | Operadores y administradores |
 | Eliminar una máquina (con sus reservas y fallas) | Administradores |
 
 Todo queda en la **auditoría** (Configuración > Sistema).
@@ -28,6 +29,25 @@ Todo queda en la **auditoría** (Configuración > Sistema).
   rechazarla, la persona recibe un aviso.
 - Los operadores pueden **bloquear un horario** (mantención, clase) para que nadie reserve.
 - **15 minutos antes** de cada reserva confirmada llega un recordatorio por Telegram.
+
+## Inducción
+
+Al editar una máquina se puede marcar **«Exigir inducción para reservar»**. Desde ese
+momento solo reserva quien tiene la inducción vigente de esa máquina; operadores y
+administradores no la necesitan.
+
+1. La persona entra a la ficha y toca **Pedir inducción** (con una nota opcional:
+   cuándo puede, para qué la necesita). El responsable de la máquina, los operadores y
+   los administradores reciben un aviso por Telegram y en la web.
+2. Después de hacerla, un operador la marca como hecha en la ficha o en la pestaña
+   **Por aprobar** («Ya la hizo»). Puede ponerle **fecha de vencimiento**; sin fecha no
+   vence. La persona recibe un aviso.
+3. En la ficha el staff ve quién tiene la inducción, quién la pidió y quién la tiene
+   vencida, y puede darla directamente a alguien, renovarla o quitarla.
+
+Los vencimientos aparecen en **Plazos** (con sus avisos a 30, 7 y 1 día y el mismo día) y
+desaparecen 30 días después de vencer. Una inducción vencida no deja reservar: hay que
+pedirla de nuevo.
 
 ## Fallas
 
@@ -55,6 +75,6 @@ Notificaciones). Sin chat vinculado, la persona solo ve el aviso en la web.
 
 ## Lo que viene
 
-Este módulo es la base de varias ideas de la hoja de ruta: exigir la inducción para
-reservar (idea 21), llave electrónica (18), mantenimiento por horas de uso (5) y una sola
+Este módulo es la base de varias ideas de la hoja de ruta: llave electrónica que solo
+habilita a quien tiene la inducción (18), mantenimiento por horas de uso (5) y una sola
 cola para todas las máquinas (23).

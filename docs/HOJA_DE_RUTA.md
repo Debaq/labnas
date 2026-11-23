@@ -250,15 +250,17 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
 
 ## Etapa 3 · Acceso y uso de máquinas
 
-- [ ] **21. Certificaciones por máquina:** tras la inducción la persona queda
-      habilitada; eso desbloquea reservas y llave electrónica.
+- [x] **21. Certificaciones por máquina:** tras la inducción la persona queda
+      habilitada; eso desbloquea reservas y llave electrónica. *Hecho en el módulo
+      Máquinas: se pide desde la ficha, la da un operador con vencimiento opcional y los
+      vencimientos salen en Plazos. Falta la llave electrónica (idea 18).*
 - [ ] **18. Llave electrónica por máquina:** ESP32 con lector de tarjeta y relé que
       habilita la máquina solo a quien tiene la certificación vigente y registra
       quién la usó y cuánto tiempo.
 - [ ] **2. Reserva de equipos** con calendario sin choques de horario, exigencia de
       certificación y registro de horas. *(en parte: el módulo Máquinas ya reserva sin
-      choques, con aprobación opcional y recordatorio; falta exigir la certificación
-      —idea 21— y registrar las horas reales de uso —idea 19—)*
+      choques, con aprobación opcional, recordatorio y exigencia de inducción; falta
+      registrar las horas reales de uso —idea 19—)*
 - [ ] **5. Mantenimiento y calibración:** bitácora por equipo y recordatorios (por
       fecha o por horas de uso: boquilla tras X kg, lente láser tras X horas).
 - [ ] **23. Una sola cola para todas las máquinas** (3D, láser, CNC, vinilo) con

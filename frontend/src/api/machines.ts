@@ -44,6 +44,8 @@ export interface Machine {
   responsible: string | null
   status: MachineStatus
   requires_approval: boolean
+  /** Solo reserva quien tiene la induccion vigente (el staff no la necesita) */
+  requires_certification: boolean
   max_hours: number | null
   inventory_item_id: string | null
   printer3d_id: string | null
@@ -68,6 +70,7 @@ export interface MachineInput {
   responsible: string | null
   status?: MachineStatus
   requires_approval: boolean
+  requires_certification: boolean
   max_hours: number | null
   inventory_item_id?: string | null
   printer3d_id?: string | null
@@ -152,6 +155,47 @@ export async function reportFault(machineId: string, description: string, photo?
     await api(`/api/machines/${encodeURIComponent(machineId)}/faults`, post({ description, photo })),
     'Error al reportar la falla',
   )
+}
+
+// --- Induccion por maquina ---
+
+export interface MachineCertification {
+  machine_id: string
+  machine_name: string
+  username: string
+  status: 'solicitada' | 'vigente' | 'vencida'
+  requested_at: string | null
+  granted_by: string | null
+  granted_at: string | null
+  /** `YYYY-MM-DD`; null = no vence */
+  expires_on: string | null
+  notes: string
+}
+
+const certsUrl = (machineId: string) => `/api/machines/${encodeURIComponent(machineId)}/certifications`
+
+export async function fetchCertifications(machineId: string): Promise<MachineCertification[]> {
+  return jsonOrThrow(await api(certsUrl(machineId)), 'Error al obtener las inducciones')
+}
+
+export async function fetchAllCertifications(q: { mine?: boolean; status?: string } = {}): Promise<MachineCertification[]> {
+  const p = new URLSearchParams()
+  if (q.mine) p.set('mine', 'true')
+  if (q.status) p.set('status', q.status)
+  return jsonOrThrow(await api(`/api/machines/certifications?${p}`), 'Error al obtener las inducciones')
+}
+
+export async function requestCertification(machineId: string, notes = ''): Promise<MachineCertification> {
+  return jsonOrThrow(await api(`${certsUrl(machineId)}/request`, post({ notes })), 'Error al pedir la induccion')
+}
+
+export async function grantCertification(machineId: string, data: { username: string; expires_on?: string | null; notes?: string }): Promise<MachineCertification> {
+  return jsonOrThrow(await api(certsUrl(machineId), post(data)), 'Error al dar la induccion')
+}
+
+export async function revokeCertification(machineId: string, username: string): Promise<void> {
+  const res = await api(`${certsUrl(machineId)}/${encodeURIComponent(username)}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al quitar la induccion')
 }
 
 export async function resolveFault(faultId: string, note: string): Promise<MachineFault> {

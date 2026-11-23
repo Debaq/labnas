@@ -8,6 +8,7 @@
 - **Etiqueta QR** para imprimir y pegar en cada máquina: al escanearla se abre la ficha (pide iniciar sesión si hace falta)
 - **Reservas sin choques de horario**, con máximo de horas por máquina y aprobación opcional de un operador (aviso por Telegram). Los operadores pueden bloquear horarios para mantención o clases. Recordatorio por Telegram 15 minutos antes
 - **Reporte de fallas con foto**: la máquina queda fuera de servicio hasta que un operador la marca reparada; avisos por Telegram a operadores y a quienes tenían reservas. Historial de fallas por máquina
+- **Inducción por máquina:** cada máquina puede exigirla para reservar. Se pide desde la ficha (aviso al responsable y a operadores), un operador la da con vencimiento opcional, y los vencimientos aparecen en Plazos
 - Detalle en `docs/MAQUINAS.md`
 
 ### Plazos (módulo nuevo)

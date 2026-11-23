@@ -113,3 +113,61 @@ async fn maquinas_acceso_y_modulo() {
     assert_eq!(s.put("/api/modules/machines", &admin, json!({ "enabled": false })).await.status, 200);
     assert_eq!(s.get("/api/machines", &ana).await.status, 404);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn maquinas_induccion() {
+    let s = Server::start().await;
+    let admin = s.admin().await;
+    let ana = s.user(&admin, "ana", "observador").await;
+    let eva = s.user(&admin, "eva", "observador").await;
+    let op = s.user(&admin, "op", "operador").await;
+
+    let r = s.post("/api/machines", &op, json!({ "name": "Laser", "kind": "laser", "requires_certification": true, "responsible": "eva" })).await;
+    assert_eq!(r.json()["requires_certification"], true);
+    let laser = id(&r.json());
+    let book = format!("/api/machines/{}/bookings", laser);
+    let certs = format!("/api/machines/{}/certifications", laser);
+
+    // sin induccion no reserva (el staff si)
+    let r = s.post(&book, &ana, json!({ "start": tomorrow(10, 0), "end": tomorrow(11, 0) })).await;
+    assert_eq!(r.status, 403);
+    assert!(r.text.contains("induccion"));
+    assert_eq!(s.post(&book, &op, json!({ "start": tomorrow(8, 0), "end": tomorrow(9, 0) })).await.status, 201);
+
+    // pedirla: una sola vez
+    let r = s.post(&format!("{}/request", certs), &ana, json!({ "notes": "Para mi tesis" })).await;
+    assert_eq!(r.status, 201);
+    assert_eq!(r.json()["status"], "solicitada");
+    assert_eq!(s.post(&format!("{}/request", certs), &ana, json!({})).await.status, 409);
+    let pend = s.get("/api/machines/certifications?status=solicitada", &op).await.json();
+    assert_eq!(pend.as_array().unwrap().len(), 1);
+    assert_eq!(pend[0]["machine_name"], "Laser");
+
+    // solo staff la da; usuario valido; vencimiento futuro
+    assert_eq!(s.post(&certs, &eva, json!({ "username": "ana" })).await.status, 403);
+    assert_eq!(s.post(&certs, &op, json!({ "username": "nadie" })).await.status, 400);
+    assert_eq!(s.post(&certs, &op, json!({ "username": "ana", "expires_on": "2020-01-01" })).await.status, 400);
+    let vence = (Local::now().date_naive() + Duration::days(20)).format("%Y-%m-%d").to_string();
+    let r = s.post(&certs, &op, json!({ "username": "ana", "expires_on": vence })).await;
+    assert_eq!(r.status, 200);
+    assert_eq!(r.json()["status"], "vigente");
+    assert_eq!(r.json()["notes"], "Para mi tesis", "conserva la nota de la solicitud");
+    assert_eq!(s.post(&format!("{}/request", certs), &ana, json!({})).await.status, 409, "ya la tiene");
+    assert_eq!(s.post(&book, &ana, json!({ "start": tomorrow(10, 0), "end": tomorrow(11, 0) })).await.status, 201);
+    let mias = s.get("/api/machines/certifications?mine=true", &ana).await.json();
+    assert_eq!(mias.as_array().unwrap().len(), 1);
+
+    // el vencimiento aparece en Plazos
+    let plazos = s.get("/api/deadlines", &ana).await.json();
+    let d = plazos.as_array().unwrap().iter().find(|d| d["source"] == "induccion").expect("plazo de induccion");
+    assert_eq!(d["days_left"], 20);
+    assert_eq!(d["category"], "licencia");
+
+    // quitarla: solo staff; la propia solicitud si se puede retirar
+    assert_eq!(s.delete(&format!("{}/ana", certs), &ana).await.status, 403);
+    assert_eq!(s.delete(&format!("{}/ana", certs), &op).await.status, 204);
+    assert_eq!(s.post(&book, &ana, json!({ "start": tomorrow(12, 0), "end": tomorrow(13, 0) })).await.status, 403);
+    assert_eq!(s.post(&format!("{}/request", certs), &eva, json!({})).await.status, 201);
+    assert_eq!(s.delete(&format!("{}/eva", certs), &eva).await.status, 204);
+    assert_eq!(s.get(&certs, &eva).await.json().as_array().unwrap().len(), 0);
+}

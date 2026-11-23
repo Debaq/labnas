@@ -726,6 +726,7 @@ fn api_routes() -> Router<AppState> {
         .route("/api/machines/bookings/{id}/reject", post(handlers::machines::reject_booking))
         .route("/api/machines/photos/{id}", get(handlers::machines::get_photo))
         .route("/api/machines/faults/{id}/resolve", post(handlers::machines::resolve_fault))
+        .route("/api/machines/certifications", get(handlers::machine_certs::list_all))
         .route("/api/machines/{id}", get(handlers::machines::get_machine))
         .route("/api/machines/{id}", put(handlers::machines::update_machine))
         .route("/api/machines/{id}", delete(handlers::machines::delete_machine))
@@ -733,6 +734,10 @@ fn api_routes() -> Router<AppState> {
         .route("/api/machines/{id}/qr", get(handlers::machines::machine_qr))
         .route("/api/machines/{id}/bookings", post(handlers::machines::create_booking))
         .route("/api/machines/{id}/faults", post(handlers::machines::report_fault))
+        .route("/api/machines/{id}/certifications", get(handlers::machine_certs::list_for_machine))
+        .route("/api/machines/{id}/certifications", post(handlers::machine_certs::grant))
+        .route("/api/machines/{id}/certifications/request", post(handlers::machine_certs::request))
+        .route("/api/machines/{id}/certifications/{username}", delete(handlers::machine_certs::revoke))
         // Plazos
         .route("/api/deadlines", get(handlers::deadlines::list_deadlines))
         .route("/api/deadlines", post(handlers::deadlines::create_deadline))

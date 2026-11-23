@@ -35,6 +35,7 @@ export default function MachineFormModal({ machine, onClose, onSaved }: Props) {
     responsible: machine?.responsible ?? null,
     status: machine?.status ?? 'disponible',
     requires_approval: machine?.requires_approval ?? false,
+    requires_certification: machine?.requires_certification ?? false,
     max_hours: machine?.max_hours ?? null,
     inventory_item_id: machine?.inventory_item_id ?? null,
     printer3d_id: machine?.printer3d_id ?? null,
@@ -127,6 +128,10 @@ export default function MachineFormModal({ machine, onClose, onSaved }: Props) {
           <label className="flex items-center gap-2 cursor-pointer" style={{ color: 'var(--text-primary)' }}>
             <input type="checkbox" checked={form.requires_approval} onChange={(e) => set('requires_approval', e.target.checked)} />
             Las reservas requieren aprobacion de un operador
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer" style={{ color: 'var(--text-primary)' }}>
+            <input type="checkbox" checked={form.requires_certification} onChange={(e) => set('requires_certification', e.target.checked)} />
+            Exigir induccion para reservar (operadores y administradores no la necesitan)
           </label>
           <label className="block">
             <span className="text-xs" style={labelStyle}>Descripcion</span>
