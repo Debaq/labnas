@@ -12,6 +12,7 @@ mod events;
 mod ledger;
 mod machines;
 mod deadlines;
+mod device_tokens;
 mod files;
 mod folders;
 mod https;

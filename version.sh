@@ -34,10 +34,15 @@ sync_version() {
     sed -i "s/^version = \".*\"/version = \"${version}\"/" "$ROOT_DIR/viewer/Cargo.toml"
     echo -e "  ${GREEN}✓${NC} viewer/Cargo.toml → ${version}"
 
+    # tray/Cargo.toml
+    sed -i "s/^version = \".*\"/version = \"${version}\"/" "$ROOT_DIR/tray/Cargo.toml"
+    echo -e "  ${GREEN}✓${NC} tray/Cargo.toml → ${version}"
+
     # Cargo.lock (el release compila con --locked: la version del paquete debe coincidir)
     sed -i '/^name = "labnas-backend"$/{n;s/^version = ".*"/version = "'"${version}"'"/}' "$ROOT_DIR/backend/Cargo.lock"
     sed -i '/^name = "labnas-viewer"$/{n;s/^version = ".*"/version = "'"${version}"'"/}' "$ROOT_DIR/viewer/Cargo.lock"
-    echo -e "  ${GREEN}✓${NC} Cargo.lock (backend y visor) → ${version}"
+    sed -i '/^name = "labnas-tray"$/{n;s/^version = ".*"/version = "'"${version}"'"/}' "$ROOT_DIR/tray/Cargo.lock"
+    echo -e "  ${GREEN}✓${NC} Cargo.lock (backend, visor y bandeja) → ${version}"
 
     # package.json
     sed -i "s/\"version\": \".*\"/\"version\": \"${version}\"/" "$ROOT_DIR/frontend/package.json"

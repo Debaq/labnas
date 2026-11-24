@@ -281,3 +281,83 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ steps.version.outputs.tag }}" "${{ env.tarball }}" "${{ env.tarball }}.sha256" --clobber
+
+  tray:
+    name: Bandeja ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    needs: viewer
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: x86_64
+            runner: ubuntu-24.04
+          - os: linux
+            arch: aarch64
+            runner: ubuntu-24.04-arm
+          - os: windows
+            arch: x86_64
+            runner: windows-2022
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Extraer version del tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Instalar deps GTK y AppIndicator
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libayatana-appindicator3-dev pkg-config
+
+      - name: Cache Rust
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tray/target
+          key: ${{ runner.os }}-tray-${{ matrix.arch }}-cargo-${{ hashFiles('tray/Cargo.lock') }}
+
+      - name: Build bandeja
+        working-directory: tray
+        run: cargo build --release --locked
+
+      - name: Empaquetar (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DIR="labnas-tray"
+          mkdir -p "$DIR"
+          cp tray/target/release/labnas-tray "$DIR/"
+          cp tray/install.sh "$DIR/"
+          ASSET="labnas-tray-v${VERSION}-linux-${{ matrix.arch }}.tar.gz"
+          tar czf "$ASSET" "$DIR"
+          sha256sum "$ASSET" > "$ASSET.sha256"
+          echo "asset=$ASSET" >> "$GITHUB_ENV"
+
+      - name: Empaquetar (Windows)
+        if: matrix.os == 'windows'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          ASSET="labnas-tray-v${VERSION}-windows-${{ matrix.arch }}.zip"
+          cp tray/target/release/labnas-tray.exe .
+          7z a "$ASSET" labnas-tray.exe
+          sha256sum "$ASSET" > "$ASSET.sha256"
+          echo "asset=$ASSET" >> "$GITHUB_ENV"
+
+      - name: Subir asset al release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ steps.version.outputs.tag }}" "${{ env.asset }}" "${{ env.asset }}.sha256" --clobber

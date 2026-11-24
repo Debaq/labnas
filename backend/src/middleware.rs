@@ -124,6 +124,9 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         ("GET", ["auth", "usernames"]) => User,
         ("GET", ["auth", "2fa"]) | ("POST", ["auth", "2fa", _]) => User,
         ("POST", ["auth", "passkey", "register", ..]) | ("GET", ["auth", "passkeys"]) | ("DELETE", ["auth", "passkeys", _]) => User,
+        // Tokens de dispositivo propios (labnas-tray)
+        ("GET", ["auth", "device-tokens"]) | ("POST", ["auth", "device-tokens"]) => User,
+        ("GET", ["auth", "device-tokens", "me"]) | ("DELETE", ["auth", "device-tokens", _]) => User,
 
         // --- Modulos ---
         ("GET", ["modules"]) => User,
@@ -303,6 +306,24 @@ pub async fn permission_check(
         }
     }
 
+    // Token de dispositivo (labnas-tray): solo por header y solo en su alcance
+    if crate::handlers::device_tokens::is_device_token(&token) {
+        if from_cookie || !crate::handlers::device_tokens::scope_allows(&method, &path) {
+            return (StatusCode::FORBIDDEN, "Este token de dispositivo no sirve para esta accion").into_response();
+        }
+        let Some(session) = crate::handlers::device_tokens::session_for(&state, &token).await else {
+            return (StatusCode::UNAUTHORIZED, "Dispositivo no vinculado o revocado").into_response();
+        };
+        if session.role == UserRole::Pendiente {
+            return (StatusCode::FORBIDDEN, "Tu cuenta esta pendiente de aprobacion").into_response();
+        }
+        if !allowed(required_access(&method, &path), &session) {
+            return (StatusCode::FORBIDDEN, "Sin permisos para esta accion").into_response();
+        }
+        request.extensions_mut().insert(session);
+        return next.run(request).await;
+    }
+
     let session = state.sessions.lock().await.get(&token).cloned();
     let Some(session) = session else {
         return (StatusCode::UNAUTHORIZED, "Sesion invalida").into_response();
@@ -454,6 +475,9 @@ mod tests {
         assert_eq!(acc(Method::DELETE, "/api/auth/passkeys/abc"), User);
         assert!(is_public("/api/auth/passkey/login"));
         assert_eq!(acc(Method::POST, "/api/music/play"), User);
+        assert_eq!(acc(Method::POST, "/api/auth/device-tokens"), User);
+        assert_eq!(acc(Method::DELETE, "/api/auth/device-tokens/abc"), User);
+        assert_eq!(acc(Method::GET, "/api/auth/device-tokens/me"), User);
         assert_eq!(acc(Method::GET, "/api/email/proposals"), User);
         assert_eq!(acc(Method::POST, "/api/email/oauth/microsoft/start"), User);
         assert_eq!(acc(Method::GET, "/api/email/oauth/microsoft/config"), User);

@@ -376,6 +376,16 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE camera_detections ADD COLUMN tg_error TEXT;
     CREATE INDEX IF NOT EXISTS idx_camera_detections_rule ON camera_detections(detector_id, at);
     CREATE INDEX IF NOT EXISTS idx_camera_detections_cam ON camera_detections(camera_id, at);",
+    // 22: tokens de dispositivo (labnas-tray): solo el hash; valen hasta que se revocan
+    "CREATE TABLE IF NOT EXISTS device_tokens (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL REFERENCES web_users(username) ON DELETE CASCADE ON UPDATE CASCADE,
+        name TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        last_used TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(username);",
 ];
 
 /// Migracion 16. Publicada: no modificar (ver `MIGRATIONS`).

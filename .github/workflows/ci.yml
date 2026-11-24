@@ -48,7 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: shellcheck
-        run: shellcheck install.sh setup-smart.sh labnas-smart-read setup-snapshots.sh labnas-snapshot setup-obico.sh viewer/install.sh bridge/check-php7.sh
+        run: shellcheck install.sh setup-smart.sh labnas-smart-read setup-snapshots.sh labnas-snapshot setup-obico.sh viewer/install.sh tray/install.sh bridge/check-php7.sh
 
   bridge:
     name: Conector PHP (PHP ${{ matrix.php }})
@@ -155,3 +155,39 @@ jobs:
       - name: clippy
         working-directory: viewer
         run: cargo clippy -- -D warnings
+
+  tray:
+    name: Bandeja (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Instalar deps GTK y AppIndicator
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libayatana-appindicator3-dev pkg-config
+
+      - name: Cache Rust
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tray/target
+          key: ${{ runner.os }}-ci-tray-${{ hashFiles('tray/Cargo.lock') }}
+
+      - name: clippy
+        working-directory: tray
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: tests
+        working-directory: tray
+        run: cargo test --locked

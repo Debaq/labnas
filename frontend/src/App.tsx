@@ -28,6 +28,7 @@ const CamerasPage = lazy(() => import('./pages/CamerasPage'))
 const MachinesPage = lazy(() => import('./pages/MachinesPage'))
 const MachineDetailPage = lazy(() => import('./pages/MachineDetailPage'))
 const DeadlinesPage = lazy(() => import('./pages/DeadlinesPage'))
+const DeviceLinkPage = lazy(() => import('./pages/DeviceLinkPage'))
 const SetupWizard = lazy(() => import('./components/SetupWizard'))
 
 // Registro de modulos: mapea module_id -> ruta + componente
@@ -106,6 +107,8 @@ function AppRoutes() {
           {/* Rutas no-modulo: siempre disponibles */}
           <Route path="/playlists/:id" element={<PlaylistEditorPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          {/* labnas-tray: autorizar un dispositivo (se abre desde la bandeja) */}
+          <Route path="/vincular" element={<DeviceLinkPage />} />
           <Route path="/admin" element={<Navigate to="/settings" replace />} />
           {/* Catch-all: redirige a dashboard */}
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

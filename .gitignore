@@ -1,5 +1,7 @@
 # Rust
 backend/target/
+viewer/target/
+tray/target/
 backend/**/*.rs.bk
 
 # Node

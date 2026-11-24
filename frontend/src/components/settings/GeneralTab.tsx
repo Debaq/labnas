@@ -7,6 +7,7 @@ import { renameUser, changePassword } from '../../api'
 import { errorMessage } from '../../lib/errors'
 import TwoFactorSection from '../TwoFactorSection'
 import PasskeysSection from '../PasskeysSection'
+import DeviceTokensSection from '../DeviceTokensSection'
 function ThemeCard({
   name,
   isSelected,
@@ -235,6 +236,7 @@ export default function GeneralTab() {
 
       <TwoFactorSection />
       <PasskeysSection />
+      <DeviceTokensSection />
     </>
   )
 }
