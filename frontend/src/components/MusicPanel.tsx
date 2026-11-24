@@ -101,10 +101,27 @@ export default function MusicPanel() {
     setElapsed(musicState.elapsed || 0)
   }, [musicState.current?.id, musicState.paused, musicState.elapsed])
 
-  async function handleSearch() {
-    if (!searchQuery.trim()) return
+  async function handleSearch(query: string = searchQuery) {
+    if (!query.trim()) return
     setSearching(true)
-    try { setSearchResults(await searchMusic(searchQuery)) } catch {} finally { setSearching(false) }
+    try { setSearchResults(await searchMusic(query)) } catch {} finally { setSearching(false) }
+  }
+
+  function handleArtistSearch(artist: string) {
+    if (!artist?.trim()) return
+    setSearchQuery(artist)
+    handleSearch(artist)
+  }
+
+  function artistLink(artist: string) {
+    return (
+      <span role="button" tabIndex={0} title={`Buscar canciones de ${artist}`}
+        className="cursor-pointer hover:underline"
+        onClick={e => { e.stopPropagation(); handleArtistSearch(artist) }}
+        onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); handleArtistSearch(artist) } }}>
+        {artist}
+      </span>
+    )
   }
 
   async function handlePlay(id: string, force?: boolean) {
@@ -234,7 +251,7 @@ export default function MusicPanel() {
             className="flex-1 px-3 py-1.5 rounded-lg text-xs outline-none"
             style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}
           />
-          <button onClick={handleSearch} disabled={searching || !searchQuery.trim()}
+          <button onClick={() => handleSearch()} disabled={searching || !searchQuery.trim()}
             className="p-1.5 rounded-lg" style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
             {searching ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
           </button>
@@ -249,7 +266,7 @@ export default function MusicPanel() {
             <img src={musicState.current.thumbnail} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0" style={{ border: '1px solid var(--border)' }} />
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium leading-tight" style={{ color: 'var(--text-primary)' }}>{musicState.current.title}</p>
-              <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>{musicState.current.artist}</p>
+              <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>{artistLink(musicState.current.artist)}</p>
               <div className="flex items-center gap-1 mt-1">
                 <p className="text-[9px]" style={{ color: 'var(--text-secondary)', opacity: 0.6 }}>
                   {musicState.current.added_by || musicState.started_by}
@@ -455,7 +472,7 @@ export default function MusicPanel() {
                   <img src={track.thumbnail} alt="" className="w-8 h-8 rounded object-cover shrink-0" onClick={() => !loadingTrack && handlePlay(track.id)} />
                   <div className="flex-1 min-w-0 cursor-pointer" onClick={() => !loadingTrack && handlePlay(track.id)}>
                     <p className="text-[11px] truncate" style={{ color: 'var(--text-primary)' }}>{track.title}</p>
-                    <p className="text-[10px] truncate" style={{ color: 'var(--text-secondary)' }}>{track.artist} · {formatDuration(track.duration)}</p>
+                    <p className="text-[10px] truncate" style={{ color: 'var(--text-secondary)' }}>{artistLink(track.artist)} · {formatDuration(track.duration)}</p>
                   </div>
                   {/* Add to playlist dropdown */}
                   {playlists.length > 0 && (
@@ -516,7 +533,7 @@ export default function MusicPanel() {
                       <img src={track.thumbnail} alt="" className="w-7 h-7 rounded object-cover shrink-0 cursor-pointer hover:opacity-80" onClick={() => handlePlayFromQueue(i)} />
                       <div className="flex-1 min-w-0 cursor-pointer" onClick={() => handlePlayFromQueue(i)}>
                         <p className="text-[10px] truncate leading-tight" style={{ color: 'var(--text-primary)' }}>{track.title}</p>
-                        <p className="text-[9px] truncate" style={{ color: 'var(--text-secondary)' }}>{track.artist} · {formatDuration(track.duration)}</p>
+                        <p className="text-[9px] truncate" style={{ color: 'var(--text-secondary)' }}>{artistLink(track.artist)} · {formatDuration(track.duration)}</p>
                       </div>
                       <div className="flex items-center gap-0 opacity-0 group-hover:opacity-100 transition-opacity">
                         {i > 0 && <button onClick={() => handleMoveInQueue(i, 0)} className="p-0.5" style={{ color: 'var(--accent)' }} title="Poner siguiente"><ArrowUpToLine size={10} /></button>}
