@@ -355,7 +355,7 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
 - [x] Revisión automática de dependencias en el CI (cargo-audit, dependabot).
 - [x] Un tipo de error común en el backend. *(`error.rs`: `ApiError`, `internal`, `db_err`)*
 - [ ] SMB/NFS (lo necesita la idea 9).
-- [ ] Partir las páginas grandes del frontend (impresoras 3D, tareas, ajustes).
+- [x] Partir las páginas grandes del frontend (impresoras 3D, tareas, ajustes).
 
 ## Ya hecho (referencia)
 
