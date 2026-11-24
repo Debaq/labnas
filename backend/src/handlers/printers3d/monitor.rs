@@ -65,6 +65,24 @@ fn finish_timelapse(state: &AppState, printer_name: String, dir: std::path::Path
     });
 }
 
+/// Ultimo estado visto de cada impresora (imprimiendo, cuando): la deteccion de
+/// impresion fallida solo analiza mientras imprime
+static PRINTING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, (bool, std::time::Instant)>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// ¿Esta imprimiendo? None si el monitor no la ha visto hace rato (modulo apagado, etc.)
+pub fn printing_now(id: &str) -> Option<bool> {
+    let m = PRINTING.lock().ok()?;
+    let (printing, at) = m.get(id)?;
+    (at.elapsed() < Duration::from_secs(120)).then_some(*printing)
+}
+
+fn set_printing(id: &str, printing: bool) {
+    if let Ok(mut m) = PRINTING.lock() {
+        m.insert(id.to_string(), (printing, std::time::Instant::now()));
+    }
+}
+
 /// Espera antes de la foto de fin: muchas impresoras retiran el cabezal al terminar
 #[cfg(not(test))]
 const FINISH_PHOTO_DELAY: Duration = Duration::from_secs(12);
@@ -163,13 +181,18 @@ pub async fn printer_monitor_loop(state: AppState) {
         }
 
         for (printer, status) in printers.iter().zip(results) {
-            let Some(status) = status else { continue };
+            let Some(status) = status else {
+                set_printing(&printer.id, false);
+                continue;
+            };
             if !status.online {
+                set_printing(&printer.id, false);
                 continue;
             }
 
             let job_state = status.current_job.as_ref().map(|j| j.state.to_lowercase()).unwrap_or_default();
             let is_printing = job_state.contains("printing");
+            set_printing(&printer.id, is_printing);
             let has_error = job_state.contains("error");
             let file_name = status.current_job.as_ref().map(|j| j.file_name.clone()).unwrap_or_default();
 

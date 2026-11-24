@@ -36,7 +36,13 @@ const MODEL_SHA256: &str = "c789161ed43c8269fcd4e67c67eeeb4e80c622da2eb296a20bc6
 const MODEL_FILE: &str = "yolox_nano.onnx";
 const MODEL_MAX_BYTES: usize = 20 * 1024 * 1024;
 
-pub const KINDS: &[(&str, &str)] = &[("personas", "Personas"), ("objetos", "Objetos"), ("movimiento", "Movimiento")];
+pub const KINDS: &[(&str, &str)] = &[
+    ("personas", "Personas"),
+    ("objetos", "Objetos"),
+    ("movimiento", "Movimiento"),
+    ("falla_impresion", "Impresión fallida (Obico)"),
+];
+const FAILED_PRINT: &str = "falla_impresion";
 /// Lunes = 0 ... domingo = 6
 const DAY_NAMES: [&str; 7] = ["lun", "mar", "mie", "jue", "vie", "sab", "dom"];
 
@@ -61,9 +67,12 @@ pub struct Actions {
     /// Segundos de video al detectar (0 = no grabar)
     #[serde(default)]
     pub clip_s: u32,
-    /// El aviso de Telegram llega tambien a las personas autorizadas (si no, solo a los admins)
+    /// Impresion fallida: impresora que mira la camara (solo se analiza mientras imprime)
     #[serde(default)]
-    pub telegram_watchers: bool,
+    pub printer_id: Option<String>,
+    /// Impresion fallida: pausarla cuando la falla es clara (exige mas que el aviso)
+    #[serde(default)]
+    pub pause_printer: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,6 +134,14 @@ fn validate(r: &RuleInput) -> Result<(), ApiError> {
         }
         if let Some(c) = r.classes.iter().find(|c| vision::class_index(c).is_none()) {
             return Err(bad(&format!("Objeto desconocido: {}", c)));
+        }
+    }
+    if r.kind == FAILED_PRINT {
+        if r.actions.pause_printer && r.actions.printer_id.as_deref().unwrap_or("").is_empty() {
+            return Err(bad("Para pausar, elige la impresora"));
+        }
+        if r.interval_s < 5 {
+            return Err(bad("Para impresion fallida, analiza cada 5 segundos o mas (Obico usa 10)"));
         }
     }
     let (lo, hi) = if r.kind == "movimiento" { (0.005, 0.8) } else { (0.1, 0.95) };
@@ -283,6 +300,9 @@ pub static TEST_DETECTIONS: StdMutex<Option<Vec<Detection>>> = StdMutex::new(Non
 /// Corre la regla sobre un cuadro. `prev`: cuadro gris anterior (movimiento)
 async fn analyze(state: &AppState, rule: &RuleInput, jpeg: axum::body::Bytes, prev: Option<Vec<u8>>) -> Result<(Vec<Detection>, Option<Vec<u8>>), String> {
     let kind = rule.kind.clone();
+    if kind == FAILED_PRINT {
+        return super::obico::detect(state, jpeg).await.map(|d| (d, None));
+    }
     if kind != "movimiento" {
         #[cfg(test)]
         if let Some(d) = TEST_DETECTIONS.lock().unwrap().clone() {
@@ -335,6 +355,14 @@ pub struct Runtime {
     last_fire: Option<Instant>,
     #[serde(skip)]
     prev_gray: Option<Vec<u8>>,
+    /// Impresion fallida: nivel actual (0 a 1) y estado del suavizado
+    pub fail_level: Option<f32>,
+    #[serde(skip)]
+    smoother: super::obico::Smoother,
+    #[serde(skip)]
+    was_printing: bool,
+    #[serde(skip)]
+    paused: bool,
 }
 
 static RUNTIME: LazyLock<StdMutex<HashMap<String, Runtime>>> = LazyLock::new(Default::default);
@@ -353,6 +381,7 @@ fn kind_label(r: &RuleInput) -> String {
     match r.kind.as_str() {
         "personas" => "personas".into(),
         "movimiento" => "movimiento".into(),
+        FAILED_PRINT => "impresion fallida".into(),
         _ => r
             .classes
             .iter()
@@ -387,10 +416,36 @@ pub async fn detection_loop(state: AppState) {
 
         for rule in active {
             let cam = &cameras[&rule.input.camera_id];
-            // Mantener la camara encendida mientras la regla esta activa
+            let rt = runtime(&rule.id);
+            let failed_print = rule.input.kind == FAILED_PRINT;
+            if failed_print {
+                // Solo mientras imprime; si no se sabe (modulo de impresoras apagado), se analiza
+                let printing = rule
+                    .input
+                    .actions
+                    .printer_id
+                    .as_deref()
+                    .and_then(crate::handlers::printers3d::printing_now)
+                    .unwrap_or(true);
+                let started = printing && !rt.was_printing;
+                update_runtime(&rule.id, |r| {
+                    r.was_printing = printing;
+                    if started {
+                        r.smoother.new_print();
+                        r.paused = false;
+                    }
+                    if !printing {
+                        r.fail_level = None;
+                    }
+                });
+                if !printing {
+                    continue;
+                }
+            }
+            // Mantener la camara encendida mientras la regla esta activa (y, en impresion
+            // fallida, mientras imprime)
             let h = hub::ensure(&state, cam.spec());
             h.touch_lease();
-            let rt = runtime(&rule.id);
             if rt.last_run.is_some_and(|t| t.elapsed() < Duration::from_secs(rule.input.interval_s as u64)) {
                 continue;
             }
@@ -405,9 +460,27 @@ pub async fn detection_loop(state: AppState) {
                         }
                     });
                     let cooled = rt.last_fire.is_none_or(|t| t.elapsed() >= Duration::from_secs(rule.input.cooldown_s as u64));
-                    if !dets.is_empty() && cooled {
-                        update_runtime(&rule.id, |r| r.last_fire = Some(Instant::now()));
-                        fire(&state, rule, cam, frame, dets).await;
+                    // Impresion fallida: decide el suavizado, no un cuadro suelto
+                    let (hit, pause) = if failed_print {
+                        let p: f32 = dets.iter().map(|d| d.score).sum();
+                        let low = rule.input.min_score;
+                        let mut verdict = super::obico::Verdict::Ok;
+                        update_runtime(&rule.id, |r| {
+                            verdict = r.smoother.push(p, low);
+                            r.fail_level = Some(r.smoother.level(low));
+                        });
+                        (verdict != super::obico::Verdict::Ok, verdict == super::obico::Verdict::Pause)
+                    } else {
+                        (!dets.is_empty(), false)
+                    };
+                    // La pausa no espera la pausa entre avisos (una vez por impresion)
+                    let pause = pause && rule.input.actions.pause_printer && !rt.paused;
+                    if (hit && cooled) || pause {
+                        update_runtime(&rule.id, |r| {
+                            r.last_fire = Some(Instant::now());
+                            r.paused |= pause;
+                        });
+                        fire(&state, rule, cam, frame, dets, pause).await;
                     }
                 }
                 Err(e) => update_runtime(&rule.id, |r| r.last_error = Some(e)),
@@ -440,9 +513,17 @@ fn summary(dets: &[Detection]) -> String {
 }
 
 /// Acciones al detectar: foto marcada, Telegram, clip; queda registrado y auditado
-async fn fire(state: &AppState, rule: &Rule, cam: &CameraRow, frame: axum::body::Bytes, dets: Vec<Detection>) {
+async fn fire(state: &AppState, rule: &Rule, cam: &CameraRow, frame: axum::body::Bytes, dets: Vec<Detection>, pause: bool) {
     let who = format!("IA ({})", rule.input.kind);
-    let labels = summary(&dets);
+    let mut labels = summary(&dets);
+    if rule.input.kind == FAILED_PRINT {
+        if labels.is_empty() {
+            labels = "falla sostenida".into();
+        }
+        if pause {
+            labels.push_str(&format!(" · {}", pause_printer(state, rule.input.actions.printer_id.as_deref().unwrap_or("")).await));
+        }
+    }
     let best = dets.iter().map(|d| d.score).fold(0.0f32, f32::max);
     let at = chrono::Local::now();
 
@@ -499,7 +580,8 @@ async fn fire(state: &AppState, rule: &Rule, cam: &CameraRow, frame: axum::body:
     // Resultado del aviso: (chats a los que llego, por que no llego)
     let mut tg: (Option<i64>, Option<String>) = (None, None);
     if rule.input.actions.telegram {
-        let extra: Vec<String> = if rule.input.actions.telegram_watchers { watchers.clone() } else { Vec::new() };
+        // A los admins y a todas las personas autorizadas a ver la deteccion
+        let extra: Vec<String> = watchers.clone();
         let caption = format!("🔎 {} en {}: {}\n{}", kind_title(&rule.input.kind), cam.name, labels, at.format("%d-%m-%Y %H:%M:%S"));
         tg = match crate::handlers::notifications::notify_admins_photo(state, marked, &caption, &extra).await {
             Ok(n) => (Some(n as i64), None),
@@ -546,10 +628,29 @@ async fn fire(state: &AppState, rule: &Rule, cam: &CameraRow, frame: axum::body:
     }
 }
 
+/// Pausa la impresora por una falla; devuelve el resultado para el aviso
+async fn pause_printer(state: &AppState, printer_id: &str) -> String {
+    let req = crate::models::printers3d::ControlPrintRequest { command: "pause".into() };
+    let r = crate::handlers::printers3d::control_print(State(state.clone()), Path(printer_id.to_string()), Json(req)).await;
+    let name = crate::handlers::printers3d::list_printers(State(state.clone()))
+        .await
+        .ok()
+        .and_then(|Json(l)| l.into_iter().find(|p| p.id == printer_id).map(|p| p.name))
+        .unwrap_or_else(|| printer_id.to_string());
+    match r {
+        Ok(_) => {
+            state.log_activity("Impresoras 3D", &format!("{} pausada por posible impresion fallida", name), "IA").await;
+            format!("{} pausada", name)
+        }
+        Err((_, e)) => format!("no se pudo pausar {}: {}", name, e),
+    }
+}
+
 fn kind_title(kind: &str) -> &'static str {
     match kind {
         "personas" => "Persona detectada",
         "movimiento" => "Movimiento detectado",
+        FAILED_PRINT => "Posible impresion fallida",
         _ => "Objeto detectado",
     }
 }
@@ -709,7 +810,7 @@ async fn save_rule(state: &AppState, session: &SessionInfo, id: Option<String>, 
         .await;
     RULES_CHANGED.notify_one();
     // Si usa el modelo y falta, empezar a bajarlo ya
-    if input.enabled && input.kind != "movimiento" && !model_status().ready {
+    if input.enabled && input.kind != "movimiento" && input.kind != FAILED_PRINT && !model_status().ready {
         let s = state.clone();
         tokio::spawn(async move {
             let _ = ensure_model(&s).await;
@@ -928,7 +1029,7 @@ mod tests {
             min_score: 0.5,
             interval_s: 2,
             schedule: None,
-            actions: Actions { photo: true, telegram: true, clip_s: 10, telegram_watchers: false },
+            actions: Actions { photo: true, telegram: true, clip_s: 10, ..Default::default() },
             cooldown_s: 60,
             enabled: true,
         };

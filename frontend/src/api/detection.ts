@@ -14,13 +14,15 @@ export interface DetectionActions {
   telegram: boolean
   /** Segundos de video al detectar (0 = no grabar) */
   clip_s: number
-  /** El aviso de Telegram llega tambien a las personas autorizadas */
-  telegram_watchers: boolean
+  /** Impresion fallida: impresora que mira la camara */
+  printer_id?: string | null
+  /** Impresion fallida: pausarla cuando la falla es clara */
+  pause_printer?: boolean
 }
 
 export interface DetectorInput {
   camera_id: string
-  kind: 'personas' | 'objetos' | 'movimiento'
+  kind: 'personas' | 'objetos' | 'movimiento' | 'falla_impresion'
   classes: string[]
   /** Confianza minima (0..1); en movimiento, fraccion de la imagen que cambia */
   min_score: number
@@ -38,6 +40,8 @@ export interface DetectorRule extends DetectorInput {
   last_fire_at: string | null
   last_labels: string | null
   last_error: string | null
+  /** Impresion fallida: nivel actual de 0 a 1 (null si no esta imprimiendo) */
+  fail_level?: number | null
 }
 
 export interface DetectorsResponse {
@@ -130,4 +134,28 @@ export async function fetchDetections(f: DetectionsFilter = {}): Promise<Detecti
 export async function saveDetectionWatchers(users: string[]): Promise<void> {
   const res = await api('/api/cameras/detectors/watchers', json('PUT', { users }))
   if (!res.ok) return failText(res, 'No se pudo guardar quienes ven la deteccion')
+}
+
+// --- Obico (impresion fallida) ---
+
+export interface ObicoStatus {
+  url: string
+  /** Direccion por la que Obico llega a LabNAS para bajar el cuadro */
+  labnas_url: string
+  has_token: boolean
+  ready: boolean
+  error: string | null
+}
+
+export async function fetchObico(): Promise<ObicoStatus> {
+  const res = await api('/api/cameras/obico')
+  if (!res.ok) return failText(res, 'Error al obtener la conexion con Obico')
+  return res.json()
+}
+
+/** token: undefined = no cambiar, '' = quitar */
+export async function saveObico(input: { url: string; labnas_url: string; token?: string }): Promise<ObicoStatus> {
+  const res = await api('/api/cameras/obico', json('PUT', input))
+  if (!res.ok) return failText(res, 'No se pudo guardar la conexion con Obico')
+  return res.json()
 }

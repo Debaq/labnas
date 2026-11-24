@@ -16,16 +16,49 @@ operador para abrir la página de Cámaras.
 | **Personas** | una persona en la imagen | YOLOX-nano (IA) |
 | **Objetos** | los objetos elegidos: notebook, mochila, celular, bicicleta, perro… (80 tipos) | YOLOX-nano (IA) |
 | **Movimiento** | que cambió una parte de la imagen | diferencia entre cuadros (sin IA, muy liviano; reacciona también a cambios de luz) |
+| **Impresión fallida** | impresión 3D arruinada («espagueti»); puede **pausar la impresora** | [Obico](https://www.obico.io/) `ml_api`, instalado aparte en el mismo servidor |
 
-Próximamente: **impresión 3D fallida** (con [Obico](https://www.obico.io/) instalado aparte)
-y **modelos propios** (humo/fuego, elementos de protección…) entrenados por el laboratorio.
+Próximamente: **modelos propios** (humo/fuego, elementos de protección…) entrenados por el laboratorio.
+
+## Impresión fallida (Obico)
+
+Obico es software libre con licencia AGPL, por eso no va dentro de LabNAS: corre al lado,
+en el mismo servidor, como un contenedor de Docker. Las imágenes no salen del laboratorio.
+
+**Instalar** (una vez, en el servidor de LabNAS; necesita Docker, x86_64 o arm64):
+
+```bash
+sudo bash setup-obico.sh            # baja la imagen publicada por Obico
+sudo bash setup-obico.sh --build    # si la imagen no baja: la construye desde el código de Obico
+sudo bash setup-obico.sh --quitar   # para sacarlo
+```
+
+Queda escuchando solo en `127.0.0.1:3333` (no se ve desde la red y no necesita token). En
+**Cámaras > Detección con IA** aparece la **Conexión con Obico** con su estado; los valores por
+defecto sirven para esta instalación. Si Obico corre en otra máquina, cambia la dirección,
+pon un token (el mismo que `ML_API_TOKEN` del contenedor) y en «Dirección de LabNAS para
+Obico» la dirección por la que esa máquina llega a LabNAS.
+
+**Cómo decide.** LabNAS le pasa a Obico cada cuadro por un enlace de un solo uso que caduca
+en un minuto (Obico solo acepta imágenes por URL). Un cuadro suelto no basta: igual que
+Obico, LabNAS suma las confianzas de cada cuadro y mira su media exponencial contra lo que
+es normal para esa cámara; no avisa en los primeros 30 cuadros de cada impresión (unos 5
+minutos con un cuadro cada 10 s), y **pausar exige una falla más clara que avisar**. La regla
+muestra el **nivel de falla** actual mientras la impresora imprime.
+
+**La regla.** Elige la cámara que mira la cama y la impresora: solo se analiza mientras esa
+impresora imprime. «Umbral de aviso» más bajo = más sensible (Obico usa 0,38). Conviene
+partir solo con aviso y foto, y activar «Pausar la impresora» cuando se vea que no da falsas
+alarmas con la luz y el encuadre del laboratorio.
 
 ## Acciones al detectar
 
 - **Foto** con lo detectado marcado, en la carpeta de grabaciones (aparece en el registro de
   fotos y grabaciones, hecha por «IA (personas)», «IA (movimiento)», etc.)
 - **Telegram con foto** a los administradores (chats con rol admin o vinculados a una cuenta
-  de admin) y, si la regla lo indica, también a las personas autorizadas
+  de admin) y a todas las personas autorizadas a ver la detección. Cada persona recibe el
+  aviso en el chat de Telegram **vinculado a su cuenta web** (Configuración > Notificaciones);
+  sin chat vinculado, no le llega
 - **Clip de video** de unos segundos (si la cámara no está grabando ya)
 
 Cada regla tiene un **horario** (por ejemplo, noches de lunes a viernes de 20:00 a 07:00; si

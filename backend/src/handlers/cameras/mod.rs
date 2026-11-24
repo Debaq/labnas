@@ -27,6 +27,7 @@ use crate::error::{ApiError, internal};
 pub mod hub;
 pub mod vision;
 pub mod detect;
+pub mod obico;
 use hub::{Audio, CamSpec, Input};
 
 

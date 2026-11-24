@@ -303,8 +303,8 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
 - [ ] **27. Acomodo automático de piezas** en la plancha de la láser.
 - [ ] **28. Generadores paramétricos:** cajas con encastre, engranajes, bisagras
       flexibles → SVG.
-- [ ] **25. Detección de fallas de impresión con IA:** la cámara reconoce la
-      impresión arruinada y pausa la impresora.
+- [x] **25. Detección de fallas de impresión con IA:** la cámara reconoce la
+      impresión arruinada y pausa la impresora. *(con Obico aparte, `setup-obico.sh`; pendiente: modelo propio)*
 
 ## Etapa 6 · Docencia y conocimiento
 

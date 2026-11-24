@@ -654,6 +654,8 @@ fn api_routes() -> Router<AppState> {
         .route("/api/cameras/detectors/{id}", put(handlers::cameras::detect::update_detector).delete(handlers::cameras::detect::delete_detector))
         .route("/api/cameras/detections", get(handlers::cameras::detect::list_detections))
         .route("/api/cameras/ai/model", post(handlers::cameras::detect::prepare_model))
+        .route("/api/cameras/obico", get(handlers::cameras::obico::get_obico).put(handlers::cameras::obico::set_obico))
+        .route("/api/cameras/frame/{token}", get(handlers::cameras::obico::serve_frame))
         .route("/api/cameras/recordings", get(handlers::cameras::list_recordings))
         .route("/api/cameras/recordings/{id}", delete(handlers::cameras::delete_recording))
         .route("/api/cameras/recordings/{id}/download", get(handlers::cameras::download_recording))

@@ -76,6 +76,8 @@ fn is_public(path: &str) -> bool {
     ) || path.starts_with("/api/share/")
         // validada por un token de un solo archivo (handlers::files::serve_preview)
         || path.starts_with("/api/preview/")
+        // cuadro para Obico: token aleatorio de un solo uso (handlers::cameras::obico)
+        || path.starts_with("/api/cameras/frame/")
 }
 
 /// Rutas que no se atienden por el puente PHP (devuelve el motivo)

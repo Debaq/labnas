@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ScanEye, Plus, Pencil, Trash2, Play, Pause, Loader2, X, Camera, Send, Video, AlertTriangle, Lock } from 'lucide-react'
 import {
   fetchDetectors, saveDetector, deleteDetector, testDetector, prepareDetectionModel,
-  saveDetectionWatchers, fetchWebUsers,
+  saveDetectionWatchers, fetchWebUsers, fetchPrinters3D,
   type DetectorsResponse, type DetectorInput, type DetectorRule,
 } from '../api'
-import type { CameraView } from '../types'
+import type { CameraView, Printer3DConfig } from '../types'
+import ObicoConnection from './ObicoConnection'
 import { useEvent } from '../events/useEvents'
 import { useToast } from './ToastContext'
 import { errorMessage } from '../lib/errors'
@@ -19,13 +20,16 @@ const KIND_HELP: Record<string, string> = {
   personas: 'Avisa cuando aparece una persona.',
   objetos: 'Avisa cuando aparece alguno de los objetos elegidos.',
   movimiento: 'Avisa cuando cambia una parte de la imagen. No usa IA: es muy liviano, pero también reacciona a cambios de luz.',
+  falla_impresion: 'Avisa cuando la impresión se ve arruinada («espagueti»). Analiza solo mientras la impresora imprime, decide mirando varios cuadros seguidos (no uno suelto) y no avisa en los primeros ~30 cuadros de cada impresión. Usa Obico, que corre aparte en el servidor.',
 }
+
+const DEFAULT_SCORE: Record<string, number> = { movimiento: 0.03, falla_impresion: 0.38 }
 
 function newRule(cameraId: string): DetectorInput {
   return {
     camera_id: cameraId, kind: 'personas', classes: [], min_score: 0.5, interval_s: 2,
     schedule: { days: [0, 1, 2, 3, 4], from: '20:00', to: '07:00' },
-    actions: { photo: true, telegram: true, clip_s: 10, telegram_watchers: false }, cooldown_s: 120, enabled: true,
+    actions: { photo: true, telegram: true, clip_s: 10 }, cooldown_s: 120, enabled: true,
   }
 }
 
@@ -46,6 +50,7 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
   const [error, setError] = useState<string | null>(null)
   const [users, setUsers] = useState<string[]>([])
   const [editWatchers, setEditWatchers] = useState<string[] | null>(null)
+  const [printers, setPrinters] = useState<Printer3DConfig[]>([])
 
   const load = useCallback(() => {
     fetchDetectors().then(setData).catch((e) => setError(errorMessage(e)))
@@ -55,6 +60,10 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
     if (isAdmin) fetchWebUsers().then((u) => setUsers(u.filter((x) => x.role !== 'admin' && x.role !== 'pendiente').map((x) => x.username))).catch(() => {})
   }, [isAdmin])
   useEvent('cameras.detection', load, load)
+  useEffect(() => {
+    if (isAdmin) fetchPrinters3D().then(setPrinters).catch(() => {})
+  }, [isAdmin])
+  const printerName = (id?: string | null) => printers.find((p) => p.id === id)?.name
 
   const classNames = useMemo(() => new Map((data?.classes ?? []).map(([en, es]) => [en, es])), [data])
 
@@ -89,6 +98,8 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
   if (!data) return isAdmin && error ? <p className="text-sm" style={{ color: 'var(--danger)' }}>{error}</p> : null
   const r = form?.rule
   const isMotion = r?.kind === 'movimiento'
+  const isFailedPrint = r?.kind === 'falla_impresion'
+  const usesObico = isFailedPrint || data.rules.some((x) => x.kind === 'falla_impresion')
 
   return (
     <div>
@@ -154,6 +165,8 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
         </div>
       )}
 
+      {isAdmin && usesObico && <div className="mb-4"><ObicoConnection /></div>}
+
       {/* Formulario */}
       {form && r && (
         <div className="rounded-xl p-4 mb-4 space-y-3" style={card}>
@@ -170,7 +183,7 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
                 value={r.kind}
                 onChange={(e) => {
                   const kind = e.target.value as DetectorInput['kind']
-                  set({ kind, min_score: kind === 'movimiento' ? 0.03 : 0.5 })
+                  set({ kind, min_score: DEFAULT_SCORE[kind] ?? 0.5, interval_s: kind === 'falla_impresion' ? 10 : r.interval_s })
                 }}
                 className="w-full rounded-lg px-2 py-1.5 text-sm" style={input}
               >
@@ -178,10 +191,16 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
               </select>
             </label>
             <label className="text-xs space-y-1" style={{ color: 'var(--text-secondary)' }}>
-              <span>{isMotion ? `Sensibilidad: cambio ≥ ${(r.min_score * 100).toFixed(1)} % de la imagen` : `Confianza mínima: ${Math.round(r.min_score * 100)} %`}</span>
+              <span>
+                {isMotion
+                  ? `Sensibilidad: cambio ≥ ${(r.min_score * 100).toFixed(1)} % de la imagen`
+                  : isFailedPrint
+                    ? `Umbral de aviso: ${r.min_score.toFixed(2)} (más bajo = más sensible; Obico usa 0,38)`
+                    : `Confianza mínima: ${Math.round(r.min_score * 100)} %`}
+              </span>
               <input
                 type="range"
-                min={isMotion ? 0.005 : 0.1} max={isMotion ? 0.3 : 0.95} step={isMotion ? 0.005 : 0.05}
+                min={isMotion ? 0.005 : 0.1} max={isMotion ? 0.3 : 0.95} step={isMotion ? 0.005 : isFailedPrint ? 0.01 : 0.05}
                 value={r.min_score}
                 onChange={(e) => set({ min_score: Number(e.target.value) })}
                 className="w-full"
@@ -189,6 +208,31 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
             </label>
           </div>
           <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{KIND_HELP[r.kind]}</p>
+
+          {isFailedPrint && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="text-xs space-y-1" style={{ color: 'var(--text-secondary)' }}>
+                <span>Impresora que mira esta cámara</span>
+                <select
+                  value={r.actions.printer_id ?? ''}
+                  onChange={(e) => set({ actions: { ...r.actions, printer_id: e.target.value || null } })}
+                  className="w-full rounded-lg px-2 py-1.5 text-sm" style={input}
+                >
+                  <option value="">— Ninguna (analiza siempre) —</option>
+                  {printers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </label>
+              <label className="text-xs flex items-center gap-2 pt-5" style={{ color: 'var(--text-secondary)' }} title="Pausar exige una falla más clara que el aviso">
+                <input
+                  type="checkbox"
+                  checked={r.actions.pause_printer ?? false}
+                  disabled={!r.actions.printer_id}
+                  onChange={(e) => set({ actions: { ...r.actions, pause_printer: e.target.checked } })}
+                />
+                Pausar la impresora si la falla es clara
+              </label>
+            </div>
+          )}
 
           {r.kind === 'objetos' && (
             <div className="space-y-1">
@@ -216,7 +260,7 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <label className="text-xs space-y-1" style={{ color: 'var(--text-secondary)' }}>
               <span>Analizar cada (s)</span>
-              <input type="number" min={1} max={60} value={r.interval_s} onChange={(e) => set({ interval_s: Number(e.target.value) })} className="w-full rounded-lg px-2 py-1.5 text-sm" style={input} />
+              <input type="number" min={isFailedPrint ? 5 : 1} max={60} value={r.interval_s} onChange={(e) => set({ interval_s: Number(e.target.value) })} className="w-full rounded-lg px-2 py-1.5 text-sm" style={input} />
             </label>
             <label className="text-xs space-y-1" style={{ color: 'var(--text-secondary)' }}>
               <span>Pausa entre avisos (s)</span>
@@ -230,11 +274,7 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
               <span>Al detectar</span>
               <label className="flex items-center gap-1"><input type="checkbox" checked={r.actions.photo} onChange={(e) => set({ actions: { ...r.actions, photo: e.target.checked } })} /> Guardar foto</label>
               <label className="flex items-center gap-1"><input type="checkbox" checked={r.actions.telegram} onChange={(e) => set({ actions: { ...r.actions, telegram: e.target.checked } })} /> Telegram con foto</label>
-              {r.actions.telegram && (
-                <label className="flex items-center gap-1 pl-4" title="Si no, solo a los administradores">
-                  <input type="checkbox" checked={r.actions.telegram_watchers ?? false} onChange={(e) => set({ actions: { ...r.actions, telegram_watchers: e.target.checked } })} /> también a las personas autorizadas
-                </label>
-              )}
+              {r.actions.telegram && <p className="pl-4">a los administradores y a quienes pueden ver la detección</p>}
             </div>
           </div>
 
@@ -289,7 +329,11 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{rule.camera}</span>
                 <span className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>
-                  {rule.kind === 'objetos' ? rule.classes.map((c) => classNames.get(c) ?? c).join(', ') : rule.kind}
+                  {rule.kind === 'objetos'
+                    ? rule.classes.map((c) => classNames.get(c) ?? c).join(', ')
+                    : rule.kind === 'falla_impresion'
+                      ? `impresión fallida${printerName(rule.actions.printer_id) ? ` · ${printerName(rule.actions.printer_id)}` : ''}${rule.actions.pause_printer ? ' · pausa' : ''}`
+                      : rule.kind}
                 </span>
                 <span className="text-xs" style={{ color: !rule.enabled ? 'var(--text-secondary)' : rule.active_now ? 'var(--success)' : 'var(--text-secondary)' }}>
                   {!rule.enabled ? 'Pausada' : rule.active_now ? '● Vigilando' : 'Fuera de horario'}
@@ -316,6 +360,24 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
                   {rule.actions.clip_s > 0 && <span className="flex items-center gap-0.5"><Video size={12} />{rule.actions.clip_s}s</span>}
                 </span>
               </div>
+              {rule.kind === 'falla_impresion' && rule.enabled && (
+                <div className="text-xs flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
+                  {rule.fail_level == null ? (
+                    <span>Esperando que la impresora imprima</span>
+                  ) : (
+                    <>
+                      <span>Nivel de falla</span>
+                      <div className="flex-1 h-1.5 rounded" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                        <div
+                          className="h-1.5 rounded"
+                          style={{ width: `${Math.round(rule.fail_level * 100)}%`, backgroundColor: rule.fail_level > 0.5 ? 'var(--danger)' : 'var(--success)' }}
+                        />
+                      </div>
+                      <span>{Math.round(rule.fail_level * 100)}%</span>
+                    </>
+                  )}
+                </div>
+              )}
               {rule.last_fire_at && (
                 <p className="text-xs" style={{ color: 'var(--text-primary)' }}>Último: {rule.last_labels} — {new Date(rule.last_fire_at).toLocaleString()}</p>
               )}
@@ -331,7 +393,7 @@ export default function DetectionSection({ cameras, isAdmin }: { cameras: Camera
       <DetectionHistory
         rules={data.rules}
         cameras={cameras}
-        ruleLabel={(r) => (r.kind === 'objetos' ? r.classes.map((c) => classNames.get(c) ?? c).join(', ') : r.kind)}
+        ruleLabel={(r) => (r.kind === 'objetos' ? r.classes.map((c) => classNames.get(c) ?? c).join(', ') : r.kind === 'falla_impresion' ? 'impresión fallida' : r.kind)}
       />
 
       {/* Resultado de la prueba */}

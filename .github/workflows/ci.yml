@@ -48,7 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: shellcheck
-        run: shellcheck install.sh setup-smart.sh labnas-smart-read setup-snapshots.sh labnas-snapshot viewer/install.sh bridge/check-php7.sh
+        run: shellcheck install.sh setup-smart.sh labnas-smart-read setup-snapshots.sh labnas-snapshot setup-obico.sh viewer/install.sh bridge/check-php7.sh
 
   bridge:
     name: Conector PHP (PHP ${{ matrix.php }})

@@ -294,3 +294,70 @@ async fn deteccion_con_ia() {
     assert_eq!(s.put("/api/modules/cameras", &admin, json!({ "enabled": false })).await.status, 200);
     TEST_INPUT.store(false, Ordering::SeqCst);
 }
+
+/// Impresion fallida: Obico (falso) baja el cuadro por el enlace de un solo uso, como el
+/// `ml_api` real, y responde con sus detecciones
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn obico_baja_el_cuadro_y_responde() {
+    use axum::{extract::Query, http::HeaderMap, routing::get, Json, Router};
+    use std::sync::{Arc, Mutex};
+
+    let s = Server::start().await;
+    let admin = s.admin().await;
+    let op = s.user(&admin, "op", "operador").await;
+    assert_eq!(s.put("/api/modules/cameras", &admin, json!({ "enabled": true })).await.status, 200);
+
+    // (Authorization recibido, bytes del cuadro, estado al pedirlo por segunda vez)
+    type Seen = Arc<Mutex<Vec<(String, usize, u16)>>>;
+    let seen: Seen = Arc::default();
+    let s2 = seen.clone();
+    let app = Router::new()
+        .route("/hc/", get(|| async { "ok" }))
+        .route(
+            "/p/",
+            get(move |headers: HeaderMap, Query(q): Query<std::collections::HashMap<String, String>>| {
+                let seen = s2.clone();
+                async move {
+                    let auth = headers.get("authorization").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+                    if auth != "Bearer secreto" {
+                        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({})));
+                    }
+                    let img = &q["img"];
+                    let first = reqwest::get(img).await.unwrap();
+                    assert_eq!(first.status(), 200);
+                    let n = first.bytes().await.unwrap().len();
+                    let again = reqwest::get(img).await.unwrap().status().as_u16();
+                    seen.lock().unwrap().push((auth, n, again));
+                    (axum::http::StatusCode::OK, Json(json!({ "detections": [["failure", 0.7, [50.0, 40.0, 20.0, 10.0]]] })))
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let obico = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+
+    // Solo el admin configura la conexion
+    assert_eq!(s.get("/api/cameras/obico", &op).await.status, 403);
+    let bad = s.put("/api/cameras/obico", &admin, json!({ "url": "ftp://x", "labnas_url": s.base })).await;
+    assert_eq!(bad.status, 400);
+    let r = s.put("/api/cameras/obico", &admin, json!({ "url": obico, "labnas_url": s.base, "token": "secreto" })).await;
+    assert_eq!(r.status, 200, "{}", r.text);
+    assert_eq!(r.json()["ready"], true);
+    assert_eq!(r.json()["has_token"], true);
+
+    let frame = axum::body::Bytes::from_static(&[0xFF, 0xD8, 1, 2, 0xFF, 0xD9]);
+    let dets = crate::handlers::cameras::obico::detect(&s.state, frame.clone()).await.unwrap();
+    assert_eq!(dets.len(), 1);
+    assert_eq!(dets[0].label, "falla");
+    assert_eq!((dets[0].x, dets[0].y), (40.0, 35.0));
+    assert_eq!(seen.lock().unwrap().clone(), vec![("Bearer secreto".to_string(), 6, 404)], "el enlace sirve una sola vez");
+
+    // Un enlace inventado no sirve nada (la ruta es publica)
+    assert_eq!(reqwest::get(format!("{}/api/cameras/frame/inventado", s.base)).await.unwrap().status(), 404);
+
+    // Sin token, Obico lo rechaza y el error lo dice
+    let r = s.put("/api/cameras/obico", &admin, json!({ "url": obico, "labnas_url": s.base, "token": "" })).await;
+    assert_eq!(r.json()["has_token"], false);
+    let e = crate::handlers::cameras::obico::detect(&s.state, frame).await.unwrap_err();
+    assert!(e.contains("token"), "{}", e);
+}
