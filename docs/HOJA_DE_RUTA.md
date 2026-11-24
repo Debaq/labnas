@@ -297,7 +297,7 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
 - [ ] **24. Laminado en el servidor:** se sube el STL y LabNAS genera el gcode con
       PrusaSlicer u OrcaSlicer usando los perfiles del laboratorio.
 - [ ] **26. Visor en el navegador** para STL, STEP, DXF, SVG y vista previa de gcode.
-- [ ] **30. Aviso al terminar** por Telegram con foto del resultado.
+- [x] **30. Aviso al terminar** por Telegram con foto del resultado. *(foto al personal y a quien encargó la pieza; texto al resto)*
 - [ ] **29. Base colaborativa de parámetros de corte** (potencia y velocidad por
       material y espesor, con fotos).
 - [ ] **27. Acomodo automático de piezas** en la plancha de la láser.

@@ -12,7 +12,7 @@ pub(super) async fn call_telegram<T: serde::de::DeserializeOwned>(
     method: &str,
     body: &serde_json::Value,
 ) -> Result<T, String> {
-    let url = format!("https://api.telegram.org/bot{}/{}", token, method);
+    let url = format!("{}/bot{}/{}", telegram_base(), token, method);
     let resp = client
         .post(&url)
         .json(body)
@@ -121,12 +121,54 @@ pub async fn notify_admins_photo(state: &AppState, jpeg: Vec<u8>, caption: &str,
     if chats.is_empty() {
         return Err("ningun chat de destino: en Configuracion > Notificaciones vincula el chat de Telegram a la cuenta de la persona".into());
     }
+    let (sent, last_err) = send_photo(state, &token, &chats, &jpeg, caption).await;
+    if sent == 0 { Err(last_err) } else { Ok(sent) }
+}
+
+/// Fin de impresion: la foto (si hay) llega al personal (admin y operador, los mismos que
+/// pueden pedir `/camara`) y a los chats de `owners` (quien encargo la pieza); el resto de
+/// los chats activos recibe solo el texto. Sin foto, o si la foto no sale, el texto llega
+/// a todos. Devuelve a cuantos chats llego algo.
+pub async fn notify_print_finished(
+    state: &AppState,
+    photo: Option<Vec<u8>>,
+    text: &str,
+    caption: &str,
+    owners: &[String],
+) -> usize {
+    let Some(jpeg) = photo else { return notify_active_chats(state, text).await };
+    let mut viewers = format!("({})", STAFF_CHATS);
+    if !owners.is_empty() {
+        let marks: Vec<String> = (1..=owners.len()).map(|i| format!("?{}", i)).collect();
+        viewers = format!("({} OR linked_web_user IN ({}))", viewers, marks.join(", "));
+    }
+    // COALESCE: con linked_web_user NULL la condicion da NULL y el chat no caeria en ningun grupo
+    let photo_filter = format!("role != 'pendiente' AND COALESCE({}, 0)", viewers);
+    let text_filter = format!("role != 'pendiente' AND NOT COALESCE({}, 0)", viewers);
+    let Some((token, photo_chats)) = tg_targets_with(state, photo_filter, owners.to_vec()).await else { return 0 };
+    let (mut sent, _) = send_photo(state, &token, &photo_chats, &jpeg, caption).await;
+    let mut text_chats = tg_targets_with(state, text_filter, owners.to_vec()).await.map(|(_, c)| c).unwrap_or_default();
+    if sent == 0 {
+        // la foto no salio (p.ej. Telegram la rechazo): que al menos llegue el aviso
+        text_chats.extend(photo_chats);
+    }
+    for chat_id in text_chats {
+        if send_telegram_message(&state.http_client, &token, chat_id, text).await.is_ok() {
+            sent += 1;
+        }
+    }
+    sent
+}
+
+/// Manda la misma foto (JPEG) con texto plano a cada chat; devuelve cuantos la recibieron
+/// y el ultimo error
+async fn send_photo(state: &AppState, token: &str, chats: &[i64], jpeg: &[u8], caption: &str) -> (usize, String) {
     let url = format!("{}/bot{}/sendPhoto", telegram_base(), token);
     let (mut sent, mut last_err) = (0, String::new());
-    for chat_id in chats {
-        let part = match reqwest::multipart::Part::bytes(jpeg.clone()).file_name("foto.jpg").mime_str("image/jpeg") {
+    for &chat_id in chats {
+        let part = match reqwest::multipart::Part::bytes(jpeg.to_vec()).file_name("foto.jpg").mime_str("image/jpeg") {
             Ok(p) => p,
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return (sent, e.to_string()),
         };
         let form = reqwest::multipart::Form::new()
             .text("chat_id", chat_id.to_string())
@@ -142,7 +184,7 @@ pub async fn notify_admins_photo(state: &AppState, jpeg: Vec<u8>, caption: &str,
             Err(e) => last_err = format!("no se pudo contactar a Telegram: {}", e),
         }
     }
-    if sent == 0 { Err(last_err) } else { Ok(sent) }
+    (sent, last_err)
 }
 
 /// API de Telegram (en los tests, un servidor falso)

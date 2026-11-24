@@ -546,6 +546,7 @@ Cada pestaña mantiene un WebSocket (`/api/live`) con el servidor, que empuja lo
 - **Impresoras 3D**: el servidor consulta todas las impresoras en paralelo una sola vez y reparte el estado a todas las pestañas (cada 5 s solo si alguien está mirando esa página; si no, cada 30 s para detectar fin de impresión)
 - **Música**, **sensores** y **respaldos** se actualizan al instante
 - **Notificaciones** en la web y **nativas en el visor de escritorio**: impresión terminada o con error, alerta de sensor, respaldo fallido, usuario pendiente de aprobación, actualización disponible
+- **Fin de impresión con foto por Telegram**: si la impresora tiene cámara, unos segundos después de terminar se manda la foto de la pieza a administradores y operadores (los que ya pueden pedir `/camara`) y a quien la encargó en la cola de impresión; los demás chats reciben solo el texto. Sin cámara, o si la foto no sale, el aviso de texto llega a todos como antes
 - Al aprobar una cuenta pendiente, la sesión del usuario se actualiza sola
 
 Cada conexión recibe solo lo de su rol y de módulos activos. El WebSocket se abre con un ticket de un solo uso (30 s), así el token de sesión nunca viaja en una URL (la terminal web usa el mismo mecanismo). Si la conexión se cae, cada vista vuelve a consultar periódicamente hasta reconectar.

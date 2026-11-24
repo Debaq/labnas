@@ -37,7 +37,7 @@ pub use bot::telegram_bot_loop;
 pub use reminders::{daily_notification_loop, task_reminder_loop};
 #[cfg(test)]
 pub(crate) use reminders::collect_reminders;
-pub use telegram::{notify_active_chats, notify_admins, notify_admins_photo, notify_staff, notify_users, send_tg_public};
+pub use telegram::{notify_active_chats, notify_admins, notify_admins_photo, notify_print_finished, notify_staff, notify_users, send_tg_public};
 
 /// Permisos por defecto segun el rol (cuando no se envian explicitamente)
 pub fn default_permissions_for_role(role: &UserRole) -> UserPermissions {

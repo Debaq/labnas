@@ -65,6 +65,39 @@ fn finish_timelapse(state: &AppState, printer_name: String, dir: std::path::Path
     });
 }
 
+/// Espera antes de la foto de fin: muchas impresoras retiran el cabezal al terminar
+#[cfg(not(test))]
+const FINISH_PHOTO_DELAY: Duration = Duration::from_secs(12);
+#[cfg(test)]
+const FINISH_PHOTO_DELAY: Duration = Duration::from_millis(0);
+
+/// Aviso de fin por Telegram con la foto de la pieza (si la impresora tiene camara).
+/// La foto va al personal y a quien encargo la pieza en la cola; ver `notify_print_finished`.
+pub fn announce_finished(state: &AppState, printer: &Printer3DConfig, file: &str, elapsed: &str) {
+    let text = format!("Impresion terminada en *{}*\nArchivo: `{}`\nTiempo: {}", printer.name, file, elapsed);
+    let caption = format!("Impresion terminada en {}\nArchivo: {}\nTiempo: {}", printer.name, file, elapsed);
+    let (state, printer) = (state.clone(), printer.clone());
+    tokio::spawn(async move {
+        let pid = printer.id.clone();
+        let owners: Vec<String> = db_op(&state.db, move |conn| {
+            let mut stmt = conn
+                .prepare("SELECT DISTINCT requested_by FROM print_queue WHERE printer_id = ?1 AND status = 'imprimiendo'")
+                .map_err(|e| e.to_string())?;
+            let rows = stmt.query_map([&pid], |r| r.get(0)).map_err(|e| e.to_string())?;
+            Ok(rows.filter_map(|r| r.ok()).collect())
+        })
+        .await
+        .unwrap_or_default();
+        let photo = if camera_url_for(&printer).is_some() {
+            tokio::time::sleep(FINISH_PHOTO_DELAY).await;
+            fetch_snapshot(&state.http_client, &printer).await.ok().map(|(_, b)| b.to_vec())
+        } else {
+            None
+        };
+        crate::handlers::notifications::notify_print_finished(&state, photo, &text, &caption, &owners).await;
+    });
+}
+
 /// Consulta todas las impresoras (en paralelo): cada 5 s si hay alguien conectado al
 /// bus de eventos (publica "printers3d.status"), si no cada 30 s solo para detectar
 /// fin de impresion / error y notificar (UI + Telegram).
@@ -155,11 +188,7 @@ pub async fn printer_monitor_loop(state: AppState) {
                     })
                     .unwrap_or_else(|| "?".to_string());
 
-                crate::handlers::notifications::notify_active_chats(
-                    &state,
-                    &format!("Impresion terminada en *{}*\nArchivo: `{}`\nTiempo: {}", printer.name, prev_file, elapsed),
-                )
-                .await;
+                announce_finished(&state, printer, &prev_file, &elapsed);
                 crate::events::notify(
                     &state,
                     crate::events::Audience::All,
