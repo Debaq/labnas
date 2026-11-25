@@ -584,6 +584,7 @@ fn api_routes() -> Router<AppState> {
         .route("/api/music/mpv-args", post(handlers::music::set_mpv_args))
         .route("/api/music/video", post(handlers::music::set_video))
         .route("/api/music/screens", get(handlers::music::list_screens))
+        .route("/api/music/tray/{platform}", get(handlers::music::download_tray))
         .route("/api/music/playlists", get(handlers::music::list_playlists))
         .route("/api/music/playlists", post(handlers::music::create_playlist))
         .route("/api/music/playlists/save-queue", post(handlers::music::save_queue_as_playlist))

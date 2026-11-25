@@ -6,7 +6,7 @@ import {
   Music, Search, Play, Pause, Square, Loader2, X, SkipForward, SkipBack,
   Trash2, ListMusic, Plus, Sparkles, MoreVertical, Volume2,
   Shuffle, Repeat, Repeat1, ChevronUp, ChevronDown, ChevronRight, Tv, TvMinimalPlay,
-  ArrowUpToLine, Radio, Dices, Pencil,
+  ArrowUpToLine, Radio, Dices, Pencil, MonitorDown,
 } from 'lucide-react'
 import {
   searchMusic, playMusic, getCurrentMusic, stopMusic, pauseMusic, previousMusic,
@@ -235,9 +235,15 @@ export default function MusicPanel() {
             </span>
           )}
         </div>
-        <button onClick={() => setOpen(false)} className="p-1 rounded-lg hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
-          <ChevronRight size={16} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button onClick={() => navigate('/settings?tab=general&seccion=bandeja')} className="p-1 rounded-lg hover:opacity-80"
+            style={{ color: 'var(--text-secondary)' }} title="Controla la música desde la bandeja de tu computador">
+            <MonitorDown size={15} />
+          </button>
+          <button onClick={() => setOpen(false)} className="p-1 rounded-lg hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+            <ChevronRight size={16} />
+          </button>
+        </div>
       </div>
 
       {/* Search - always visible */}

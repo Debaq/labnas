@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.5.1] — 2026-11-25
+
+Desde v3.5.0.
+
+### Control de música en la bandeja
+
+- **Se descarga desde el propio LabNAS**: Configuración › General › Dispositivos vinculados tiene un botón por sistema (destaca el tuyo) con instrucciones de instalación; el reproductor tiene un acceso directo
+- El LabNAS baja el archivo de GitHub la primera vez, lo verifica con su `.sha256` y lo guarda: después se descarga aunque no haya internet
+
 ## [3.5.0] — 2026-11-24
 
 Desde v3.4.3.

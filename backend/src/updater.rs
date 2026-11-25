@@ -74,7 +74,7 @@ pub fn server_asset_name(tag: &str) -> String {
     format!("labnas-{}-linux-{}.tar.gz", tag, release_arch())
 }
 
-fn asset_url(release: &serde_json::Value, name: &str) -> Option<String> {
+pub(crate) fn asset_url(release: &serde_json::Value, name: &str) -> Option<String> {
     release["assets"]
         .as_array()?
         .iter()
@@ -149,17 +149,17 @@ fn exe_name() -> String {
 
 // ─── Instalacion ───
 
-fn sha256_hex(data: &[u8]) -> String {
+pub(crate) fn sha256_hex(data: &[u8]) -> String {
     Sha256::digest(data).iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 /// Primer token de un archivo `sha256sum` ("<hash>  <archivo>")
-fn parse_sha256_file(text: &str) -> Option<String> {
+pub(crate) fn parse_sha256_file(text: &str) -> Option<String> {
     let hash = text.split_whitespace().next()?.to_ascii_lowercase();
     (hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit())).then_some(hash)
 }
 
-async fn download(client: &reqwest::Client, url: &str, timeout: Duration) -> Result<Vec<u8>, String> {
+pub(crate) async fn download(client: &reqwest::Client, url: &str, timeout: Duration) -> Result<Vec<u8>, String> {
     let resp = client
         .get(url)
         .header("User-Agent", "LabNAS")

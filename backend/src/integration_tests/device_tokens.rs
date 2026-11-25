@@ -5,6 +5,24 @@ use serde_json::json;
 use super::harness::Server;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn descarga_de_la_bandeja_desde_la_cache() {
+    let s = Server::start().await;
+    let admin = s.admin().await;
+    let ana = s.user(&admin, "ana", "observador").await;
+    // Ya descargada (no se toca GitHub en los tests)
+    let tag = format!("v{}", env!("CARGO_PKG_VERSION"));
+    let dir = crate::db::data_dir().join("downloads");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(format!("labnas-tray-{tag}-windows-x86_64.zip")), b"PK-falso").unwrap();
+
+    let r = s.get("/api/music/tray/windows-x86_64", &ana).await;
+    assert_eq!(r.status, 200);
+    assert!(r.header("content-disposition").contains(&format!("labnas-tray-{tag}-windows-x86_64.zip")));
+    assert_eq!(s.get("/api/music/tray/macos-arm64", &ana).await.status, 404);
+    assert_eq!(s.get("/api/music/tray/..%2F..%2Fetc", &ana).await.status, 404);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn token_de_dispositivo_solo_controla_la_musica() {
     let s = Server::start().await;
     let admin = s.admin().await;

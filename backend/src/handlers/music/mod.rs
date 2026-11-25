@@ -17,10 +17,11 @@ mod playback;
 mod screens;
 mod discovery;
 mod playlists;
+mod tray_download;
 
 // API publica (handlers y loops) y visibilidad entre submodulos (`use super::*`)
 #[allow(unused_imports)]
-pub use {player::*, playback::*, screens::*, discovery::*, playlists::*};
+pub use {player::*, playback::*, screens::*, discovery::*, playlists::*, tray_download::download_tray};
 
 const MPV_SOCKET: &str = "/tmp/labnas-mpv-socket";
 
