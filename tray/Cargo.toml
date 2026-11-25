@@ -1,6 +1,6 @@
 [package]
 name = "labnas-tray"
-version = "3.5.1"
+version = "3.6.0"
 edition = "2024"
 description = "Control de la musica de LabNAS desde la bandeja del sistema (Windows y Linux)"
 
