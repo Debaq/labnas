@@ -386,6 +386,8 @@ const MIGRATIONS: &[&str] = &[
         last_used TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(username);",
+    // 23: piel de la interfaz por cuenta (la usa tambien labnas-tray)
+    "ALTER TABLE web_users ADD COLUMN ui_theme TEXT;",
 ];
 
 /// Migracion 16. Publicada: no modificar (ver `MIGRATIONS`).

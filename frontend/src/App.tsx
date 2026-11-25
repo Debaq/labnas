@@ -3,6 +3,7 @@ import { ThemeProvider } from './themes/ThemeContext'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { ToastProvider } from './components/ToastContext'
 import EventsProvider from './events/EventsProvider'
+import ThemeSync from './themes/ThemeSync'
 import Layout from './components/Layout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
@@ -122,6 +123,7 @@ export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
+        <ThemeSync />
         <ToastProvider>
           <EventsProvider>
             <BrowserRouter>

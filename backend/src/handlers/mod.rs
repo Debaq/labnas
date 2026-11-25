@@ -1,6 +1,7 @@
 pub mod twofa;
 pub mod passkeys;
 pub mod device_tokens;
+pub mod preferences;
 pub mod setup;
 pub mod smart;
 pub mod snapshots;

@@ -33,14 +33,16 @@ const MAX_PER_USER: i64 = 20;
 const LAST_USED_EVERY_SECS: i64 = 300;
 
 /// Rutas que acepta un token de dispositivo: usar el reproductor compartido desde el
-/// widget de la bandeja (ver, controlar, buscar y encolar). `*` = un segmento cualquiera.
-/// Nada de administrar el reproductor (mpv-args, lastfm-key) ni editar listas.
+/// widget de la bandeja (ver, controlar, buscar, encolar y guardar canciones en listas).
+/// `*` = un segmento cualquiera. Nada de administrar el reproductor (mpv-args, lastfm-key)
+/// ni crear, renombrar, vaciar o borrar listas.
 const DEVICE_SCOPE: &[(&str, &str)] = &[
     ("GET", "/api/music/current"),
     ("POST", "/api/music/pause"),
     ("POST", "/api/music/next"),
     ("POST", "/api/music/previous"),
     ("POST", "/api/music/volume"),
+    ("POST", "/api/music/seek"),
     ("POST", "/api/music/shuffle"),
     ("POST", "/api/music/repeat"),
     ("GET", "/api/music/search"),
@@ -51,6 +53,11 @@ const DEVICE_SCOPE: &[(&str, &str)] = &[
     ("DELETE", "/api/music/queue"),
     ("GET", "/api/music/playlists"),
     ("POST", "/api/music/playlists/*/load"),
+    ("POST", "/api/music/playlists/*/tracks"),
+    // avisos de la persona (los mismos que ve en LabNAS), como notificaciones del sistema
+    ("GET", "/api/live/notices"),
+    // la piel elegida en LabNAS, para pintar el widget igual
+    ("GET", "/api/auth/preferences"),
     // la app comprueba que el token sigue vivo y a nombre de quien esta, y se desvincula
     ("GET", "/api/auth/device-tokens/me"),
     ("DELETE", "/api/auth/device-tokens/me"),
@@ -217,7 +224,8 @@ pub async fn list(
 
 /// GET /api/auth/device-tokens/me: a nombre de quien esta el token (para la app)
 pub async fn me(Extension(session): Extension<SessionInfo>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "username": session.username }))
+    // `admin`: la bandeja ofrece los avisos de administracion solo a quien los recibe
+    Json(serde_json::json!({ "username": session.username, "admin": session.role == UserRole::Admin }))
 }
 
 /// DELETE /api/auth/device-tokens/me: la app se desvincula con su propio token

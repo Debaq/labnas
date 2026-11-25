@@ -1,5 +1,36 @@
 # Changelog
 
+## [3.6.2] — 2026-11-25
+
+Desde v3.6.1.
+
+### Bandeja: avisos de LabNAS en el computador
+
+- Los avisos de LabNAS llegan como **notificaciones del sistema**, cada persona solo los suyos. En ⚙ se elige cuáles:
+  - **Los míos** (activado): tu pieza 3D lista o con problemas, tu pedido de impresión avanzó, tus reservas e inducciones, tus plazos, propuestas de la IA de tu correo
+  - **Del laboratorio** (desactivado): todas las impresoras 3D, sensores, cámaras y plazos generales. Si la pieza era tuya, llega un solo aviso
+  - **Administración** (activado, solo admins): cuentas y reservas por aprobar, pedidos 3D, respaldos, discos, actualizaciones
+  - El aviso de entrada a tu cuenta por internet sale siempre
+- Cuando una impresora termina o falla, quien encargó la pieza recibe un aviso **personal** («Tu pieza está lista»), también en la web
+- Aviso opcional de **canción nueva** (título y quién la puso)
+
+### Bandeja: control de música
+
+- **Teclas multimedia** del teclado y **reproductor del sistema** (widget de medios de KDE/GNOME y pantalla de bloqueo en Linux; panel de medios de Windows) controlan LabNAS y muestran lo que suena con su carátula
+- **Barra de progreso clickeable** para saltar a cualquier punto de la canción (también desde el reproductor del sistema)
+- **Ordenar la cola arrastrando** desde el número de cada canción
+- **Guardar la canción que suena en una lista** (botón 🔖); marca las listas que ya la tienen
+- **Widget compacto**: solo el reproductor; crece al abrir Cola, Buscar o Listas y se achica con otro clic, la flecha o Esc
+- Usa el **rayo de LabNAS** y **la piel de tu cuenta** con el color del laboratorio
+- **Windows**: bordes y sombra del sistema (esquinas redondeadas en Windows 11) en vez del marco cuadrado
+- La pantalla ⚙ ya no se cierra sola a los pocos segundos
+
+### LabNAS
+
+- **La piel elegida se guarda en la cuenta**: te sigue a cualquier navegador y a la bandeja
+- `POST /api/music/seek` para saltar dentro de la canción
+- Las canciones agregadas a listas y las listas creadas quedan a nombre de quien lo hizo (antes podían quedar como «unknown»)
+
 ## [3.6.1] — 2026-11-25
 
 Desde v3.6.0.

@@ -96,10 +96,18 @@ pub enum Level {
 }
 
 /// Notificacion para la UI (toast) y el visor de escritorio (notificacion nativa)
+///
+/// `scope` dice para quien es (lo usa la bandeja para dejar elegir que avisos mostrar):
+/// `personal` (una persona), `lab` (todos) o `admin` (administradores).
 pub fn notify(state: &AppState, audience: Audience, module: Option<&'static str>, level: Level, title: &str, body: &str) {
+    let scope = match audience {
+        Audience::User(_) => "personal",
+        Audience::All => "lab",
+        Audience::Admins => "admin",
+    };
     state.events.publish(
         "notify",
-        serde_json::json!({ "level": level, "title": title, "body": body }),
+        serde_json::json!({ "level": level, "title": title, "body": body, "scope": scope, "module": module }),
         audience,
         module,
     );
@@ -136,6 +144,33 @@ pub async fn events_poll(
     for k in q.kinds.split(',').map(str::trim).filter(|k| !k.is_empty()).take(64) {
         interests.add(k);
     }
+    Json(poll(state, session, q.since, None).await)
+}
+
+#[derive(serde::Deserialize)]
+pub struct NoticesQuery {
+    #[serde(default)]
+    pub since: u64,
+}
+
+/// GET /api/live/notices — solo los avisos (`notify`) de la persona, por long-poll. Es lo
+/// que escucha la bandeja (labnas-tray): un token de dispositivo no ve el resto de los
+/// eventos (estado de camaras, maquinas...). `since=0` contesta al tiro con el cursor.
+pub async fn notices_poll(
+    State(state): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
+    axum::extract::Query(q): axum::extract::Query<NoticesQuery>,
+) -> Json<serde_json::Value> {
+    if q.since == 0 {
+        return Json(serde_json::json!({ "events": [], "next": ring_last() }));
+    }
+    Json(poll(state, session, q.since, Some("notify")).await)
+}
+
+/// Eventos visibles para la sesion desde `since` (espera hasta ~18 s si no hay);
+/// `only` deja un solo tipo
+async fn poll(state: AppState, session: SessionInfo, since: u64, only: Option<&'static str>) -> serde_json::Value {
+    let q = NoticesQuery { since };
     let mut rx = state.events.subscribe();
     let last = ring_last();
     // Primera consulta, o el cliente quedo muy atras: empezar desde ahora (y pedir resync)
@@ -157,6 +192,7 @@ pub async fn events_poll(
         let enabled = state.enabled_modules.lock().await.clone();
         candidates
             .into_iter()
+            .filter(|(_, ev)| only.is_none_or(|k| ev.kind == k))
             .filter(|(_, ev)| visible_to(ev, &session))
             .filter(|(_, ev)| !pending || matches!(ev.audience, Audience::User(_)))
             .filter(|(_, ev)| ev.module.is_none_or(|m| enabled.contains(m)))
@@ -190,7 +226,7 @@ pub async fn events_poll(
     if resync {
         list.insert(0, serde_json::json!({ "seq": next, "kind": "resync", "data": null }));
     }
-    Json(serde_json::json!({ "events": list, "next": next }))
+    serde_json::json!({ "events": list, "next": next })
 }
 
 // ─── Interes por tema ───

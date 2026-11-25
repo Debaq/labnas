@@ -54,8 +54,27 @@ async fn token_de_dispositivo_solo_controla_la_musica() {
     assert_eq!(s.post("/api/music/volume", &token, json!({ "volume": 40 })).await.status, 200);
     assert_eq!(s.post("/api/music/pause", &token, json!({})).await.status, 200);
     assert_eq!(s.get("/api/auth/device-tokens/me", &token).await.json()["username"], "ana");
+    assert_eq!(s.get("/api/auth/device-tokens/me", &token).await.json()["admin"], false);
 
     assert_eq!(s.get("/api/music/playlists", &token).await.status, 200);
+    // sin nada sonando no hay a donde saltar (pero la ruta esta permitida)
+    assert_eq!(s.post("/api/music/seek", &token, json!({ "position": 30 })).await.status, 409);
+    // guardar una cancion en una lista ajena: queda a nombre de quien la agrego
+    let pl = s.post("/api/music/playlists", &admin, json!({ "name": "Taller" })).await.json();
+    let pid = pl["id"].as_str().unwrap();
+    let r = s.post(&format!("/api/music/playlists/{pid}/tracks"), &token, json!({ "id": "abc", "title": "T", "artist": "A" })).await;
+    assert_eq!(r.status, 200);
+    assert_eq!(r.json()["tracks"][0]["added_by"], "ana");
+    // pero no editar la lista en si
+    assert_eq!(s.put(&format!("/api/music/playlists/{pid}"), &token, json!({ "name": "x" })).await.status, 403);
+    assert_eq!(s.delete(&format!("/api/music/playlists/{pid}/tracks/0"), &token).await.status, 403);
+
+    // La piel se guarda en la cuenta; el dispositivo la lee pero no la cambia
+    assert_eq!(s.get("/api/auth/preferences", &token).await.json()["theme"], serde_json::Value::Null);
+    assert_eq!(s.put("/api/auth/preferences", &ana, json!({ "theme": "nord" })).await.status, 200);
+    assert_eq!(s.get("/api/auth/preferences", &token).await.json()["theme"], "nord");
+    assert_eq!(s.put("/api/auth/preferences", &ana, json!({ "theme": "<script>" })).await.status, 400);
+    assert_eq!(s.put("/api/auth/preferences", &token, json!({ "theme": "light" })).await.status, 403);
 
     // Lo que no: administrar el reproductor, editar listas, otras rutas, crear mas tokens
     assert_eq!(s.post("/api/music/mpv-args", &token, json!({ "args": "" })).await.status, 403);
@@ -94,4 +113,43 @@ async fn token_de_dispositivo_solo_controla_la_musica() {
     assert_eq!(s.delete("/api/auth/device-tokens/me", &t2).await.status, 204);
     assert_eq!(s.get("/api/music/current", &t2).await.status, 401);
     assert_eq!(s.get("/api/auth/device-tokens", &ana).await.json().as_array().unwrap().len(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn avisos_para_la_bandeja() {
+    use crate::events::{notify, Audience, Level};
+    let s = Server::start().await;
+    let admin = s.admin().await;
+    let ana = s.user(&admin, "ana", "observador").await;
+    let token = |who: String| {
+        let s = &s;
+        async move { s.post("/api/auth/device-tokens", &who, json!({ "name": "PC" })).await.json()["token"].as_str().unwrap().to_string() }
+    };
+    let (t_ana, t_admin) = (token(ana).await, token(admin).await);
+
+    // la primera consulta contesta al tiro con el cursor
+    let t0 = std::time::Instant::now();
+    let since = s.get("/api/live/notices?since=0", &t_ana).await.json()["next"].as_u64().unwrap();
+    assert!(t0.elapsed() < std::time::Duration::from_secs(2));
+
+    notify(&s.state, Audience::User("ana".into()), Some("printers3d"), Level::Success, "Tu pieza está lista", "«x» terminó");
+    notify(&s.state, Audience::Admins, None, Level::Info, "Solo admins", "");
+    notify(&s.state, Audience::All, Some("printers3d"), Level::Success, "Impresion terminada en P1", "");
+    // otros eventos en vivo no llegan a la bandeja
+    s.state.events.publish("machines", (), Audience::All, None);
+
+    let titles = |v: serde_json::Value| -> Vec<(String, String)> {
+        v["events"].as_array().unwrap().iter().map(|e| {
+            assert_eq!(e["kind"], "notify");
+            (e["data"]["title"].as_str().unwrap().to_string(), e["data"]["scope"].as_str().unwrap().to_string())
+        }).collect()
+    };
+    let path = format!("/api/live/notices?since={since}");
+    let a = titles(s.get(&path, &t_ana).await.json());
+    assert_eq!(a, vec![
+        ("Tu pieza está lista".to_string(), "personal".to_string()),
+        ("Impresion terminada en P1".to_string(), "lab".to_string()),
+    ]);
+    let ad = titles(s.get(&path, &t_admin).await.json());
+    assert_eq!(ad.iter().map(|(_, sc)| sc.as_str()).collect::<Vec<_>>(), vec!["admin", "lab"]);
 }

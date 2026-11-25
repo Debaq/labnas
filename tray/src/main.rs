@@ -21,6 +21,8 @@ mod http;
 mod link;
 #[macro_use]
 mod logfile;
+mod media;
+mod notices;
 
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
@@ -47,10 +49,14 @@ const REDISCOVER_EVERY: Duration = Duration::from_secs(60);
 /// Plazo para pedidos que pasan por yt-dlp en el servidor
 const SLOW: Duration = Duration::from_secs(90);
 const VOLUME_STEP: i64 = 10;
+/// Cada cuanto se relee la piel (por si se cambio en LabNAS)
+const LOOK_EVERY: Duration = Duration::from_secs(60);
 /// Puerto local para que una segunda copia le pida a la primera abrir el widget
 const SINGLE_INSTANCE_PORT: u16 = 47321;
 const WIDGET_W: f64 = 372.0;
-const WIDGET_H: f64 = 600.0;
+/// Alto inicial (reproductor sin cola); la pagina pide el alto que necesita con `size`
+const WIDGET_H: f64 = 300.0;
+const WIDGET_H_RANGE: (f64, f64) = (160.0, 640.0);
 
 /// Lo que muestran la bandeja y el widget
 #[derive(Debug, Clone, Default)]
@@ -74,6 +80,15 @@ struct Status {
     notice: Option<String>,
     /// Certificado cambiado: (host, huella guardada, actual)
     cert_changed: Option<(String, String, String)>,
+    /// Piel elegida en LabNAS (cuenta) y color de acento del laboratorio (branding)
+    theme: Option<String>,
+    accent: Option<String>,
+    /// Aviso del sistema al cambiar la cancion (opcional)
+    notify: bool,
+    /// Avisos de LabNAS que se muestran: (personales, laboratorio, administracion)
+    notices: (bool, bool, bool),
+    /// La cuenta es de un admin (para ofrecer los avisos de administracion)
+    admin: bool,
 }
 
 impl Status {
@@ -87,6 +102,11 @@ impl Status {
             "error": self.error,
             "notice": self.notice,
             "cert": self.cert_changed.as_ref().map(|(h, o, n)| json!({ "host": h, "old": o, "new": n })),
+            "theme": self.theme,
+            "accent": self.accent,
+            "notify": self.notify,
+            "notices": { "personal": self.notices.0, "lab": self.notices.1, "admin": self.notices.2 },
+            "admin": self.admin,
         })
     }
 }
@@ -120,6 +140,17 @@ enum Cmd {
     LoadPlaylist(String),
     /// Mix: llena la cola con recomendaciones (como el boton del reproductor web)
     Mix,
+    /// Saltar a un segundo de la cancion
+    Seek(u32),
+    /// Adelantar / retroceder (teclas del sistema)
+    SeekBy(i64),
+    /// Play / Pause del sistema (solo cambia si hace falta)
+    SetPaused(bool),
+    /// Guardar la cancion actual en una lista
+    SaveTo { id: String, name: String },
+    SetNotify(bool),
+    /// Avisos de LabNAS: `personal`, `lab` o `admin`
+    SetNotices(String, bool),
     Link,
     Linked(Result<link::Linked, String>),
     Unlink,
@@ -204,6 +235,12 @@ struct Worker {
     linking: bool,
     /// La persona pidio cambiar la direccion
     force_setup: bool,
+    /// Ultima vez que se leyo la piel y el acento
+    last_look: Option<Instant>,
+    /// Cancion de la ultima consulta (None = aun no se consulto; "" = nada sonando)
+    last_track: Option<String>,
+    /// Lo que necesita el hilo de los avisos de LabNAS
+    notices: notices::Shared,
 }
 
 impl Worker {
@@ -229,6 +266,14 @@ impl Worker {
         self.status.phase = self.phase();
         self.status.linked = self.cfg.token.is_some();
         self.status.user = self.cfg.user.clone();
+        self.status.notify = self.cfg.notify;
+        self.status.notices = (!self.cfg.quiet_personal, self.cfg.lab, !self.cfg.quiet_admin);
+        if let Ok(mut l) = self.notices.lock() {
+            let ready = self.status.cert_changed.is_none() && !self.force_setup;
+            l.base = self.base.clone().filter(|_| ready);
+            l.token = self.cfg.token.clone();
+            (l.personal, l.lab, l.admin) = self.status.notices;
+        }
         self.status.base = self.base.as_ref().map(Url::base);
         if self.status.phase != "listo" {
             self.status.headline = match self.status.phase {
@@ -364,10 +409,23 @@ impl Worker {
                         let text = if artist.is_empty() { title.to_string() } else { format!("{title} — {artist}") };
                         self.status.headline = format!("{icon} {}", shorten(&text, 60));
                         self.status.playing = true;
+                        let id = cur.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                        // la primera consulta no avisa: solo los cambios
+                        if self.last_track.as_deref().is_some_and(|t| t != id) && self.cfg.notify {
+                            let by = cur.get("added_by").and_then(|v| v.as_str()).or(ms["started_by"].as_str());
+                            let body = match by {
+                                Some(by) if artist.is_empty() => format!("Puesta por {by}"),
+                                Some(by) => format!("{artist} · puesta por {by}"),
+                                None => artist.to_string(),
+                            };
+                            media::notify(media::Kind::Music, title.to_string(), body);
+                        }
+                        self.last_track = Some(id.to_string());
                     }
                     None => {
                         self.status.headline = "Nada sonando".into();
                         self.status.playing = false;
+                        self.last_track = Some(String::new());
                     }
                 }
                 self.status.music = Some(ms);
@@ -388,6 +446,32 @@ impl Worker {
         }
     }
 
+    /// Piel de la cuenta y acento del laboratorio, para que el widget se vea como LabNAS
+    fn refresh_look(&mut self) {
+        if self.base.is_none() || self.last_look.is_some_and(|t| t.elapsed() < LOOK_EVERY) {
+            return;
+        }
+        self.last_look = Some(Instant::now());
+        if let Some(base) = self.base.clone()
+            && let Ok(r) = http::request(&base, "GET", "/api/system/branding", None, None)
+            && r.status == 200
+        {
+            self.status.accent = r.json().and_then(|b| b["accent_color"].as_str().map(str::to_string)).filter(|a| !a.is_empty());
+        }
+        if self.token().is_some()
+            && let Some(r) = self.call("GET", "/api/auth/preferences", None)
+            && r.status == 200
+        {
+            self.status.theme = r.json().and_then(|p| p["theme"].as_str().map(str::to_string));
+        }
+        if self.token().is_some()
+            && let Some(r) = self.call("GET", "/api/auth/device-tokens/me", None)
+            && r.status == 200
+        {
+            self.status.admin = r.json().is_some_and(|m| m["admin"] == true);
+        }
+    }
+
     fn refresh(&mut self) {
         if self.token().is_none() || self.status.cert_changed.is_some() || self.force_setup {
             return;
@@ -403,11 +487,19 @@ impl Worker {
         if let Some(r) = self.call("GET", "/api/music/current", None) {
             self.apply(r);
         }
+        self.refresh_look();
     }
 
     fn action(&mut self, method: &str, path: &str, body: Option<String>) {
         if let Some(r) = self.call(method, path, Some(body.as_deref().unwrap_or("{}"))) {
             self.apply(r);
+        }
+    }
+
+    fn send_playlists(&mut self) {
+        if let Some(r) = self.call("GET", "/api/music/playlists", None) {
+            let items = if r.status == 200 { r.json().unwrap_or(json!([])) } else { json!([]) };
+            self.widget(json!({ "type": "playlists", "items": items }));
         }
     }
 
@@ -426,6 +518,60 @@ impl Worker {
                 self.action("POST", "/api/music/volume", Some(format!("{{\"volume\":{v}}}")));
             }
             Cmd::SetVolume(v) => self.action("POST", "/api/music/volume", Some(format!("{{\"volume\":{}}}", v.min(100)))),
+            Cmd::Seek(pos) => self.action("POST", "/api/music/seek", Some(format!("{{\"position\":{pos}}}"))),
+            Cmd::SeekBy(delta) => {
+                // el tiempo de ahora, no el de la consulta de hace unos segundos
+                self.refresh();
+                let Some(ms) = self.status.music.as_ref().filter(|m| m["current"].is_object()) else { return };
+                let pos = (ms["elapsed"].as_i64().unwrap_or(0) + delta).max(0);
+                self.action("POST", "/api/music/seek", Some(format!("{{\"position\":{pos}}}")));
+            }
+            Cmd::SetPaused(want) => {
+                if self.status.playing && self.status.paused != want {
+                    self.action("POST", "/api/music/pause", None);
+                }
+            }
+            Cmd::SaveTo { id, name } => {
+                let Some(cur) = self.status.music.as_ref().map(|m| m["current"].clone()).filter(Value::is_object) else {
+                    self.toast("No hay nada sonando", true);
+                    return;
+                };
+                let body = json!({
+                    "id": cur["id"], "title": cur["title"], "artist": cur["artist"],
+                    "thumbnail": cur["thumbnail"], "duration": cur["duration"],
+                })
+                .to_string();
+                match self.call("POST", &format!("/api/music/playlists/{id}/tracks"), Some(&body)) {
+                    Some(r) if r.status == 200 => {
+                        let title = cur["title"].as_str().unwrap_or("La canción");
+                        self.toast(format!("«{}» guardada en {name}", shorten(title, 40)), false);
+                        self.send_playlists();
+                    }
+                    Some(r) => self.toast(error_text(&r, "No se pudo guardar"), true),
+                    None => {}
+                }
+                return;
+            }
+            Cmd::SetNotify(on) => {
+                self.cfg.notify = on;
+                config::save(&self.cfg);
+                #[cfg(windows)]
+                if on {
+                    media::register_notifications();
+                }
+            }
+            Cmd::SetNotices(key, on) => {
+                match key.as_str() {
+                    "personal" => self.cfg.quiet_personal = !on,
+                    "lab" => self.cfg.lab = on,
+                    _ => self.cfg.quiet_admin = !on,
+                }
+                config::save(&self.cfg);
+                #[cfg(windows)]
+                if on {
+                    media::register_notifications();
+                }
+            }
             Cmd::Shuffle => self.action("POST", "/api/music/shuffle", None),
             Cmd::Repeat => self.action("POST", "/api/music/repeat", None),
             Cmd::QueuePlay(i) => self.action("POST", &format!("/api/music/queue/play/{i}"), None),
@@ -456,10 +602,7 @@ impl Worker {
                 return;
             }
             Cmd::Playlists => {
-                if let Some(r) = self.call("GET", "/api/music/playlists", None) {
-                    let items = if r.status == 200 { r.json().unwrap_or(json!([])) } else { json!([]) };
-                    self.widget(json!({ "type": "playlists", "items": items }));
-                }
+                self.send_playlists();
                 return;
             }
             Cmd::Mix => {
@@ -467,7 +610,7 @@ impl Worker {
                 return;
             }
             Cmd::LoadPlaylist(id) => {
-                let id: String = id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+                let id = playlist_id(&id);
                 self.slow("POST", format!("/api/music/playlists/{id}/load"), Some("{}".into()));
                 return;
             }
@@ -499,6 +642,7 @@ impl Worker {
                         self.cfg.token = Some(l.token);
                         self.cfg.user = l.user;
                         self.status.error = None;
+                        self.last_look = None;
                         config::save(&self.cfg);
                         let _ = self.proxy.send_event(UserEvent::ShowWidget);
                     }
@@ -609,6 +753,11 @@ impl Worker {
 
 // ─── Mensajes del widget ───
 
+/// Id de lista tal como va en la ruta (sin `/`, `?` ni nada raro)
+fn playlist_id(raw: &str) -> String {
+    raw.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').take(64).collect()
+}
+
 fn ipc_to_cmd(msg: &Value) -> Option<Cmd> {
     let int = |k: &str| msg[k].as_u64().map(|v| v as usize);
     Some(match msg["cmd"].as_str()? {
@@ -626,6 +775,10 @@ fn ipc_to_cmd(msg: &Value) -> Option<Cmd> {
         "playlists" => Cmd::Playlists,
         "loadPlaylist" => Cmd::LoadPlaylist(msg["id"].as_str()?.to_string()),
         "mix" => Cmd::Mix,
+        "seek" => Cmd::Seek(u32::try_from(msg["pos"].as_u64()?).ok()?),
+        "saveTo" => Cmd::SaveTo { id: playlist_id(msg["id"].as_str()?), name: shorten(msg["name"].as_str().unwrap_or(""), 60) },
+        "notify" => Cmd::SetNotify(msg["on"].as_bool()?),
+        "notices" => Cmd::SetNotices(msg["key"].as_str().filter(|k| ["personal", "lab", "admin"].contains(k))?.to_string(), msg["on"].as_bool()?),
         "link" => Cmd::Link,
         "unlink" => Cmd::Unlink,
         "rediscover" => Cmd::Rediscover,
@@ -647,22 +800,45 @@ struct Widget {
     hidden_at: Option<Instant>,
     /// Cuando se mostro (en Windows el foco tarda un instante en llegar)
     shown_at: Option<Instant>,
+    /// Alto logico actual (compacto o con la cola / busqueda abierta)
+    height: f64,
+    /// Donde estaba el icono al abrirlo, para reubicarlo al cambiar de alto
+    rect: Option<tray_icon::Rect>,
+    /// Ultimo alto real (fisico) informado por el sistema
+    seen_h: u32,
+}
+
+/// Build de pruebas con `LABNAS_TRAY_TEST_JS`: el widget no se oculta solo
+fn testing() -> bool {
+    cfg!(debug_assertions) && std::env::var_os("LABNAS_TRAY_TEST_JS").is_some()
+}
+
+/// La pagina del widget con el logo de LabNAS incrustado
+fn widget_html() -> String {
+    let logo = format!("data:image/svg+xml,{}", http::pct_encode(include_str!("../assets/logo.svg")));
+    let html = include_str!("../assets/widget.html").replace("__LOGO__", &logo);
+    // Windows: la ventana es opaca (sombra y esquinas las pone el sistema) y la tarjeta la llena
+    if cfg!(windows) { html.replace("<body>", "<body class=\"flat\">") } else { html }
 }
 
 fn build_widget(target: &EventLoopWindowTarget<UserEvent>, proxy: &EventLoopProxy<UserEvent>) -> Option<Widget> {
     let builder = WindowBuilder::new()
         .with_title("LabNAS")
         .with_inner_size(LogicalSize::new(WIDGET_W, WIDGET_H))
-        .with_resizable(false)
+        // GTK no cambia el tamano de una ventana fija ni desde el programa; sin bordes igual
+        // no se puede estirar con el raton
+        .with_resizable(cfg!(target_os = "linux"))
         .with_decorations(false)
-        .with_transparent(true)
+        // Windows: con transparencia la sombra del sistema dibuja un marco cuadrado alrededor
+        // de la tarjeta redondeada; ahi va opaca con sombra y esquinas de Windows 11
+        .with_transparent(!cfg!(windows))
         .with_always_on_top(true)
         .with_visible(false)
         .with_window_icon(window_icon());
     #[cfg(windows)]
     let builder = {
         use tao::platform::windows::WindowBuilderExtWindows;
-        builder.with_skip_taskbar(true)
+        builder.with_skip_taskbar(true).with_undecorated_shadow(true)
     };
     #[cfg(target_os = "linux")]
     let builder = {
@@ -673,13 +849,15 @@ fn build_widget(target: &EventLoopWindowTarget<UserEvent>, proxy: &EventLoopProx
         .build(target)
         .map_err(|e| log!("no se pudo crear el widget: {e}"))
         .ok()?;
+    #[cfg(windows)]
+    round_corners(&window);
 
     // Datos del webview fuera de la carpeta del .exe (puede no tener permiso de escritura)
     let mut context = WebContext::new(dirs::data_local_dir().map(|d| d.join("labnas-tray").join("webview")));
     let ipc_proxy = proxy.clone();
     let wb = WebViewBuilder::new_with_web_context(&mut context)
-        .with_html(include_str!("../assets/widget.html"))
-        .with_transparent(true)
+        .with_html(widget_html())
+        .with_transparent(!cfg!(windows))
         .with_devtools(cfg!(debug_assertions))
         .with_ipc_handler(move |req| {
             let _ = ipc_proxy.send_event(UserEvent::Ipc(req.body().clone()));
@@ -700,11 +878,11 @@ fn build_widget(target: &EventLoopWindowTarget<UserEvent>, proxy: &EventLoopProx
     #[cfg(not(target_os = "linux"))]
     let webview = wb.build(&window);
     let webview = webview.map_err(|e| log!("no se pudo crear el webview: {e}")).ok()?;
-    Some(Widget { window, webview, _context: context, hidden_at: None, shown_at: None })
+    Some(Widget { window, webview, _context: context, hidden_at: None, shown_at: None, height: WIDGET_H, rect: None, seen_h: 0 })
 }
 
 /// Ubica el widget junto al icono (Windows da su posicion) o arriba a la derecha
-fn place_widget(w: &Window, target: &EventLoopWindowTarget<UserEvent>, rect: Option<tray_icon::Rect>) {
+fn place_widget(w: &Window, target: &EventLoopWindowTarget<UserEvent>, rect: Option<tray_icon::Rect>, height: f64) {
     let point = rect.map(|r| (r.position.x + f64::from(r.size.width) / 2.0, r.position.y + f64::from(r.size.height) / 2.0));
     let monitor = point
         .and_then(|(x, y)| {
@@ -717,7 +895,7 @@ fn place_widget(w: &Window, target: &EventLoopWindowTarget<UserEvent>, rect: Opt
         .or_else(|| w.current_monitor());
     let Some(m) = monitor else { return };
     let scale = m.scale_factor();
-    let (ww, wh) = (WIDGET_W * scale, WIDGET_H * scale);
+    let (ww, wh) = (WIDGET_W * scale, height * scale);
     let (mx, my) = (f64::from(m.position().x), f64::from(m.position().y));
     let (mw, mh) = (f64::from(m.size().width), f64::from(m.size().height));
     let margin = 10.0 * scale;
@@ -760,6 +938,18 @@ fn auto_hide(widget: &mut Option<Widget>, control_flow: &mut ControlFlow) {
         w.hidden_at = Some(Instant::now());
     } else {
         *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(200));
+    }
+}
+
+/// Windows 11: esquinas redondeadas del sistema en la ventana sin bordes (en 10 no hace nada)
+#[cfg(windows)]
+fn round_corners(w: &Window) {
+    use tao::platform::windows::WindowExtWindows;
+    use windows_sys::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
+    let pref = DWMWCP_ROUND;
+    // SAFETY: hwnd valido de esta ventana; el puntero apunta a un i32 vivo durante la llamada
+    unsafe {
+        DwmSetWindowAttribute(w.hwnd() as _, DWMWA_WINDOW_CORNER_PREFERENCE as u32, (&raw const pref).cast(), size_of::<i32>() as u32);
     }
 }
 
@@ -972,6 +1162,33 @@ fn main() {
     }
 
     let (tx, rx) = mpsc::channel::<Cmd>();
+    // teclas multimedia y reproductor del sistema
+    let media_tx = tx.clone();
+    let media_proxy = proxy.clone();
+    let mut media = media::Media::new(&event_loop, move |a| {
+        let cmd = match a {
+            media::Action::SetPaused(p) => Cmd::SetPaused(p),
+            media::Action::Toggle => Cmd::Toggle,
+            media::Action::Next => Cmd::Next,
+            media::Action::Previous => Cmd::Previous,
+            media::Action::SeekTo(s) => Cmd::Seek(s),
+            media::Action::SeekBy(d) => Cmd::SeekBy(d),
+            media::Action::Volume(v) => Cmd::SetVolume(v),
+            media::Action::Raise => {
+                let _ = media_proxy.send_event(UserEvent::ShowWidget);
+                return;
+            }
+        };
+        let _ = media_tx.send(cmd);
+    });
+    #[cfg(windows)]
+    {
+        // los avisos de LabNAS vienen activados: Windows necesita la identidad desde ya
+        let c = config::load();
+        if c.notify || !c.quiet_personal || c.lab || !c.quiet_admin {
+            std::thread::spawn(media::register_notifications);
+        }
+    }
     let worker = Worker {
         cfg: config::load(),
         base: None,
@@ -983,7 +1200,11 @@ fn main() {
         offline: false,
         linking: false,
         force_setup: false,
+        last_look: None,
+        last_track: None,
+        notices: notices::Shared::default(),
     };
+    notices::spawn(worker.notices.clone());
     std::thread::spawn(move || worker.run(rx));
     if let Some(listener) = listener {
         let p = proxy.clone();
@@ -1016,7 +1237,8 @@ fn main() {
                 *widget = build_widget(target, &proxy);
             }
             let Some(w) = widget.as_mut() else { return };
-            place_widget(&w.window, target, rect);
+            w.rect = rect;
+            place_widget(&w.window, target, rect, w.height);
             w.window.set_visible(true);
             w.window.set_focus();
             w.hidden_at = None;
@@ -1031,9 +1253,21 @@ fn main() {
             Event::WindowEvent { event: WindowEvent::Focused(false), .. } => {
                 if let Some(w) = widget.as_mut()
                     && w.window.is_visible()
+                    && !testing()
                 {
                     w.window.set_visible(false);
                     w.hidden_at = Some(Instant::now());
+                }
+            }
+            // el gestor de ventanas puede aplicar el cambio de alto despues de mover la
+            // ventana: se vuelve a anclar junto a la barra cuando el alto ya cambio
+            // (en GTK mover tambien avisa Resized: solo cuenta si cambio el alto)
+            Event::WindowEvent { event: WindowEvent::Resized(size), .. } => {
+                if let Some(w) = widget.as_mut()
+                    && size.height != std::mem::replace(&mut w.seen_h, size.height)
+                    && w.window.is_visible()
+                {
+                    place_widget(&w.window, target, w.rect, w.height);
                 }
             }
             Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
@@ -1045,6 +1279,9 @@ fn main() {
                 UserEvent::Status(s) => {
                     status = *s;
                     items.show(&status, tray.as_ref());
+                    if let Some(m) = media.as_mut() {
+                        m.update(status.music.as_ref().filter(|_| status.phase == "listo"));
+                    }
                     if let Some(w) = widget.as_ref() {
                         push_status(w, &status);
                     }
@@ -1060,6 +1297,20 @@ fn main() {
                         Some("hide") => {
                             if let Some(w) = widget.as_ref() {
                                 w.window.set_visible(false);
+                            }
+                        }
+                        // la pagina pide alto: compacta o con la cola / busqueda abierta
+                        Some("size") => {
+                            let Some(h) = msg["h"].as_f64() else { return };
+                            let h = h.clamp(WIDGET_H_RANGE.0, WIDGET_H_RANGE.1).round();
+                            if let Some(w) = widget.as_mut()
+                                && (h - w.height).abs() >= 1.0
+                            {
+                                w.height = h;
+                                w.window.set_inner_size(LogicalSize::new(WIDGET_W, h));
+                                if w.window.is_visible() {
+                                    place_widget(&w.window, target, w.rect, h);
+                                }
                             }
                         }
                         Some("openWeb") => {
@@ -1151,6 +1402,20 @@ mod tests {
         assert_eq!(normalize_url("192.168.1.10:3001").map(|u| u.base()).as_deref(), Some("http://192.168.1.10:3001"));
         assert_eq!(normalize_url(" https://labnas.local:3443/ ").map(|u| u.base()).as_deref(), Some("https://labnas.local:3443"));
         assert!(normalize_url("   ").is_none());
+    }
+
+    #[test]
+    fn pieles_al_dia() {
+        // cada piel de la web debe estar en el widget (si se agrega una, regenerar THEMES)
+        let ts = include_str!("../../frontend/src/themes/themes.ts");
+        let html = widget_html();
+        let union = ts.split("export type ThemeName =").nth(1).and_then(|r| r.lines().next()).unwrap_or("");
+        let names: Vec<&str> = union.split('|').map(|n| n.trim().trim_matches('\'')).filter(|n| !n.is_empty()).collect();
+        assert!(names.len() >= 9, "{names:?}");
+        for n in names {
+            assert!(html.contains(&format!("\"{n}\":{{")), "falta la piel {n} en widget.html");
+        }
+        assert!(html.contains("data:image/svg+xml,") && !html.contains("__LOGO__"));
     }
 
     #[test]

@@ -150,6 +150,12 @@ pub struct SetVolumeRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct SeekRequest {
+    /// Segundo de la cancion
+    pub position: u32,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct QueueMoveRequest {
     pub from: usize,
     pub to: usize,

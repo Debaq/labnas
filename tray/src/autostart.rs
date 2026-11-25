@@ -35,7 +35,7 @@ pub fn set(on: bool) -> Result<(), String> {
 const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 
 #[cfg(windows)]
-fn reg(args: &[&str]) -> std::io::Result<std::process::Output> {
+pub(crate) fn reg(args: &[&str]) -> std::io::Result<std::process::Output> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     std::process::Command::new("reg").args(args).creation_flags(CREATE_NO_WINDOW).output()

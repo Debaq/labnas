@@ -5,27 +5,30 @@
 <title>LabNAS</title>
 <style>
   :root {
-    --bg: #1e1f29; --card: #262836; --card2: #2e3142; --line: #3a3d52;
-    --text: #f2f2f7; --muted: #9a9cb5; --accent: #bd93f9; --accent2: #ff79c6;
-    --ok: #50fa7b; --bad: #ff5555; --warn: #f1fa8c;
+    --bg: #1e1f29; --card: #282a36; --card2: #343746; --line: #44475a; --input: #44475a;
+    --text: #f8f8f2; --muted: #6272a4; --accent: #bd93f9; --accent2: #caa8ff; --accent-alpha: rgba(189,147,249,.12);
+    --on-accent: #1b1b22; --ok: #50fa7b; --bad: #ff5555; --warn: #f1fa8c;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden;
     font: 13px/1.35 system-ui, -apple-system, "Segoe UI", Ubuntu, sans-serif; color: var(--text);
     user-select: none; -webkit-user-select: none; }
   #app { position: absolute; inset: 6px; display: flex; flex-direction: column; border-radius: 16px;
-    background: linear-gradient(160deg, #262838 0%, var(--bg) 60%); border: 1px solid var(--line);
-    box-shadow: 0 12px 40px rgba(0,0,0,.45); overflow: hidden; }
+    background: linear-gradient(160deg, var(--card) 0%, var(--bg) 60%); border: 1px solid var(--line);
+    box-shadow: 0 6px 18px rgba(0,0,0,.4); overflow: hidden; }
+  /* para medir el alto que necesita el contenido (ver fit) */
+  #app.measure { bottom: auto; }
+  /* Windows: ventana opaca; sombra y esquinas las pone el sistema */
+  body.flat #app { inset: 0; border: 0; border-radius: 0; box-shadow: none; }
   button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
   button:disabled { opacity: .35; cursor: default; }
-  input { font: inherit; color: var(--text); background: var(--card2); border: 1px solid var(--line);
+  input { font: inherit; color: var(--text); background: var(--input); border: 1px solid var(--line);
     border-radius: 10px; padding: 8px 10px; outline: none; width: 100%; user-select: text; -webkit-user-select: text; }
   input:focus { border-color: var(--accent); }
   svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; display: block; }
 
   header { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; }
-  header .logo { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), var(--accent2));
-    display: grid; place-items: center; color: #1e1f29; font-weight: 800; font-size: 12px; }
+  header .logo { width: 22px; height: 22px; object-fit: contain; }
   header .title { font-weight: 650; flex: 1; min-width: 0; }
   header .title small { display: block; color: var(--muted); font-weight: 400; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .icon-btn { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: var(--muted); }
@@ -35,7 +38,7 @@
   .now { display: flex; gap: 12px; padding: 6px 14px 4px; align-items: center; }
   .cover { width: 72px; height: 72px; border-radius: 12px; object-fit: cover; flex-shrink: 0; background: var(--card2);
     box-shadow: 0 6px 18px rgba(0,0,0,.4); }
-  .cover.ph { display: grid; place-items: center; color: var(--muted); background: linear-gradient(135deg, #34374a, #2a2c3b); }
+  .cover.ph { display: grid; place-items: center; color: var(--muted); background: linear-gradient(135deg, var(--card2), var(--card)); }
   .cover.ph svg { width: 30px; height: 30px; }
   .meta { min-width: 0; flex: 1; }
   .meta .t { font-weight: 650; font-size: 14px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -43,11 +46,16 @@
   .meta .by { color: var(--muted); opacity: .7; font-size: 11px; margin-top: 2px; }
   .progress { padding: 6px 14px 0; }
   .bar { height: 4px; border-radius: 4px; background: var(--card2); overflow: hidden; }
+  .seek { padding: 6px 0; margin: -6px 0; }
+  .progress.seekable .seek { cursor: pointer; }
+  .progress.seekable .seek:hover .bar { height: 7px; margin-top: -1.5px; margin-bottom: -1.5px; }
+  .bar { transition: height .12s; }
   .bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .9s linear; }
+  .controls .main svg, .search .go svg { color: var(--on-accent); }
   .times { display: flex; justify-content: space-between; color: var(--muted); font-size: 10.5px; margin-top: 3px; font-variant-numeric: tabular-nums; }
   .controls { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 4px 0 2px; }
-  .controls .main { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; color: #1e1f29;
-    background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 6px 18px rgba(189,147,249,.35); }
+  .controls .main { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; color: var(--on-accent);
+    background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 6px 18px rgba(0,0,0,.3); }
   .controls .main svg { width: 22px; height: 22px; fill: currentColor; stroke: none; }
   .controls .main:hover:not(:disabled) { transform: scale(1.05); }
   .controls .sec { color: var(--text); }
@@ -60,16 +68,38 @@
   input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--text); cursor: pointer; }
 
   /* Pestanas */
-  .tabs { display: flex; gap: 4px; padding: 0 10px; border-bottom: 1px solid var(--line); }
+  .tabs { display: flex; gap: 4px; padding: 0 10px 4px; border-top: 1px solid var(--line); }
+  #player.open .tabs { padding-bottom: 0; border-bottom: 1px solid var(--line); }
+  .tabs .fold { flex: 0 0 30px; display: none; }
+  #player.open .tabs .fold { display: flex; }
   .tabs button { flex: 1; padding: 8px 0; color: var(--muted); font-weight: 600; font-size: 12px; border-bottom: 2px solid transparent;
     display: flex; align-items: center; justify-content: center; gap: 6px; }
   .tabs button svg { width: 15px; height: 15px; }
   .tabs button.on { color: var(--text); border-color: var(--accent); }
   .tabs .count { font-size: 10px; background: var(--card2); color: var(--muted); border-radius: 8px; padding: 0 6px; }
-  .pane { flex: 1; overflow-y: auto; padding: 8px 8px 10px; }
+  .pane { flex: 1; overflow-y: auto; padding: 8px 8px 10px; position: relative; }
+  .now .save { align-self: flex-start; flex-shrink: 0; }
+  .now .save.on { color: var(--accent); background: var(--accent-alpha); }
+  .row .grip { width: 22px; height: 40px; display: grid; place-items: center; color: var(--muted); cursor: grab; touch-action: none;
+    font-size: 11px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  .row .grip svg { width: 15px; height: 15px; display: none; }
+  .row:hover .grip svg, .row.dragging .grip svg { display: block; }
+  .row:hover .grip span, .row.dragging .grip span { display: none; }
+  .row.dragging { background: var(--card2); box-shadow: 0 6px 18px rgba(0,0,0,.35); position: relative; z-index: 2; cursor: grabbing; }
+  .row.dragging .grip { cursor: grabbing; }
+  #pane-queue.sorting .row[data-i]:not(.dragging) { transition: transform .15s ease; }
+  .row .acts button.done { color: var(--ok); opacity: 1; }
+  .savebar { display: flex; align-items: center; gap: 8px; padding: 6px 8px; margin: 0 2px 8px; border-radius: 10px;
+    background: var(--accent-alpha); border: 1px solid var(--accent); font-size: 12px; }
+  .savebar span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .opts { display: flex; flex-direction: column; gap: 1px; border-radius: 11px; overflow: hidden; }
+  .opts .opt { border-radius: 0; }
+  .opt { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 11px; background: var(--card2); cursor: pointer; }
+  .opt input { width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--accent); margin: 0; }
+  .opt small { display: block; color: var(--muted); font-size: 11px; }
   .pane::-webkit-scrollbar { width: 6px; } .pane::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; }
   .search { display: flex; gap: 6px; padding: 0 2px 8px; position: sticky; top: 0; background: var(--bg); z-index: 1; }
-  .search .go { width: 38px; border-radius: 10px; background: var(--accent); color: #1e1f29; display: grid; place-items: center; flex-shrink: 0; }
+  .search .go { width: 38px; border-radius: 10px; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; flex-shrink: 0; }
 
   .row { display: flex; align-items: center; gap: 9px; padding: 6px; border-radius: 10px; }
   .row:hover { background: var(--card); }
@@ -87,7 +117,7 @@
   .qbar { display: flex; align-items: center; gap: 8px; padding: 2px 4px 8px; }
   .qbar .hint { flex: 1; color: var(--muted); font-size: 11px; }
   .pill { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; font-weight: 650; font-size: 12px;
-    background: linear-gradient(135deg, rgba(189,147,249,.18), rgba(255,121,198,.18)); border: 1px solid rgba(189,147,249,.45); color: var(--text); }
+    background: var(--accent-alpha); border: 1px solid var(--accent); color: var(--text); }
   .pill:hover:not(:disabled) { border-color: var(--accent); }
   .pill svg { width: 15px; height: 15px; color: var(--accent); }
   .pill .mini { width: 13px; height: 13px; border-width: 2px; margin: 0; }
@@ -101,7 +131,7 @@
   .wizard h2 { margin: 0; font-size: 17px; }
   .wizard p { margin: 0; color: var(--muted); }
   .wizard .step { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
-  .btn { padding: 10px 14px; border-radius: 11px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #1e1f29;
+  .btn { padding: 10px 14px; border-radius: 11px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: var(--on-accent);
     font-weight: 700; text-align: center; }
   .btn.ghost { background: var(--card2); color: var(--text); font-weight: 600; }
   .err { color: var(--bad); font-size: 12px; }
@@ -118,7 +148,7 @@
 <body>
 <div id="app">
   <header>
-    <div class="logo">L</div>
+    <img class="logo" src="__LOGO__" alt="">
     <div class="title">LabNAS <small id="sub">Música</small></div>
     <button class="icon-btn" id="btnWeb" title="Abrir LabNAS en el navegador"><svg viewBox="0 0 24 24"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg></button>
     <button class="icon-btn" id="btnMenu" title="Cuenta y conexión"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
@@ -138,9 +168,10 @@
         <div class="a" id="artist"></div>
         <div class="by" id="by"></div>
       </div>
+      <button class="icon-btn save" id="btnSave" title="Guardar en una lista"><svg viewBox="0 0 24 24"><path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h7"/><path d="M18 3v6M15 6h6"/></svg></button>
     </div>
-    <div class="progress">
-      <div class="bar"><i id="bar"></i></div>
+    <div class="progress" id="progress">
+      <div class="seek" id="seek"><div class="bar"><i id="bar"></i></div></div>
       <div class="times"><span id="tNow">0:00</span><span id="tLen">0:00</span></div>
     </div>
     <div class="controls">
@@ -156,11 +187,12 @@
       <span id="volTxt" style="width:30px;text-align:right;font-size:11px;font-variant-numeric:tabular-nums"></span>
     </div>
     <div class="tabs">
-      <button data-tab="queue" class="on"><svg viewBox="0 0 24 24"><path d="M3 6h13M3 12h13M3 18h9"/><path d="M19 15v6M16 18h6"/></svg>Cola <span class="count" id="qCount">0</span></button>
+      <button data-tab="queue"><svg viewBox="0 0 24 24"><path d="M3 6h13M3 12h13M3 18h9"/><path d="M19 15v6M16 18h6"/></svg>Cola <span class="count" id="qCount">0</span></button>
       <button data-tab="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>Buscar</button>
       <button data-tab="lists"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>Listas</button>
+      <button class="fold" id="btnFold" title="Achicar (Esc)"><svg viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></svg></button>
     </div>
-    <div class="pane" id="pane-queue"></div>
+    <div class="pane hidden" id="pane-queue"></div>
     <div class="pane hidden" id="pane-search">
       <form class="search" id="searchForm">
         <input id="q" placeholder="Buscar canción o artista…" autocomplete="off">
@@ -175,6 +207,16 @@
 </div>
 
 <script>
+// Pieles de LabNAS (frontend/src/themes/themes.ts); el test `pieles_al_dia` revisa que esten todas
+const THEMES = {"dracula":{"bg":"#1e1f29","card":"#282a36","card2":"#343746","line":"#44475a","text":"#f8f8f2","muted":"#6272a4","accent":"#bd93f9","accent2":"#caa8ff","accentAlpha":"rgba(189, 147, 249, 0.12)","ok":"#50fa7b","bad":"#ff5555","warn":"#f1fa8c","input":"#44475a"},
+  "light":{"bg":"#ffffff","card":"#f8fafc","card2":"#f1f5f9","line":"#e2e8f0","text":"#1e293b","muted":"#64748b","accent":"#3b82f6","accent2":"#2563eb","accentAlpha":"rgba(59, 130, 246, 0.10)","ok":"#22c55e","bad":"#ef4444","warn":"#eab308","input":"#ffffff"},
+  "nord":{"bg":"#272c36","card":"#2e3440","card2":"#3b4252","line":"#4c566a","text":"#eceff4","muted":"#81a1c1","accent":"#88c0d0","accent2":"#8fbcbb","accentAlpha":"rgba(136, 192, 208, 0.12)","ok":"#a3be8c","bad":"#bf616a","warn":"#ebcb8b","input":"#3b4252"},
+  "solarized":{"bg":"#eee8d5","card":"#fdf6e3","card2":"#f5efdc","line":"#eee8d5","text":"#657b83","muted":"#93a1a1","accent":"#268bd2","accent2":"#1a6fb5","accentAlpha":"rgba(38, 139, 210, 0.10)","ok":"#859900","bad":"#dc322f","warn":"#b58900","input":"#fdf6e3"},
+  "monokai":{"bg":"#1e1f1c","card":"#272822","card2":"#3e3d32","line":"#49483e","text":"#f8f8f2","muted":"#75715e","accent":"#a6e22e","accent2":"#b6f23e","accentAlpha":"rgba(166, 226, 46, 0.12)","ok":"#a6e22e","bad":"#f92672","warn":"#e6db74","input":"#3e3d32"},
+  "catppuccin":{"bg":"#181825","card":"#1e1e2e","card2":"#313244","line":"#45475a","text":"#cdd6f4","muted":"#6c7086","accent":"#cba6f7","accent2":"#d4b8fa","accentAlpha":"rgba(203, 166, 247, 0.12)","ok":"#a6e3a1","bad":"#f38ba8","warn":"#f9e2af","input":"#313244"},
+  "gruvbox":{"bg":"#1d2021","card":"#282828","card2":"#3c3836","line":"#504945","text":"#ebdbb2","muted":"#928374","accent":"#fe8019","accent2":"#f09030","accentAlpha":"rgba(254, 128, 25, 0.12)","ok":"#b8bb26","bad":"#fb4934","warn":"#fabd2f","input":"#3c3836"},
+  "tokyonight":{"bg":"#16161e","card":"#1a1b26","card2":"#24283b","line":"#3b4261","text":"#c0caf5","muted":"#565f89","accent":"#7aa2f7","accent2":"#89b4fa","accentAlpha":"rgba(122, 162, 247, 0.12)","ok":"#9ece6a","bad":"#f7768e","warn":"#e0af68","input":"#24283b"},
+  "rosepine":{"bg":"#1f1d2e","card":"#191724","card2":"#26233a","line":"#393552","text":"#e0def4","muted":"#6e6a86","accent":"#c4a7e7","accent2":"#d4b7f7","accentAlpha":"rgba(196, 167, 231, 0.12)","ok":"#9ccfd8","bad":"#eb6f92","warn":"#f6c177","input":"#26233a"}};
 const $ = (id) => document.getElementById(id);
 const send = (msg) => window.ipc.postMessage(JSON.stringify(msg));
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -191,15 +233,22 @@ const ICO = {
   x: '<svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>',
   up: '<svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
   top: '<svg viewBox="0 0 24 24"><path d="M5 3h14M12 21V8M6 14l6-6 6 6"/></svg>',
+  save: '<svg viewBox="0 0 24 24"><path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>',
+  check: '<svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>',
+  grip: '<svg viewBox="0 0 24 24"><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></svg>',
   sparkles: '<svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>',
 };
 let mixing = false;
 
 let S = {};              // ultimo estado del programa
-let tab = 'queue';
+let tab = null;           // pestana abierta (null = widget compacto)
 let tick = null, base = { at: 0, elapsed: 0 };
 let volDragging = false;
 let listsLoaded = false;
+let lists = [];            // ultimas listas recibidas
+let saving = false;        // eligiendo lista para guardar la cancion actual
+let menuOpen = false;      // pantalla «Cuenta y conexion»
+let drag = null;           // arrastre en la cola
 
 function toast(text, bad) {
   const t = $('toast');
@@ -211,6 +260,20 @@ function wizard(html) {
   $('wizard').innerHTML = html;
   $('wizard').classList.remove('hidden');
   $('player').classList.add('hidden');
+  fit();
+}
+
+/** Pide a la ventana el alto justo: compacta, o alta con la cola / busqueda / listas abiertas */
+const TALL = 600;
+function fit() {
+  requestAnimationFrame(() => {
+    const app = $('app');
+    let h;
+    if (tab && !$('player').classList.contains('hidden')) h = TALL;
+    else { app.classList.add('measure'); h = app.offsetHeight + 2 * app.offsetTop; app.classList.remove('measure'); }
+    h = Math.round(h);
+    if (h !== fit.last) { fit.last = h; send({ cmd: 'size', h }); }
+  });
 }
 
 function renderWizard() {
@@ -277,7 +340,11 @@ function renderPlayer() {
   $('artist').textContent = cur?.artist || (cur ? '' : 'Busca algo y agrégalo a la cola');
   $('by').textContent = cur && (cur.added_by || m.started_by) ? `Puesta por ${cur.added_by || m.started_by}` : '';
   $('icoToggle').innerHTML = cur && !m.paused ? ICON_PAUSE : ICON_PLAY;
-  for (const id of ['btnToggle', 'btnPrev']) $(id).disabled = !cur;
+  for (const id of ['btnToggle', 'btnPrev', 'btnSave']) $(id).disabled = !cur;
+  $('btnSave').classList.toggle('on', saving);
+  $('progress').classList.toggle('seekable', !!cur?.duration);
+  if (!cur && saving) { saving = false; if (listsLoaded) renderLists(lists); }
+  if (cur?.id !== renderPlayer.cur) { renderPlayer.cur = cur?.id; if (listsLoaded) renderLists(lists); }
   $('btnNext').disabled = !cur && !(m.queue || []).length;
   $('btnShuffle').classList.toggle('on', !!m.shuffle);
   $('btnRepeat').classList.toggle('on', m.repeat && m.repeat !== 'off');
@@ -289,6 +356,7 @@ function renderPlayer() {
   clearInterval(tick); if (base.run) tick = setInterval(drawProgress, 1000);
   $('sub').textContent = S.user ? `Música · ${S.user}` : 'Música';
   renderQueue();
+  fit();
 }
 
 function drawProgress() {
@@ -300,14 +368,16 @@ function drawProgress() {
   $('bar').style.width = len ? Math.min(100, el / len * 100) + '%' : (base.run || base.elapsed ? '100%' : '0');
 }
 
-function trackRow(t, { n, acts }) {
-  return `<div class="row">${n != null ? `<span class="n">${n}</span>` : ''}
+function trackRow(t, { n, acts, i }) {
+  const num = n == null ? '' : i == null ? `<span class="n">${n}</span>` : `<span class="grip" title="Arrastra para ordenar"><span>${n}</span>${ICO.grip}</span>`;
+  return `<div class="row"${i == null ? '' : ` data-i="${i}"`}>${num}
     <img src="${esc(t.thumbnail)}" alt="" loading="lazy"><div class="info"><div class="t" title="${esc(t.title)}">${esc(t.title)}</div>
     <div class="s">${esc(t.artist)}${t.duration ? ' · ' + fmt(t.duration) : ''}${t.added_by ? ' · ' + esc(t.added_by) : ''}</div></div>
     <div class="acts">${acts}</div></div>`;
 }
 
 function renderQueue() {
+  if (drag) { drag.pending = true; return; }   // no rehacer la lista bajo el dedo
   const q = (S.music && S.music.queue) || [];
   const hasSeed = !!(S.music && (S.music.current || (S.music.history || []).length));
   $('qCount').textContent = q.length;
@@ -315,7 +385,7 @@ function renderQueue() {
     <button class="pill" id="mix" ${mixing || !hasSeed ? 'disabled' : ''} title="${hasSeed ? 'Agrega a la cola canciones parecidas a lo que ha sonado' : 'Reproduce algo primero'}">
     ${mixing ? '<div class="spinner mini"></div>' : ICO.sparkles}Mix</button></div>`;
   if (!q.length) { $('pane-queue').innerHTML = bar + '<div class="empty">Usa <b>Buscar</b> para agregar canciones' + (hasSeed ? ' o pide un <b>Mix</b>.' : '.') + '</div>'; return; }
-  $('pane-queue').innerHTML = bar + q.map((t, i) => trackRow(t, { n: i + 1, acts:
+  $('pane-queue').innerHTML = bar + q.map((t, i) => trackRow(t, { n: i + 1, i, acts:
     `<button class="play" data-a="qplay" data-i="${i}" title="Reproducir ahora">${ICO.play}</button>` +
     (i > 0 ? `<button data-a="qtop" data-i="${i}" title="Que suene después">${ICO.top}</button>` : '') +
     `<button data-a="qdel" data-i="${i}" title="Quitar de la cola">${ICO.x}</button>` })).join('');
@@ -331,15 +401,42 @@ function renderResults(list) {
 }
 
 function renderLists(items) {
-  listsLoaded = true;
-  if (!items.length) { $('pane-lists').innerHTML = '<div class="empty">No hay listas guardadas en LabNAS.</div>'; return; }
-  $('pane-lists').innerHTML = items.map(pl => `<div class="row"><div class="info"><div class="t">${esc(pl.name)}</div>
+  listsLoaded = true; lists = items;
+  const cur = S.music?.current;
+  const head = saving && cur ? `<div class="savebar">${ICO.save}<span>Elige dónde guardar «${esc(cur.title)}»</span>
+    <button class="icon-btn" data-a="nosave" title="Cancelar">${ICO.x}</button></div>` : '';
+  if (!items.length) { $('pane-lists').innerHTML = head + '<div class="empty">No hay listas guardadas en LabNAS. Créalas desde LabNAS en el navegador.</div>'; return; }
+  $('pane-lists').innerHTML = head + items.map(pl => {
+    const has = !!cur && (pl.tracks || []).some(t => t.id === cur.id);
+    const save = !cur ? '' : has
+      ? `<button class="done" disabled title="Ya está en esta lista">${ICO.check}</button>`
+      : `<button class="${saving ? 'play' : ''}" data-a="save" data-id="${esc(pl.id)}" data-name="${esc(pl.name)}" title="Guardar aquí la canción que suena">${ICO.save}</button>`;
+    return `<div class="row"><div class="info"><div class="t">${esc(pl.name)}</div>
     <div class="s">${pl.tracks?.length || 0} canciones · de ${esc(pl.created_by)}</div></div>
-    <div class="acts always"><button class="play" data-a="load" data-id="${esc(pl.id)}" title="Agregar a la cola">${ICO.plus}</button></div></div>`).join('');
+    <div class="acts always">${save}${saving ? '' : `<button class="play" data-a="load" data-id="${esc(pl.id)}" title="Agregar la lista a la cola">${ICO.plus}</button>`}</div></div>`;
+  }).join('');
+}
+
+/** Piel elegida en LabNAS (auto = la del sistema) y acento del laboratorio */
+function applyTheme(name, accent) {
+  if (!name || name === 'auto' || !THEMES[name]) name = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dracula';
+  const t = { ...THEMES[name] };
+  if (accent && /^#[0-9a-fA-F]{6}$/.test(accent)) { t.accent = accent; t.accent2 = accent; t.accentAlpha = accent + '1f'; }
+  const r = document.documentElement.style;
+  for (const [k, v] of Object.entries({ bg: t.bg, card: t.card, card2: t.card2, line: t.line, input: t.input, text: t.text, muted: t.muted,
+    accent: t.accent, accent2: t.accent2, 'accent-alpha': t.accentAlpha, ok: t.ok, bad: t.bad, warn: t.warn })) r.setProperty('--' + k, v);
+  // texto sobre el acento: oscuro si el acento es claro
+  const hex = t.accent.replace('#', ''), c = [0, 2, 4].map(i => parseInt(hex.substr(i, 2), 16) / 255).map(v => v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  r.setProperty('--on-accent', 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2] > 0.33 ? '#1b1b22' : '#ffffff');
+  const bg = t.bg.replace('#', ''), lum = [0, 2, 4].reduce((a, i, k) => a + [0.2126, 0.7152, 0.0722][k] * parseInt(bg.substr(i, 2), 16) / 255, 0);
+  r.colorScheme = lum > 0.5 ? 'light' : 'dark';
 }
 
 function render() {
-  if (S.phase === 'listo') renderPlayer(); else renderWizard();
+  applyTheme(S.theme, S.accent);
+  if (S.phase !== 'listo') { menuOpen = false; renderWizard(); }
+  else if (menuOpen) renderMenu();
+  else renderPlayer();
 }
 
 // ─── Mensajes desde el programa ───
@@ -356,17 +453,103 @@ window.labnas = {
 // ─── Acciones ───
 $('btnClose').onclick = () => send({ cmd: 'hide' });
 $('btnWeb').onclick = () => send({ cmd: 'openWeb' });
-$('btnMenu').onclick = () => {
-  if (S.phase !== 'listo') return;
+function renderMenu() {
+  // no rehacer la pantalla (y perder el foco) si nada cambio
+  const key = JSON.stringify([S.base, S.user, S.notify, S.notices, S.admin]);
+  if (renderMenu.key === key && !$('wizard').classList.contains('hidden')) return;
+  renderMenu.key = key;
   const who = S.user ? `vinculado como ${S.user}` : 'vinculado';
+  const n = S.notices || {};
+  const opt = (k, on, label, hint) => `<label class="opt"><input type="checkbox" data-k="${k}" ${on ? 'checked' : ''}>
+      <div>${label}<small>${hint}</small></div></label>`;
   wizard(`<h2>Cuenta y conexión</h2><p>LabNAS: <code>${esc(S.base)}</code><br>Este computador está ${esc(who)}.</p>
+    <div class="step" style="margin-top:2px">Avisos en este computador</div>
+    <div class="opts">
+    ${opt('personal', n.personal, 'Los míos', 'Tu pieza 3D lista, tus reservas e inducciones, tus plazos…')}
+    ${opt('lab', n.lab, 'Del laboratorio', 'Todas las impresoras 3D, sensores, cámaras y plazos generales.')}
+    ${S.admin ? opt('admin', n.admin, 'Administración', 'Cuentas y reservas por aprobar, respaldos, discos, actualizaciones.') : ''}
+    ${opt('music', !!S.notify, 'Canción nueva', 'El título y quién la puso, cada vez que cambia.')}
+    </div>
+    <p style="font-size:11.5px">Las teclas ⏯ ⏮ ⏭ del teclado y el reproductor del sistema también controlan LabNAS.</p>
     <button class="btn ghost" id="back">Volver al reproductor</button>
     <button class="btn ghost" id="change">Usar otra dirección</button>
     <button class="btn ghost" id="unlink" style="color:var(--bad)">Desvincular este computador</button>`);
-  $('back').onclick = render;
-  $('change').onclick = () => send({ cmd: 'changeUrl' });
-  $('unlink').onclick = () => send({ cmd: 'unlink' });
+  document.querySelectorAll('.opt input[data-k]').forEach(i => i.onchange = () =>
+    send(i.dataset.k === 'music' ? { cmd: 'notify', on: i.checked } : { cmd: 'notices', key: i.dataset.k, on: i.checked }));
+  $('back').onclick = () => { menuOpen = false; renderMenu.key = null; render(); };
+  $('change').onclick = () => { menuOpen = false; renderMenu.key = null; send({ cmd: 'changeUrl' }); };
+  $('unlink').onclick = () => { menuOpen = false; renderMenu.key = null; send({ cmd: 'unlink' }); };
+}
+$('btnMenu').onclick = () => {
+  if (S.phase !== 'listo') return;
+  menuOpen = !menuOpen; renderMenu.key = null; render();
 };
+
+// ─── Saltar a un punto de la cancion ───
+const seekAt = (e) => {
+  const r = $('seek').getBoundingClientRect();
+  return Math.round(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * (base.len || 0));
+};
+$('seek').onmousemove = (e) => { $('seek').title = base.len ? `Ir a ${fmt(seekAt(e))}` : ''; };
+$('seek').onclick = (e) => {
+  if (!base.len) return;
+  const pos = seekAt(e);
+  base = { ...base, at: Date.now(), elapsed: pos };
+  drawProgress();
+  send({ cmd: 'seek', pos });
+};
+
+// ─── Guardar la cancion actual en una lista ───
+$('btnSave').onclick = () => {
+  saving = !saving;
+  if (saving) { if (tab !== 'lists') setTab('lists'); else send({ cmd: 'playlists' }); }
+  $('btnSave').classList.toggle('on', saving);
+  if (listsLoaded) renderLists(lists);
+};
+
+// ─── Ordenar la cola arrastrando ───
+$('pane-queue').addEventListener('pointerdown', (e) => {
+  const g = e.target.closest('.grip'); if (!g || e.button !== 0) return;
+  const row = g.closest('.row');
+  drag = { from: Number(row.dataset.i), to: Number(row.dataset.i), row, y0: e.clientY, scroll0: $('pane-queue').scrollTop,
+    rows: [...$('pane-queue').querySelectorAll('.row[data-i]')] };
+  $('pane-queue').classList.add('sorting');
+  try { g.setPointerCapture(e.pointerId); } catch { /* sin captura: igual sigue */ }
+  row.classList.add('dragging');
+  e.preventDefault();
+});
+$('pane-queue').addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  const pane = $('pane-queue'), pr = pane.getBoundingClientRect();
+  // cerca de los bordes, la lista se desplaza sola
+  if (e.clientY < pr.top + 28) pane.scrollTop -= 8; else if (e.clientY > pr.bottom - 28) pane.scrollTop += 8;
+  drag.row.style.transform = `translateY(${e.clientY - drag.y0 + pane.scrollTop - drag.scroll0}px)`;
+  const y = e.clientY - pr.top + pane.scrollTop;
+  let to = 0;
+  drag.rows.forEach((r, i) => { if (i !== drag.from && r.offsetTop + r.offsetHeight / 2 < y) to++; });
+  drag.to = to;
+  // las demas filas se corren para dejar el hueco donde caera
+  const h = drag.row.offsetHeight, f = drag.from;
+  drag.rows.forEach((r, i) => {
+    if (i === f) return;
+    const dy = f < to && i > f && i <= to ? -h : to < f && i >= to && i < f ? h : 0;
+    r.style.transform = dy ? `translateY(${dy}px)` : '';
+  });
+});
+const endDrag = () => {
+  if (!drag) return;
+  const { from, to } = drag;
+  drag = null;
+  $('pane-queue').classList.remove('sorting');
+  const q = S.music?.queue;
+  if (to !== from && q && from < q.length && to < q.length) {
+    q.splice(to, 0, q.splice(from, 1)[0]);   // se ve al instante; LabNAS confirma
+    send({ cmd: 'queueMove', from, to });
+  }
+  renderQueue();
+};
+$('pane-queue').addEventListener('pointerup', endDrag);
+$('pane-queue').addEventListener('pointercancel', endDrag);
 $('btnToggle').onclick = () => send({ cmd: 'toggle' });
 $('btnPrev').onclick = () => send({ cmd: 'previous' });
 $('btnNext').onclick = () => send({ cmd: 'next' });
@@ -375,13 +558,19 @@ $('btnRepeat').onclick = () => send({ cmd: 'repeat' });
 $('vol').oninput = () => { volDragging = true; $('volTxt').textContent = $('vol').value + '%'; };
 $('vol').onchange = () => { volDragging = false; send({ cmd: 'volume', value: Number($('vol').value) }); };
 
-document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
-  tab = b.dataset.tab;
-  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
-  for (const t of ['queue', 'search', 'lists']) $('pane-' + t).classList.toggle('hidden', t !== tab);
+function setTab(t) {
+  tab = t;
+  if (t !== 'lists' && saving) { saving = false; $('btnSave').classList.remove('on'); }
+  document.querySelectorAll('.tabs button[data-tab]').forEach(x => x.classList.toggle('on', x.dataset.tab === tab));
+  for (const k of ['queue', 'search', 'lists']) $('pane-' + k).classList.toggle('hidden', k !== tab);
+  $('player').classList.toggle('open', !!tab);
   if (tab === 'search') setTimeout(() => $('q').focus(), 30);
   if (tab === 'lists') send({ cmd: 'playlists' });
-});
+  fit();
+}
+// la pestana abierta se cierra con otro clic (o la flecha / Esc) y el widget vuelve a ser compacto
+document.querySelectorAll('.tabs button[data-tab]').forEach(b => b.onclick = () => setTab(tab === b.dataset.tab ? null : b.dataset.tab));
+$('btnFold').onclick = () => setTab(null);
 
 $('searchForm').onsubmit = (e) => {
   e.preventDefault();
@@ -403,6 +592,8 @@ document.addEventListener('click', (e) => {
   else if (a === 'qtop') send({ cmd: 'queueMove', from: i, to: 0 });
   else if (a === 'qdel') send({ cmd: 'queueRemove', index: i });
   else if (a === 'load') { send({ cmd: 'loadPlaylist', id: b.dataset.id }); toast('Agregando la lista a la cola…'); }
+  else if (a === 'save') { send({ cmd: 'saveTo', id: b.dataset.id, name: b.dataset.name }); b.disabled = true; saving = false; $('btnSave').classList.remove('on'); }
+  else if (a === 'nosave') { saving = false; $('btnSave').classList.remove('on'); renderLists(lists); }
 });
 document.addEventListener('click', (e) => {
   if (!e.target.closest('#mix')) return;
@@ -413,7 +604,8 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') send({ cmd: 'hide' });
+  if (e.key === 'Escape' && menuOpen) { menuOpen = false; renderMenu.key = null; render(); }
+  else if (e.key === 'Escape') { if (tab && S.phase === 'listo' && !$('player').classList.contains('hidden')) setTab(null); else send({ cmd: 'hide' }); }
   else if (e.key === ' ' && e.target.tagName !== 'INPUT' && S.phase === 'listo') { e.preventDefault(); send({ cmd: 'toggle' }); }
 });
 document.addEventListener('contextmenu', (e) => e.preventDefault());

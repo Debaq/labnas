@@ -224,7 +224,9 @@ pub async fn music_events_loop(state: AppState) {
         let ms = snapshot(&state).await;
         let mut key = ms.clone();
         key.elapsed = 0;
-        let key = serde_json::to_string(&key).unwrap_or_default();
+        // un salto (seek) cambia el inicio de la cancion, o el punto en pausa
+        let at = if ms.paused { u64::from(ms.elapsed) } else { ms.playback_started_at.unwrap_or(0) };
+        let key = format!("{}|{at}", serde_json::to_string(&key).unwrap_or_default());
         if key != last {
             last = key;
             state.events.publish("music.state", &ms, crate::events::Audience::All, Some("music"));
@@ -291,6 +293,40 @@ pub async fn pause(
     }
 
     Json(state.music.lock().await.clone())
+}
+
+/// POST /api/music/seek - Saltar a un segundo de la cancion actual
+pub async fn seek(
+    State(state): State<AppState>,
+    Json(req): Json<SeekRequest>,
+) -> Result<Json<MusicState>, (StatusCode, String)> {
+    let duration = {
+        let ms = state.music.lock().await;
+        match &ms.current {
+            None => return Err((StatusCode::CONFLICT, "No hay nada sonando".to_string())),
+            Some(t) => t.duration,
+        }
+    };
+    if duration == 0 {
+        return Err((StatusCode::CONFLICT, "Una transmision en vivo no se puede adelantar".to_string()));
+    }
+    let pos = req.position.min(duration.saturating_sub(1));
+
+    // mpv en pausa esta detenido (SIGSTOP): toma la orden al reanudar
+    let mut sock = tokio::net::UnixStream::connect(MPV_SOCKET)
+        .await
+        .map_err(|_| (StatusCode::SERVICE_UNAVAILABLE, "El reproductor no responde".to_string()))?;
+    let cmd = format!("{{ \"command\": [\"seek\", {pos}, \"absolute\"] }}\n");
+    sock.write_all(cmd.as_bytes())
+        .await
+        .map_err(|_| (StatusCode::SERVICE_UNAVAILABLE, "El reproductor no responde".to_string()))?;
+
+    let mut ms = state.music.lock().await;
+    ms.elapsed = pos;
+    if !ms.paused {
+        ms.playback_started_at = Some(now_epoch_secs().saturating_sub(u64::from(pos)));
+    }
+    Ok(Json(ms.clone()))
 }
 
 /// POST /api/music/previous - Volver a la canción anterior

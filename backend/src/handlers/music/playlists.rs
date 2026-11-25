@@ -8,22 +8,6 @@ use crate::error::db_err;
 // ══════════════════════════════════════════
 
 use rusqlite::params;
-use axum::http::HeaderMap;
-
-pub(super) async fn get_session_username(state: &AppState, headers: &HeaderMap) -> String {
-    let token = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .map(|s| s.to_string());
-    if let Some(token) = token {
-        let sessions = state.sessions.lock().await;
-        if let Some(session) = sessions.get(&token) {
-            return session.username.clone();
-        }
-    }
-    "unknown".to_string()
-}
 
 pub(super) fn now_iso() -> String {
     chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string()
@@ -71,13 +55,13 @@ pub struct CreatePlaylistReq {
 /// POST /api/music/playlists
 pub async fn create_playlist(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
     Json(req): Json<CreatePlaylistReq>,
 ) -> Result<Json<Playlist>, (StatusCode, String)> {
     if req.name.trim().is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Nombre requerido".to_string()));
     }
-    let username = get_session_username(&state, &headers).await;
+    let username = session.username;
     let now = now_iso();
     let playlist = Playlist {
         id: uuid::Uuid::new_v4().to_string()[..8].to_string(),
@@ -167,11 +151,11 @@ pub struct AddTrackReq {
 /// POST /api/music/playlists/{id}/tracks
 pub async fn add_track_to_playlist(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
     Path(id): Path<String>,
     Json(req): Json<AddTrackReq>,
 ) -> Result<Json<Playlist>, (StatusCode, String)> {
-    let username = get_session_username(&state, &headers).await;
+    let username = session.username;
     let now = now_iso();
     let result = crate::db::db_op_status(&state.db, move |conn| {
         use rusqlite::OptionalExtension;
@@ -323,13 +307,13 @@ pub struct SaveQueueReq {
 /// POST /api/music/playlists/save-queue - Save current queue + current as playlist
 pub async fn save_queue_as_playlist(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
     Json(req): Json<SaveQueueReq>,
 ) -> Result<Json<Playlist>, (StatusCode, String)> {
     if req.name.trim().is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Nombre requerido".to_string()));
     }
-    let username = get_session_username(&state, &headers).await;
+    let username = session.username;
     let music = state.music.lock().await;
 
     let mut tracks: Vec<PlaylistTrack> = Vec::new();

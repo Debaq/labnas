@@ -12,6 +12,13 @@ pub struct Config {
     pub token: Option<String>,
     /// Usuario a cuyo nombre esta el token
     pub user: Option<String>,
+    /// Avisar con una notificacion cuando cambia la cancion
+    pub notify: bool,
+    /// Avisos de LabNAS: los personales y los de administracion vienen activados, los del
+    /// laboratorio (todas las impresoras, sensores...) no
+    pub quiet_personal: bool,
+    pub lab: bool,
+    pub quiet_admin: bool,
 }
 
 fn dir() -> Option<PathBuf> {
@@ -30,6 +37,10 @@ fn parse(content: &str) -> Config {
             "url" => c.url = Some(v.to_string()),
             "token" => c.token = Some(v.to_string()),
             "user" => c.user = Some(v.to_string()),
+            "notify" => c.notify = v == "1",
+            "avisos_personales" => c.quiet_personal = v == "0",
+            "avisos_laboratorio" => c.lab = v == "1",
+            "avisos_admin" => c.quiet_admin = v == "0",
             _ => {}
         }
     }
@@ -41,6 +52,17 @@ fn render(c: &Config) -> String {
     for (k, v) in [("url", &c.url), ("token", &c.token), ("user", &c.user)] {
         if let Some(v) = v {
             s.push_str(&format!("{k}={v}\n"));
+        }
+    }
+    for (on, line) in [
+        (c.notify, "notify=1"),
+        (c.quiet_personal, "avisos_personales=0"),
+        (c.lab, "avisos_laboratorio=1"),
+        (c.quiet_admin, "avisos_admin=0"),
+    ] {
+        if on {
+            s.push_str(line);
+            s.push('\n');
         }
     }
     s
@@ -174,7 +196,9 @@ mod tests {
 
     #[test]
     fn ida_y_vuelta() {
-        let c = Config { url: Some("https://x:3443".into()), token: Some("lnd_ab".into()), user: None };
+        let c = Config { url: Some("https://x:3443".into()), token: Some("lnd_ab".into()), user: None, ..Config::default() };
+        assert_eq!(parse(&render(&c)), c);
+        let c = Config { user: Some("ana".into()), notify: true, lab: true, quiet_admin: true, ..c };
         assert_eq!(parse(&render(&c)), c);
         assert_eq!(parse("basura\nurl=\n"), Config::default());
     }

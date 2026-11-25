@@ -54,6 +54,7 @@ async fn migracion_cifra_secretos_en_claro() {
             "ALTER TABLE web_users DROP COLUMN totp_secret;
              ALTER TABLE web_users DROP COLUMN totp_last_step;
              ALTER TABLE web_users DROP COLUMN app_password_hash;
+             ALTER TABLE web_users DROP COLUMN ui_theme;
              DROP TABLE totp_recovery;
              ALTER TABLE email_accounts DROP COLUMN auth;
              ALTER TABLE email_accounts DROP COLUMN last_error;

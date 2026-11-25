@@ -124,6 +124,8 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         ("GET", ["auth", "usernames"]) => User,
         ("GET", ["auth", "2fa"]) | ("POST", ["auth", "2fa", _]) => User,
         ("POST", ["auth", "passkey", "register", ..]) | ("GET", ["auth", "passkeys"]) | ("DELETE", ["auth", "passkeys", _]) => User,
+        // Preferencias de la interfaz (piel)
+        ("GET", ["auth", "preferences"]) | ("PUT", ["auth", "preferences"]) => User,
         // Tokens de dispositivo propios (labnas-tray)
         ("GET", ["auth", "device-tokens"]) | ("POST", ["auth", "device-tokens"]) => User,
         ("GET", ["auth", "device-tokens", "me"]) | ("DELETE", ["auth", "device-tokens", _]) => User,
@@ -132,7 +134,7 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         ("GET", ["modules"]) => User,
 
         // --- Eventos en tiempo real ---
-        ("POST", ["live", "ticket"]) | ("GET", ["live"]) | ("GET", ["live", "poll"]) => User,
+        ("POST", ["live", "ticket"]) | ("GET", ["live"]) | ("GET", ["live", "poll"]) | ("GET", ["live", "notices"]) => User,
 
         // --- Archivos ---
         ("GET", ["files"]) | ("GET", ["files", "download"]) | ("GET", ["files", "quickaccess"]) => User,
@@ -478,6 +480,7 @@ mod tests {
         assert_eq!(acc(Method::POST, "/api/auth/device-tokens"), User);
         assert_eq!(acc(Method::DELETE, "/api/auth/device-tokens/abc"), User);
         assert_eq!(acc(Method::GET, "/api/auth/device-tokens/me"), User);
+        assert_eq!(acc(Method::PUT, "/api/auth/preferences"), User);
         assert_eq!(acc(Method::GET, "/api/email/proposals"), User);
         assert_eq!(acc(Method::POST, "/api/email/oauth/microsoft/start"), User);
         assert_eq!(acc(Method::GET, "/api/email/oauth/microsoft/config"), User);

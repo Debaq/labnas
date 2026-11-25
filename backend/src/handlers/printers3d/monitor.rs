@@ -89,6 +89,28 @@ const FINISH_PHOTO_DELAY: Duration = Duration::from_secs(12);
 #[cfg(test)]
 const FINISH_PHOTO_DELAY: Duration = Duration::from_millis(0);
 
+/// Piezas de la cola que se estan imprimiendo en esa impresora: (quien la pidio, titulo)
+async fn queue_printing(state: &AppState, printer_id: &str) -> Vec<(String, String)> {
+    let pid = printer_id.to_string();
+    db_op(&state.db, move |conn| {
+        let mut stmt = conn
+            .prepare("SELECT requested_by, title FROM print_queue WHERE printer_id = ?1 AND status = 'imprimiendo'")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([&pid], |r| Ok((r.get(0)?, r.get(1)?))).map_err(|e| e.to_string())?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// Aviso personal a quien encargo la pieza (antes que el general: la bandeja muestra
+/// uno solo si la persona tambien sigue los del laboratorio)
+async fn tell_owners(state: &AppState, printer_id: &str, level: crate::events::Level, title: &str, body: impl Fn(&str) -> String) {
+    for (owner, piece) in queue_printing(state, printer_id).await {
+        crate::events::notify(state, crate::events::Audience::User(owner), Some("printers3d"), level, title, &body(&piece));
+    }
+}
+
 /// Aviso de fin por Telegram con la foto de la pieza (si la impresora tiene camara).
 /// La foto va al personal y a quien encargo la pieza en la cola; ver `notify_print_finished`.
 pub fn announce_finished(state: &AppState, printer: &Printer3DConfig, file: &str, elapsed: &str) {
@@ -96,16 +118,9 @@ pub fn announce_finished(state: &AppState, printer: &Printer3DConfig, file: &str
     let caption = format!("Impresion terminada en {}\nArchivo: {}\nTiempo: {}", printer.name, file, elapsed);
     let (state, printer) = (state.clone(), printer.clone());
     tokio::spawn(async move {
-        let pid = printer.id.clone();
-        let owners: Vec<String> = db_op(&state.db, move |conn| {
-            let mut stmt = conn
-                .prepare("SELECT DISTINCT requested_by FROM print_queue WHERE printer_id = ?1 AND status = 'imprimiendo'")
-                .map_err(|e| e.to_string())?;
-            let rows = stmt.query_map([&pid], |r| r.get(0)).map_err(|e| e.to_string())?;
-            Ok(rows.filter_map(|r| r.ok()).collect())
-        })
-        .await
-        .unwrap_or_default();
+        let mut owners: Vec<String> = queue_printing(&state, &printer.id).await.into_iter().map(|(o, _)| o).collect();
+        owners.sort();
+        owners.dedup();
         let photo = if camera_url_for(&printer).is_some() {
             tokio::time::sleep(FINISH_PHOTO_DELAY).await;
             fetch_snapshot(&state.http_client, &printer).await.ok().map(|(_, b)| b.to_vec())
@@ -212,6 +227,10 @@ pub async fn printer_monitor_loop(state: AppState) {
                     .unwrap_or_else(|| "?".to_string());
 
                 announce_finished(&state, printer, &prev_file, &elapsed);
+                tell_owners(&state, &printer.id, crate::events::Level::Success, "Tu pieza está lista", |piece| {
+                    format!("«{}» terminó en {} ({})", piece, printer.name, elapsed)
+                })
+                .await;
                 crate::events::notify(
                     &state,
                     crate::events::Audience::All,
@@ -236,6 +255,10 @@ pub async fn printer_monitor_loop(state: AppState) {
                     &state,
                     &format!("Error en impresora *{}*\nEstado: {}", printer.name, error_state),
                 )
+                .await;
+                tell_owners(&state, &printer.id, crate::events::Level::Error, "Tu pieza tuvo un problema", |piece| {
+                    format!("«{}» en {}: {}", piece, printer.name, error_state)
+                })
                 .await;
                 crate::events::notify(
                     &state,
