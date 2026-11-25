@@ -929,7 +929,7 @@ fn auto_hide(widget: &mut Option<Widget>, control_flow: &mut ControlFlow) {
         return;
     }
     let Some(w) = widget.as_mut() else { return };
-    if !w.window.is_visible() {
+    if !w.window.is_visible() || testing() {
         return;
     }
     let settled = w.shown_at.is_none_or(|t| t.elapsed() > Duration::from_millis(400));
