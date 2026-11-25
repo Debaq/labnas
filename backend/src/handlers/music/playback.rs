@@ -43,13 +43,11 @@ pub async fn search(
 /// POST /api/music/play - Reproduce en el NAS o agrega a la cola
 pub async fn play(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
     Json(req): Json<PlayRequest>,
 ) -> Result<Json<MusicState>, (StatusCode, String)> {
-    let username = {
-        let sessions = state.sessions.lock().await;
-        extract_username(&sessions, &headers)
-    };
+    // de la sesion del middleware: vale tambien con token de dispositivo (labnas-tray)
+    let username = session.username.clone();
 
     let has_current = state.music.lock().await.current.is_some();
 

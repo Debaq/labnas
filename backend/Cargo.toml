@@ -49,6 +49,8 @@ sha1 = "0.11"
 getrandom = "0.4"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 zip = { version = "9.7.0", default-features = false }
+flate2 = "1.1"
+tar = { version = "0.4", default-features = false }
 p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "std"] }
 ciborium = "0.2.2"
 rsa = { version = "0.10.0", default-features = false, features = ["std", "pkcs1v15"] }

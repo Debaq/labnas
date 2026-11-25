@@ -1,14 +1,18 @@
-//! labnas-tray: control de la musica de LabNAS desde la bandeja del sistema, para los
-//! computadores de quienes usan el laboratorio (Windows y Linux).
+//! labnas-tray: la musica de LabNAS desde la bandeja del sistema, para los computadores
+//! de quienes usan el laboratorio (Windows y Linux).
 //!
-//! - Encuentra el LabNAS por mDNS (o usa `url=` de su archivo de configuracion).
-//! - Se vincula a la cuenta desde el navegador ("Vincular con mi cuenta"): recibe un
-//!   token de dispositivo que solo sirve para controlar el reproductor y que se puede
-//!   revocar en LabNAS (Configuracion > General > Dispositivos vinculados).
-//! - El menu muestra lo que suena y permite pausar, pasar, retroceder y cambiar el volumen.
+//! - Clic en el icono (Windows) o «Abrir control» en su menu: un widget flotante con lo
+//!   que suena, anterior/pausa/siguiente, volumen, la cola, buscar y agregar canciones y
+//!   las listas guardadas. Es una pagina embebida (`assets/widget.html`) en un webview
+//!   (WebView2 en Windows, WebKitGTK en Linux) que habla con este programa por IPC: el
+//!   token nunca llega a la pagina.
+//! - Asistente: encuentra el LabNAS (direccion que trae la descarga, configuracion, mDNS,
+//!   labnas.local) y si no, la pide; despues vincula la cuenta desde el navegador con un
+//!   token de dispositivo que solo sirve para la musica (revocable en LabNAS, Configuracion
+//!   > General > Dispositivos vinculados).
 //!
-//! Hilos: el principal maneja la bandeja (tao + tray-icon); uno aparte hace la red y le
-//! manda el estado por el `EventLoopProxy`, asi la bandeja nunca se congela.
+//! Hilos: el principal maneja la bandeja y el widget (tao); uno aparte hace la red y le
+//! manda el estado por el `EventLoopProxy`; lo lento (buscar, reproducir) va en hilos propios.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod autostart;
@@ -19,45 +23,82 @@ mod link;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
-use tao::event::Event;
-use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
-use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
+use serde_json::{json, Value};
+use tao::dpi::{LogicalSize, PhysicalPosition};
+use tao::event::{Event, WindowEvent};
+use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget};
+use tao::window::{Window, WindowBuilder};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
+use wry::{WebContext, WebView, WebViewBuilder};
 
 use http::Url;
 
 const MDNS_TYPE: &str = "_labnas._tcp.local.";
 const MDNS_TIMEOUT: Duration = Duration::from_millis(2500);
+/// Ultimo intento si no hay mDNS (Windows 10+ y la mayoria de los Linux resuelven .local)
+const FALLBACK_URL: &str = "http://labnas.local:3001";
 /// Cada cuanto se consulta lo que suena
 const POLL: Duration = Duration::from_secs(3);
-/// Si el servidor no responde, cada cuanto se lo vuelve a buscar por mDNS (cambio de IP)
+/// Si el servidor no responde, cada cuanto se lo vuelve a buscar (cambio de IP)
 const REDISCOVER_EVERY: Duration = Duration::from_secs(60);
+/// Plazo para pedidos que pasan por yt-dlp en el servidor
+const SLOW: Duration = Duration::from_secs(90);
 const VOLUME_STEP: i64 = 10;
+/// Puerto local para que una segunda copia le pida a la primera abrir el widget
+const SINGLE_INSTANCE_PORT: u16 = 47321;
+const WIDGET_W: f64 = 372.0;
+const WIDGET_H: f64 = 600.0;
 
-/// Lo que la bandeja muestra
+/// Lo que muestran la bandeja y el widget
 #[derive(Debug, Clone, Default)]
 struct Status {
-    /// Primera linea del menu (y del tooltip)
+    /// buscando | configurar | vincular | vinculando | listo | sin-conexion | certificado
+    phase: &'static str,
+    /// Primera linea del menu y del tooltip
     headline: String,
-    /// Hay una cancion (habilita pausar y volumen)
+    /// MusicState tal cual lo manda LabNAS
+    music: Option<Value>,
     playing: bool,
     paused: bool,
-    volume: Option<u8>,
-    /// Hay token de dispositivo
     linked: bool,
     user: Option<String>,
-    /// Se puede abrir LabNAS en el navegador
     base: Option<String>,
-    /// Vinculacion en curso (esperando al navegador)
-    linking: bool,
+    /// Direccion para proponer en el asistente
+    suggest: Option<String>,
+    /// Error para el asistente (direccion que no responde, vinculacion fallida...)
+    error: Option<String>,
+    /// Aviso en lugar del titulo (musica desactivada, cuenta pendiente...)
+    notice: Option<String>,
     /// Certificado cambiado: (host, huella guardada, actual)
     cert_changed: Option<(String, String, String)>,
 }
 
+impl Status {
+    fn to_json(&self) -> Value {
+        json!({
+            "phase": self.phase,
+            "music": self.music,
+            "user": self.user,
+            "base": self.base,
+            "suggest": self.suggest,
+            "error": self.error,
+            "notice": self.notice,
+            "cert": self.cert_changed.as_ref().map(|(h, o, n)| json!({ "host": h, "old": o, "new": n })),
+        })
+    }
+}
+
 enum UserEvent {
     Menu(MenuId),
-    TrayLeftClick,
+    /// Clic izquierdo en el icono, con su posicion en pantalla (Windows)
+    TrayClick(tray_icon::Rect),
     Status(Box<Status>),
+    /// Evento para la pagina del widget (resultados de busqueda, listas, avisos)
+    Widget(Value),
+    /// Mensaje de la pagina del widget
+    Ipc(String),
+    ShowWidget,
 }
 
 enum Cmd {
@@ -65,11 +106,26 @@ enum Cmd {
     Next,
     Previous,
     Volume(i64),
+    SetVolume(u8),
+    Shuffle,
+    Repeat,
+    Search(String),
+    Play { id: String, now: bool },
+    QueuePlay(usize),
+    QueueRemove(usize),
+    QueueMove(usize, usize),
+    Playlists,
+    LoadPlaylist(String),
     Link,
+    Linked(Result<link::Linked, String>),
     Unlink,
     Rediscover,
+    ChangeUrl,
+    SetUrl(String),
     TrustNewCert,
-    Linked(Result<link::Linked, String>),
+    /// Respuesta de un pedido lento hecho en otro hilo (MusicState o error)
+    Applied(Result<http::Response, String>),
+    Refresh,
 }
 
 // ─── Red ───
@@ -96,7 +152,7 @@ fn discover() -> Option<String> {
     found
 }
 
-/// Sigue la redireccion a HTTPS (si el servidor la tiene) y comprueba que responde
+/// Sigue la redireccion a HTTPS (si el servidor la tiene) y comprueba que es un LabNAS
 fn resolve(url: &Url) -> Result<Url, http::Error> {
     let health = |u: &Url| -> Result<http::Response, http::Error> { http::request(u, "GET", "/api/health", None, None) };
     let not_labnas = |u: &Url, status: u16| http::Error::Proto(format!("{} no parece un LabNAS (HTTP {status})", u.base()));
@@ -118,6 +174,20 @@ fn shorten(s: &str, max: usize) -> String {
     }
 }
 
+/// Lo que escribio la persona: agrega `http://` si falta
+fn normalize_url(raw: &str) -> Option<Url> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if raw.contains("://") { Url::parse(raw) } else { Url::parse(&format!("http://{raw}")) }
+}
+
+fn error_text(r: &http::Response, fallback: &str) -> String {
+    let t = r.text();
+    shorten(if t.is_empty() || t.starts_with('<') { fallback } else { &t }, 120)
+}
+
 struct Worker {
     cfg: config::Config,
     base: Option<Url>,
@@ -125,106 +195,157 @@ struct Worker {
     proxy: EventLoopProxy<UserEvent>,
     tx: Sender<Cmd>,
     last_discovery: Option<Instant>,
+    searching: bool,
+    offline: bool,
+    linking: bool,
+    /// La persona pidio cambiar la direccion
+    force_setup: bool,
 }
 
 impl Worker {
+    fn phase(&self) -> &'static str {
+        if self.status.cert_changed.is_some() {
+            "certificado"
+        } else if self.searching {
+            "buscando"
+        } else if self.base.is_none() || self.force_setup {
+            "configurar"
+        } else if self.linking {
+            "vinculando"
+        } else if self.cfg.token.is_none() {
+            "vincular"
+        } else if self.offline {
+            "sin-conexion"
+        } else {
+            "listo"
+        }
+    }
+
     fn publish(&mut self) {
+        self.status.phase = self.phase();
         self.status.linked = self.cfg.token.is_some();
         self.status.user = self.cfg.user.clone();
         self.status.base = self.base.as_ref().map(Url::base);
+        if self.status.phase != "listo" {
+            self.status.headline = match self.status.phase {
+                "buscando" => "Buscando LabNAS…".into(),
+                "configurar" => "Falta la dirección de LabNAS".into(),
+                "vincular" => "Sin vincular a tu cuenta".into(),
+                "vinculando" => "Autoriza en el navegador…".into(),
+                "sin-conexion" => "LabNAS no responde".into(),
+                _ => "⚠ El certificado de LabNAS cambió".into(),
+            };
+        }
         let _ = self.proxy.send_event(UserEvent::Status(Box::new(self.status.clone())));
     }
 
-    fn headline(&mut self, text: impl Into<String>) {
-        self.status.headline = text.into();
-        self.status.playing = false;
-        self.status.volume = None;
+    fn widget(&self, ev: Value) {
+        let _ = self.proxy.send_event(UserEvent::Widget(ev));
     }
 
-    /// Busca el servidor: config, y si no responde o no hay, mDNS
+    fn toast(&self, text: impl Into<String>, bad: bool) {
+        self.widget(json!({ "type": "toast", "text": text.into(), "bad": bad }));
+    }
+
+    /// Prueba una direccion; true si queda resuelta (o con el certificado cambiado)
+    fn try_url(&mut self, url: &Url) -> Result<(), String> {
+        match resolve(url) {
+            Ok(base) => {
+                self.status.cert_changed = None;
+                self.offline = false;
+                if self.cfg.url.as_deref() != Some(base.base().as_str()) {
+                    self.cfg.url = Some(base.base());
+                    config::save(&self.cfg);
+                }
+                self.base = Some(base);
+                Ok(())
+            }
+            Err(http::Error::CertChanged(h, old, new)) => {
+                self.base = Some(url.clone());
+                self.status.cert_changed = Some((h, old, new));
+                Ok(())
+            }
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    /// Busca el servidor: variable de entorno, configuracion, direccion de la descarga,
+    /// mDNS y labnas.local, en ese orden
     fn find_server(&mut self) {
         self.last_discovery = Some(Instant::now());
-        let mut candidates: Vec<String> = Vec::new();
+        let mut known: Vec<String> = Vec::new();
         if let Ok(env) = std::env::var("LABNAS_URL") {
-            candidates.push(env);
+            known.push(env);
         }
-        if let Some(u) = &self.cfg.url {
-            candidates.push(u.clone());
-        }
-        let mut tried_mdns = false;
-        loop {
-            for c in candidates.drain(..) {
-                let Some(url) = Url::parse(&c) else { continue };
-                match resolve(&url) {
-                    Ok(base) => {
-                        self.status.cert_changed = None;
-                        if self.cfg.url.as_deref() != Some(base.base().as_str()) {
-                            self.cfg.url = Some(base.base());
-                            config::save(&self.cfg);
-                        }
-                        self.base = Some(base);
-                        return;
-                    }
-                    Err(http::Error::CertChanged(h, old, new)) => {
-                        self.base = Some(url);
-                        self.status.cert_changed = Some((h.clone(), old, new));
-                        self.headline(format!("⚠ El certificado de {h} cambió"));
-                        return;
-                    }
-                    Err(e) => eprintln!("[labnas-tray] {c}: {e}"),
-                }
-            }
-            if tried_mdns {
-                break;
-            }
-            tried_mdns = true;
-            match discover() {
-                Some(u) => candidates.push(u),
-                None => break,
+        known.extend(self.cfg.url.clone());
+        known.extend(config::bundled_url());
+        for c in known {
+            let Some(url) = Url::parse(&c) else { continue };
+            match self.try_url(&url) {
+                Ok(()) => return,
+                Err(e) => eprintln!("[labnas-tray] {c}: {e}"),
             }
         }
-        if self.base.is_none() {
-            self.headline("LabNAS no encontrado en la red");
+        for c in discover().into_iter().chain(std::iter::once(FALLBACK_URL.to_string())) {
+            let Some(url) = Url::parse(&c) else { continue };
+            if self.try_url(&url).is_ok() {
+                return;
+            }
         }
     }
 
-    fn token(&self) -> Option<&str> {
-        self.cfg.token.as_deref()
+    fn token(&self) -> Option<String> {
+        self.cfg.token.clone()
     }
 
-    /// Pedido autenticado a la API; devuelve la respuesta si el servidor contesto
+    /// Pedido autenticado a la API; None si el servidor no contesto
     fn call(&mut self, method: &str, path: &str, body: Option<&str>) -> Option<http::Response> {
-        let (Some(base), Some(token)) = (self.base.clone(), self.token().map(str::to_string)) else {
+        let (Some(base), Some(token)) = (self.base.clone(), self.token()) else {
             return None;
         };
         match http::request(&base, method, path, Some(&token), body) {
-            Ok(r) => Some(r),
+            Ok(r) => {
+                self.offline = false;
+                Some(r)
+            }
             Err(http::Error::CertChanged(h, old, new)) => {
-                self.status.cert_changed = Some((h.clone(), old, new));
-                self.headline(format!("⚠ El certificado de {h} cambió"));
+                self.status.cert_changed = Some((h, old, new));
                 None
             }
             Err(e) => {
                 eprintln!("[labnas-tray] {path}: {e}");
-                self.headline("LabNAS no responde");
-                let stale = self.last_discovery.is_none_or(|t| t.elapsed() > REDISCOVER_EVERY);
-                if stale {
+                self.offline = true;
+                if self.last_discovery.is_none_or(|t| t.elapsed() > REDISCOVER_EVERY) {
+                    let before = self.base.clone();
                     self.find_server();
+                    if self.base.is_none() {
+                        self.base = before;
+                    }
                 }
                 None
             }
         }
     }
 
-    /// Interpreta un MusicState (o el error) y actualiza el estado
+    /// Pedido lento en otro hilo; el MusicState vuelve como `Cmd::Applied`
+    fn slow(&self, method: &'static str, path: String, body: Option<String>) {
+        let (Some(base), Some(token)) = (self.base.clone(), self.token()) else { return };
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let res = http::request_timeout(&base, method, &path, Some(&token), body.as_deref(), SLOW).map_err(|e| e.to_string());
+            let _ = tx.send(Cmd::Applied(res));
+        });
+    }
+
+    /// Interpreta la respuesta a un pedido de musica y actualiza el estado
     fn apply(&mut self, r: http::Response) {
         match r.status {
             200 => {
-                let Some(ms) = r.json() else {
-                    self.headline("Respuesta extraña de LabNAS");
-                    return;
-                };
-                self.status.volume = ms["volume"].as_u64().map(|v| v.min(100) as u8);
+                let Some(ms) = r.json() else { return };
+                if !ms.is_object() || ms.get("queue").is_none() {
+                    return; // no es un MusicState (p. ej. cargar una lista): se refresca aparte
+                }
+                self.status.notice = None;
                 self.status.paused = ms["paused"].as_bool().unwrap_or(false);
                 match ms["current"].as_object() {
                     Some(cur) => {
@@ -240,90 +361,132 @@ impl Worker {
                         self.status.playing = false;
                     }
                 }
+                self.status.music = Some(ms);
             }
             401 => {
                 // revocado desde LabNAS (o la cuenta se borro)
                 self.cfg.token = None;
                 self.cfg.user = None;
                 config::save(&self.cfg);
-                self.headline("Vinculación revocada: vuelve a vincular");
+                self.status.music = None;
+                self.status.error = Some("La vinculación fue revocada en LabNAS: vuelve a vincular.".into());
             }
-            404 => self.headline("La música está desactivada en LabNAS"),
-            _ => {
-                let msg = r.text();
-                self.headline(shorten(if msg.is_empty() { "Error de LabNAS" } else { &msg }, 60));
+            404 => {
+                self.status.notice = Some("La música está desactivada en LabNAS".into());
+                self.status.headline = self.status.notice.clone().unwrap_or_default();
             }
+            _ => self.toast(error_text(&r, "LabNAS no pudo hacerlo"), true),
         }
     }
 
     fn refresh(&mut self) {
-        if self.token().is_none() {
-            if self.base.is_some() && !self.status.linking && self.status.cert_changed.is_none() {
-                self.headline("Sin vincular a tu cuenta");
-            }
+        if self.token().is_none() || self.status.cert_changed.is_some() || self.force_setup {
             return;
         }
         if self.base.is_none() {
-            let stale = self.last_discovery.is_none_or(|t| t.elapsed() > REDISCOVER_EVERY);
-            if stale {
+            if self.last_discovery.is_none_or(|t| t.elapsed() > REDISCOVER_EVERY) {
                 self.find_server();
             }
             if self.base.is_none() {
                 return;
             }
         }
-        if self.status.cert_changed.is_some() {
-            return;
-        }
         if let Some(r) = self.call("GET", "/api/music/current", None) {
             self.apply(r);
         }
     }
 
-    fn action(&mut self, path: &str, body: Option<String>) {
-        if let Some(r) = self.call("POST", path, Some(body.as_deref().unwrap_or("{}"))) {
+    fn action(&mut self, method: &str, path: &str, body: Option<String>) {
+        if let Some(r) = self.call(method, path, Some(body.as_deref().unwrap_or("{}"))) {
             self.apply(r);
         }
     }
 
     fn handle(&mut self, cmd: Cmd) {
         match cmd {
-            Cmd::Toggle => self.action("/api/music/pause", None),
-            Cmd::Next => self.action("/api/music/next", None),
-            Cmd::Previous => self.action("/api/music/previous", None),
-            Cmd::Volume(delta) => {
-                let cur = i64::from(self.status.volume.unwrap_or(50));
-                let v = (cur + delta).clamp(0, 100);
-                self.action("/api/music/volume", Some(format!("{{\"volume\":{v}}}")));
-            }
-            Cmd::Link => {
-                if self.base.is_none() {
-                    self.find_server();
+            Cmd::Toggle => self.action("POST", "/api/music/pause", None),
+            Cmd::Next => self.action("POST", "/api/music/next", None),
+            Cmd::Previous => {
+                if let Some(r) = self.call("POST", "/api/music/previous", Some("{}")) {
+                    if r.status == 200 { self.apply(r) } else { self.toast("No hay canción anterior", false) }
                 }
-                let Some(base) = self.base.as_ref().map(Url::base) else {
-                    self.publish();
-                    return;
-                };
-                self.status.linking = true;
-                self.headline("Autoriza en el navegador…");
+            }
+            Cmd::Volume(delta) => {
+                let cur = self.status.music.as_ref().and_then(|m| m["volume"].as_i64()).unwrap_or(50);
+                let v = (cur + delta).clamp(0, 100);
+                self.action("POST", "/api/music/volume", Some(format!("{{\"volume\":{v}}}")));
+            }
+            Cmd::SetVolume(v) => self.action("POST", "/api/music/volume", Some(format!("{{\"volume\":{}}}", v.min(100)))),
+            Cmd::Shuffle => self.action("POST", "/api/music/shuffle", None),
+            Cmd::Repeat => self.action("POST", "/api/music/repeat", None),
+            Cmd::QueuePlay(i) => self.action("POST", &format!("/api/music/queue/play/{i}"), None),
+            Cmd::QueueRemove(i) => self.action("DELETE", "/api/music/queue", Some(format!("{{\"index\":{i}}}"))),
+            Cmd::QueueMove(from, to) => self.action("POST", "/api/music/queue/move", Some(format!("{{\"from\":{from},\"to\":{to}}}"))),
+            Cmd::Search(q) => {
+                let (Some(base), Some(token)) = (self.base.clone(), self.token()) else { return };
+                let proxy = self.proxy.clone();
+                std::thread::spawn(move || {
+                    let path = format!("/api/music/search?q={}", http::pct_encode(&q));
+                    let ev = match http::request_timeout(&base, "GET", &path, Some(&token), None, SLOW) {
+                        Ok(r) if r.status == 200 => json!({ "type": "search", "q": q, "results": r.json().unwrap_or(json!([])) }),
+                        Ok(r) => json!({ "type": "search", "q": q, "error": error_text(&r, "La búsqueda falló") }),
+                        Err(e) => json!({ "type": "search", "q": q, "error": format!("La búsqueda falló: {e}") }),
+                    };
+                    let _ = proxy.send_event(UserEvent::Widget(ev));
+                });
+                return;
+            }
+            Cmd::Play { id, now } => {
+                let body = json!({ "id": id, "force": now }).to_string();
+                self.slow("POST", "/api/music/play".into(), Some(body));
+                return;
+            }
+            Cmd::Playlists => {
+                if let Some(r) = self.call("GET", "/api/music/playlists", None) {
+                    let items = if r.status == 200 { r.json().unwrap_or(json!([])) } else { json!([]) };
+                    self.widget(json!({ "type": "playlists", "items": items }));
+                }
+                return;
+            }
+            Cmd::LoadPlaylist(id) => {
+                let id: String = id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+                self.slow("POST", format!("/api/music/playlists/{id}/load"), Some("{}".into()));
+                return;
+            }
+            Cmd::Applied(res) => match res {
+                Ok(r) if r.status == 200 => {
+                    let was_state = r.json().is_some_and(|v| v.get("queue").is_some());
+                    self.apply(r);
+                    if !was_state {
+                        self.toast("Lista agregada a la cola", false);
+                        self.refresh();
+                    }
+                }
+                Ok(r) => self.toast(error_text(&r, "LabNAS no pudo hacerlo"), true),
+                Err(e) => self.toast(format!("Sin respuesta de LabNAS: {}", shorten(&e, 80)), true),
+            },
+            Cmd::Link => {
+                let Some(base) = self.base.as_ref().map(Url::base) else { return };
+                self.linking = true;
+                self.status.error = None;
                 let tx = self.tx.clone();
                 std::thread::spawn(move || {
                     let _ = tx.send(Cmd::Linked(link::link(&base)));
                 });
             }
             Cmd::Linked(res) => {
-                self.status.linking = false;
+                self.linking = false;
                 match res {
                     Ok(l) => {
                         self.cfg.token = Some(l.token);
                         self.cfg.user = l.user;
+                        self.status.error = None;
                         config::save(&self.cfg);
+                        let _ = self.proxy.send_event(UserEvent::ShowWidget);
                     }
                     Err(e) => {
                         eprintln!("[labnas-tray] vincular: {e}");
-                        self.headline(shorten(&format!("No se vinculó: {e}"), 60));
-                        self.publish();
-                        return;
+                        self.status.error = Some(format!("No se vinculó: {e}"));
                     }
                 }
             }
@@ -332,17 +495,44 @@ impl Worker {
                 let _ = self.call("DELETE", "/api/auth/device-tokens/me", None);
                 self.cfg.token = None;
                 self.cfg.user = None;
+                self.status.music = None;
                 config::save(&self.cfg);
             }
             Cmd::Rediscover => {
-                self.base = None;
                 self.status.cert_changed = None;
-                self.headline("Buscando LabNAS…");
+                self.status.error = None;
+                self.force_setup = false;
+                self.searching = true;
                 self.publish();
-                let saved = self.cfg.url.take();
+                let before = (self.base.take(), self.cfg.url.take());
                 self.find_server();
+                self.searching = false;
                 if self.base.is_none() {
-                    self.cfg.url = saved;
+                    self.cfg.url = before.1;
+                    self.status.error = Some("No lo encontré en la red. Escribe la dirección.".into());
+                }
+            }
+            Cmd::ChangeUrl => {
+                self.force_setup = true;
+                self.status.error = None;
+            }
+            Cmd::SetUrl(raw) => {
+                self.status.error = None;
+                match normalize_url(&raw) {
+                    None => self.status.error = Some("Esa dirección no es válida".into()),
+                    Some(url) => {
+                        self.searching = true;
+                        self.publish();
+                        let res = self.try_url(&url);
+                        self.searching = false;
+                        match res {
+                            Ok(()) => self.force_setup = false,
+                            Err(e) => {
+                                self.status.suggest = Some(raw);
+                                self.status.error = Some(format!("No pude conectar: {}", shorten(&e, 120)));
+                            }
+                        }
+                    }
                 }
             }
             Cmd::TrustNewCert => {
@@ -351,17 +541,27 @@ impl Worker {
                     self.find_server();
                 }
             }
+            Cmd::Refresh => {}
         }
         self.refresh();
         self.publish();
     }
 
     fn run(mut self, rx: Receiver<Cmd>) {
-        self.headline("Buscando LabNAS…");
+        let first_run = !config::exists();
+        self.status.suggest = config::bundled_url();
+        self.searching = true;
         self.publish();
         self.find_server();
+        self.searching = false;
         self.refresh();
         self.publish();
+        // Asistente: si falta algo para funcionar, se abre el widget solo la primera vez
+        // (o si nunca se encontro el servidor)
+        let needs_setup = self.base.is_none() || self.cfg.token.is_none();
+        if needs_setup && (first_run || self.cfg.url.is_none()) {
+            let _ = self.proxy.send_event(UserEvent::ShowWidget);
+        }
         loop {
             match rx.recv_timeout(POLL) {
                 Ok(cmd) => self.handle(cmd),
@@ -377,34 +577,189 @@ impl Worker {
     }
 }
 
+// ─── Mensajes del widget ───
+
+fn ipc_to_cmd(msg: &Value) -> Option<Cmd> {
+    let int = |k: &str| msg[k].as_u64().map(|v| v as usize);
+    Some(match msg["cmd"].as_str()? {
+        "toggle" => Cmd::Toggle,
+        "next" => Cmd::Next,
+        "previous" => Cmd::Previous,
+        "volume" => Cmd::SetVolume(msg["value"].as_u64()?.min(100) as u8),
+        "shuffle" => Cmd::Shuffle,
+        "repeat" => Cmd::Repeat,
+        "search" => Cmd::Search(shorten(msg["q"].as_str()?.trim(), 200)),
+        "play" => Cmd::Play { id: msg["id"].as_str()?.chars().take(64).collect(), now: msg["now"].as_bool().unwrap_or(false) },
+        "queuePlay" => Cmd::QueuePlay(int("index")?),
+        "queueRemove" => Cmd::QueueRemove(int("index")?),
+        "queueMove" => Cmd::QueueMove(int("from")?, int("to")?),
+        "playlists" => Cmd::Playlists,
+        "loadPlaylist" => Cmd::LoadPlaylist(msg["id"].as_str()?.to_string()),
+        "link" => Cmd::Link,
+        "unlink" => Cmd::Unlink,
+        "rediscover" => Cmd::Rediscover,
+        "changeUrl" => Cmd::ChangeUrl,
+        "setUrl" => Cmd::SetUrl(msg["url"].as_str()?.to_string()),
+        "trustCert" => Cmd::TrustNewCert,
+        "ready" => Cmd::Refresh,
+        _ => return None,
+    })
+}
+
+// ─── Widget ───
+
+struct Widget {
+    window: Window,
+    webview: WebView,
+    _context: WebContext,
+    /// Cuando se oculto por perder el foco (el clic en el icono que lo causo no debe reabrirlo)
+    hidden_at: Option<Instant>,
+}
+
+fn build_widget(target: &EventLoopWindowTarget<UserEvent>, proxy: &EventLoopProxy<UserEvent>) -> Option<Widget> {
+    let builder = WindowBuilder::new()
+        .with_title("LabNAS")
+        .with_inner_size(LogicalSize::new(WIDGET_W, WIDGET_H))
+        .with_resizable(false)
+        .with_decorations(false)
+        .with_transparent(true)
+        .with_always_on_top(true)
+        .with_visible(false)
+        .with_window_icon(window_icon());
+    #[cfg(windows)]
+    let builder = {
+        use tao::platform::windows::WindowBuilderExtWindows;
+        builder.with_skip_taskbar(true)
+    };
+    #[cfg(target_os = "linux")]
+    let builder = {
+        use tao::platform::unix::WindowBuilderExtUnix;
+        builder.with_skip_taskbar(true)
+    };
+    let window = builder
+        .build(target)
+        .map_err(|e| eprintln!("[labnas-tray] no se pudo crear el widget: {e}"))
+        .ok()?;
+
+    // Datos del webview fuera de la carpeta del .exe (puede no tener permiso de escritura)
+    let mut context = WebContext::new(dirs::data_local_dir().map(|d| d.join("labnas-tray").join("webview")));
+    let ipc_proxy = proxy.clone();
+    let wb = WebViewBuilder::new_with_web_context(&mut context)
+        .with_html(include_str!("../assets/widget.html"))
+        .with_transparent(true)
+        .with_devtools(cfg!(debug_assertions))
+        .with_ipc_handler(move |req| {
+            let _ = ipc_proxy.send_event(UserEvent::Ipc(req.body().clone()));
+        })
+        // enlaces: al navegador del sistema, nunca dentro del widget
+        .with_navigation_handler(|url| url.starts_with("about:") || url.starts_with("data:"))
+        .with_new_window_req_handler(|url, _| {
+            let _ = open::that_detached(url);
+            wry::NewWindowResponse::Deny
+        });
+    #[cfg(target_os = "linux")]
+    let webview = {
+        use tao::platform::unix::WindowExtUnix;
+        use wry::WebViewBuilderExtUnix;
+        let vbox = window.default_vbox()?;
+        wb.build_gtk(vbox)
+    };
+    #[cfg(not(target_os = "linux"))]
+    let webview = wb.build(&window);
+    let webview = webview.map_err(|e| eprintln!("[labnas-tray] no se pudo crear el webview: {e}")).ok()?;
+    Some(Widget { window, webview, _context: context, hidden_at: None })
+}
+
+/// Ubica el widget junto al icono (Windows da su posicion) o arriba a la derecha
+fn place_widget(w: &Window, target: &EventLoopWindowTarget<UserEvent>, rect: Option<tray_icon::Rect>) {
+    let point = rect.map(|r| (r.position.x + f64::from(r.size.width) / 2.0, r.position.y + f64::from(r.size.height) / 2.0));
+    let monitor = point
+        .and_then(|(x, y)| {
+            target.available_monitors().find(|m| {
+                let (p, s) = (m.position(), m.size());
+                x >= f64::from(p.x) && x < f64::from(p.x) + f64::from(s.width) && y >= f64::from(p.y) && y < f64::from(p.y) + f64::from(s.height)
+            })
+        })
+        .or_else(|| target.primary_monitor())
+        .or_else(|| w.current_monitor());
+    let Some(m) = monitor else { return };
+    let scale = m.scale_factor();
+    let (ww, wh) = (WIDGET_W * scale, WIDGET_H * scale);
+    let (mx, my) = (f64::from(m.position().x), f64::from(m.position().y));
+    let (mw, mh) = (f64::from(m.size().width), f64::from(m.size().height));
+    let margin = 10.0 * scale;
+    let (x, y) = match (rect, point) {
+        (Some(r), Some((cx, _))) => {
+            let x = (cx - ww / 2.0).clamp(mx + margin, mx + mw - ww - margin);
+            // barra de tareas abajo (lo comun) o arriba
+            let y = if r.position.y > my + mh / 2.0 {
+                r.position.y - wh - margin
+            } else {
+                r.position.y + f64::from(r.size.height) + margin
+            };
+            (x, y.clamp(my, my + mh - wh))
+        }
+        // Linux no da la posicion del icono: esquina de la bandeja segun el escritorio
+        // (GNOME arriba a la derecha; KDE, XFCE, Cinnamon... abajo a la derecha)
+        _ if panel_on_top() => (mx + mw - ww - margin, my + 44.0 * scale),
+        _ => (mx + mw - ww - margin, my + mh - wh - 56.0 * scale),
+    };
+    if std::env::var_os("LABNAS_TRAY_DEBUG").is_some() {
+        eprintln!("[labnas-tray] monitor {:?} {:?} escala {scale} -> widget en ({x:.0}, {y:.0})", m.position(), m.size());
+    }
+    w.set_outer_position(PhysicalPosition::new(x, y));
+}
+
+fn panel_on_top() -> bool {
+    std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.to_ascii_uppercase().contains("GNOME"))
+}
+
+/// En Wayland una ventana no puede elegir su posicion: el widget saldria al centro. Con
+/// XWayland (GTK por X11) KWin y Mutter si la respetan; el icono va por D-Bus y no cambia.
+/// `LABNAS_TRAY_WAYLAND=1` deja Wayland nativo.
+#[cfg(target_os = "linux")]
+fn prefer_xwayland() {
+    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let chosen = std::env::var_os("GDK_BACKEND").is_some();
+    let native = std::env::var("LABNAS_TRAY_WAYLAND").is_ok_and(|v| v == "1");
+    if wayland && !chosen && !native && std::env::var_os("DISPLAY").is_some() {
+        // SAFETY: al inicio de main, antes de crear hilos o iniciar GTK
+        unsafe { std::env::set_var("GDK_BACKEND", "x11") };
+    }
+}
+
+fn push_status(w: &Widget, s: &Status) {
+    let _ = w.webview.evaluate_script(&format!("window.labnas && window.labnas.update({})", s.to_json()));
+}
+
+fn push_event(w: &Widget, ev: &Value) {
+    let _ = w.webview.evaluate_script(&format!("window.labnas && window.labnas.event({ev})"));
+}
+
 // ─── Bandeja ───
 
-fn icon() -> Option<tray_icon::Icon> {
+fn icon_rgba() -> Option<(Vec<u8>, u32, u32)> {
     let decoder = png::Decoder::new(std::io::Cursor::new(include_bytes!("../assets/tray.png").as_slice()));
     let mut reader = decoder.read_info().ok()?;
     let mut buf = vec![0; reader.output_buffer_size()?];
     let info = reader.next_frame(&mut buf).ok()?;
     buf.truncate(info.buffer_size());
-    if info.color_type != png::ColorType::Rgba {
-        return None;
-    }
-    tray_icon::Icon::from_rgba(buf, info.width, info.height).ok()
+    (info.color_type == png::ColorType::Rgba).then_some((buf, info.width, info.height))
+}
+
+fn window_icon() -> Option<tao::window::Icon> {
+    icon_rgba().and_then(|(rgba, w, h)| tao::window::Icon::from_rgba(rgba, w, h).ok())
 }
 
 struct Items {
+    open_widget: MenuItem,
     headline: MenuItem,
     toggle: MenuItem,
     next: MenuItem,
     previous: MenuItem,
-    volume: Submenu,
     vol_up: MenuItem,
     vol_down: MenuItem,
-    open: MenuItem,
-    link: MenuItem,
-    unlink: MenuItem,
-    account: MenuItem,
-    rediscover: MenuItem,
-    trust: MenuItem,
+    open_web: MenuItem,
     autostart: CheckMenuItem,
     quit: MenuItem,
 }
@@ -412,19 +767,14 @@ struct Items {
 impl Items {
     fn new() -> Self {
         Items {
+            open_widget: MenuItem::new("Abrir control de música", true, None),
             headline: MenuItem::new("Buscando LabNAS…", false, None),
-            toggle: MenuItem::new("⏯  Pausar", false, None),
+            toggle: MenuItem::new("⏸  Pausar", false, None),
             next: MenuItem::new("⏭  Siguiente", false, None),
             previous: MenuItem::new("⏮  Anterior", false, None),
-            volume: Submenu::new("Volumen", false),
-            vol_up: MenuItem::new(format!("Subir (+{VOLUME_STEP})"), true, None),
-            vol_down: MenuItem::new(format!("Bajar (−{VOLUME_STEP})"), true, None),
-            open: MenuItem::new("Abrir LabNAS", false, None),
-            link: MenuItem::new("Vincular con mi cuenta…", false, None),
-            unlink: MenuItem::new("Desvincular este computador", false, None),
-            account: MenuItem::new("", false, None),
-            rediscover: MenuItem::new("Buscar LabNAS en la red", true, None),
-            trust: MenuItem::new("Confiar en el certificado nuevo…", false, None),
+            vol_up: MenuItem::new(format!("🔊  Subir volumen (+{VOLUME_STEP})"), false, None),
+            vol_down: MenuItem::new(format!("🔉  Bajar volumen (−{VOLUME_STEP})"), false, None),
+            open_web: MenuItem::new("Abrir LabNAS en el navegador", false, None),
             autostart: CheckMenuItem::new("Iniciar con el sistema", true, autostart::enabled(), None),
             quit: MenuItem::new("Salir", true, None),
         }
@@ -432,21 +782,17 @@ impl Items {
 
     fn menu(&self) -> Option<Menu> {
         let menu = Menu::new();
-        self.volume.append_items(&[&self.vol_up, &self.vol_down]).ok()?;
         menu.append_items(&[
-            &self.headline,
+            &self.open_widget,
             &PredefinedMenuItem::separator(),
+            &self.headline,
             &self.toggle,
             &self.next,
             &self.previous,
-            &self.volume,
+            &self.vol_up,
+            &self.vol_down,
             &PredefinedMenuItem::separator(),
-            &self.open,
-            &self.account,
-            &self.link,
-            &self.unlink,
-            &self.trust,
-            &self.rediscover,
+            &self.open_web,
             &self.autostart,
             &PredefinedMenuItem::separator(),
             &self.quit,
@@ -457,39 +803,23 @@ impl Items {
 
     fn show(&self, s: &Status, tray: Option<&tray_icon::TrayIcon>) {
         self.headline.set_text(&s.headline);
-        let can_control = s.linked && s.base.is_some() && s.cert_changed.is_none();
+        let ready = s.phase == "listo";
         self.toggle.set_text(if s.playing && s.paused { "▶  Reanudar" } else { "⏸  Pausar" });
-        self.toggle.set_enabled(can_control && s.playing);
-        self.next.set_enabled(can_control);
-        self.previous.set_enabled(can_control);
-        self.volume.set_text(match s.volume {
-            Some(v) => format!("Volumen: {v}%"),
-            None => "Volumen".to_string(),
-        });
-        self.volume.set_enabled(can_control && s.volume.is_some());
-        self.open.set_enabled(s.base.is_some());
-        self.link.set_enabled(!s.linked && !s.linking && s.cert_changed.is_none());
-        self.link.set_text(if s.linking { "Esperando al navegador…" } else { "Vincular con mi cuenta…" });
-        self.unlink.set_enabled(s.linked);
-        self.account.set_text(match (&s.user, s.linked) {
-            (Some(u), true) => format!("Vinculado como {u}"),
-            (None, true) => "Vinculado".to_string(),
-            _ => "Sin vincular".to_string(),
-        });
-        self.trust.set_enabled(s.cert_changed.is_some());
+        self.toggle.set_enabled(ready && s.playing);
+        self.next.set_enabled(ready);
+        self.previous.set_enabled(ready && s.playing);
+        self.vol_up.set_enabled(ready);
+        self.vol_down.set_enabled(ready);
+        self.open_web.set_enabled(s.base.is_some());
         if let Some(t) = tray {
-            let tip = match &s.cert_changed {
-                Some((h, old, new)) => format!("LabNAS: el certificado de {h} cambió\nGuardado: {old}\nActual: {new}"),
-                None => format!("LabNAS\n{}", s.headline),
-            };
-            let _ = t.set_tooltip(Some(tip));
+            let _ = t.set_tooltip(Some(format!("LabNAS\n{}", s.headline)));
         }
     }
 }
 
 /// `labnas-tray --probar <url>`: comprueba la conexion (redireccion a HTTPS y certificado)
 fn probe(url: &str) -> ! {
-    let Some(u) = Url::parse(url) else {
+    let Some(u) = normalize_url(url) else {
         eprintln!("URL invalida: {url}");
         std::process::exit(2);
     };
@@ -509,11 +839,31 @@ fn probe(url: &str) -> ! {
     }
 }
 
+/// Una sola copia por usuario: si ya hay una, se le pide abrir el widget y se sale.
+/// Devuelve el listener de la copia principal.
+fn single_instance() -> Option<std::net::TcpListener> {
+    use std::io::Write;
+    match std::net::TcpListener::bind(("127.0.0.1", SINGLE_INSTANCE_PORT)) {
+        Ok(l) => Some(l),
+        Err(_) => {
+            if let Ok(mut s) = std::net::TcpStream::connect_timeout(&([127, 0, 0, 1], SINGLE_INSTANCE_PORT).into(), Duration::from_secs(1)) {
+                let _ = s.write_all(b"labnas-tray abrir\n");
+                std::process::exit(0);
+            }
+            // el puerto lo usa otro programa: seguir sin instancia unica
+            None
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("--probar") {
         probe(args.get(2).map(String::as_str).unwrap_or(""));
     }
+    let listener = single_instance();
+    #[cfg(target_os = "linux")]
+    prefer_xwayland();
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
@@ -524,18 +874,18 @@ fn main() {
     }));
     let click_proxy = proxy.clone();
     TrayIconEvent::set_event_handler(Some(move |e: TrayIconEvent| {
-        if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
-            let _ = click_proxy.send_event(UserEvent::TrayLeftClick);
+        if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, rect, .. } = e {
+            let _ = click_proxy.send_event(UserEvent::TrayClick(rect));
         }
     }));
 
     let items = Items::new();
-    let tray = match (icon(), items.menu()) {
+    let tray = match (icon_rgba().and_then(|(rgba, w, h)| tray_icon::Icon::from_rgba(rgba, w, h).ok()), items.menu()) {
         (Some(icon), Some(menu)) => tray_icon::TrayIconBuilder::new()
             .with_icon(icon)
             .with_tooltip("LabNAS")
             .with_menu(Box::new(menu))
-            // clic izquierdo: pausar/reanudar; el menu va con el derecho
+            // clic izquierdo: widget; el menu va con el derecho
             .with_menu_on_left_click(false)
             .build()
             .map_err(|e| eprintln!("[labnas-tray] no se pudo crear el icono de la bandeja: {e}"))
@@ -555,59 +905,147 @@ fn main() {
         proxy: proxy.clone(),
         tx: tx.clone(),
         last_discovery: None,
+        searching: false,
+        offline: false,
+        linking: false,
+        force_setup: false,
     };
     std::thread::spawn(move || worker.run(rx));
+    if let Some(listener) = listener {
+        let p = proxy.clone();
+        std::thread::spawn(move || {
+            use std::io::Read;
+            for stream in listener.incoming().flatten() {
+                let mut buf = [0u8; 32];
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+                let n = (&stream).read(&mut buf).unwrap_or(0);
+                if buf[..n].starts_with(b"labnas-tray abrir") {
+                    let _ = p.send_event(UserEvent::ShowWidget);
+                }
+            }
+        });
+    }
+    // `--abrir`: abre el widget al iniciar (acceso directo del escritorio)
+    if args.iter().any(|a| a == "--abrir") {
+        let _ = proxy.send_event(UserEvent::ShowWidget);
+    }
 
     let mut status = Status::default();
-    event_loop.run(move |event, _, control_flow| {
+    let mut widget: Option<Widget> = None;
+    event_loop.run(move |event, target, control_flow| {
         *control_flow = ControlFlow::Wait;
-        let Event::UserEvent(ev) = event else { return };
         let send = |c: Cmd| {
             let _ = tx.send(c);
         };
-        match ev {
-            UserEvent::Status(s) => {
-                status = *s;
-                items.show(&status, tray.as_ref());
+        let show = |widget: &mut Option<Widget>, rect: Option<tray_icon::Rect>, status: &Status| {
+            if widget.is_none() {
+                *widget = build_widget(target, &proxy);
             }
-            UserEvent::TrayLeftClick => {
-                if status.linked && status.playing {
-                    send(Cmd::Toggle);
+            let Some(w) = widget.as_mut() else { return };
+            place_widget(&w.window, target, rect);
+            w.window.set_visible(true);
+            w.window.set_focus();
+            w.hidden_at = None;
+            push_status(w, status);
+            push_event(w, &json!({ "type": "shown" }));
+        };
+        match event {
+            Event::WindowEvent { event: WindowEvent::Focused(false), .. } => {
+                if let Some(w) = widget.as_mut()
+                    && w.window.is_visible()
+                {
+                    w.window.set_visible(false);
+                    w.hidden_at = Some(Instant::now());
                 }
             }
-            UserEvent::Menu(id) => {
-                if id == *items.toggle.id() {
-                    send(Cmd::Toggle);
-                } else if id == *items.next.id() {
-                    send(Cmd::Next);
-                } else if id == *items.previous.id() {
-                    send(Cmd::Previous);
-                } else if id == *items.vol_up.id() {
-                    send(Cmd::Volume(VOLUME_STEP));
-                } else if id == *items.vol_down.id() {
-                    send(Cmd::Volume(-VOLUME_STEP));
-                } else if id == *items.open.id() {
-                    if let Some(b) = &status.base {
-                        let _ = open::that_detached(b);
-                    }
-                } else if id == *items.link.id() {
-                    send(Cmd::Link);
-                } else if id == *items.unlink.id() {
-                    send(Cmd::Unlink);
-                } else if id == *items.rediscover.id() {
-                    send(Cmd::Rediscover);
-                } else if id == *items.trust.id() {
-                    send(Cmd::TrustNewCert);
-                } else if id == *items.autostart.id() {
-                    let want = items.autostart.is_checked();
-                    if let Err(e) = autostart::set(want) {
-                        eprintln!("[labnas-tray] iniciar con el sistema: {e}");
-                        items.autostart.set_checked(!want);
-                    }
-                } else if id == *items.quit.id() {
-                    *control_flow = ControlFlow::Exit;
+            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+                if let Some(w) = widget.as_ref() {
+                    w.window.set_visible(false);
                 }
             }
+            Event::UserEvent(ev) => match ev {
+                UserEvent::Status(s) => {
+                    status = *s;
+                    items.show(&status, tray.as_ref());
+                    if let Some(w) = widget.as_ref() {
+                        push_status(w, &status);
+                    }
+                }
+                UserEvent::Widget(ev) => {
+                    if let Some(w) = widget.as_ref() {
+                        push_event(w, &ev);
+                    }
+                }
+                UserEvent::Ipc(body) => {
+                    let Ok(msg) = serde_json::from_str::<Value>(&body) else { return };
+                    match msg["cmd"].as_str() {
+                        Some("hide") => {
+                            if let Some(w) = widget.as_ref() {
+                                w.window.set_visible(false);
+                            }
+                        }
+                        Some("openWeb") => {
+                            if let Some(b) = &status.base {
+                                let _ = open::that_detached(b);
+                            }
+                        }
+                        Some("ready") => {
+                            if let Some(w) = widget.as_ref() {
+                                push_status(w, &status);
+                            }
+                        }
+                        _ => {
+                            if let Some(c) = ipc_to_cmd(&msg) {
+                                send(c);
+                            }
+                        }
+                    }
+                }
+                UserEvent::TrayClick(rect) => {
+                    let visible = widget.as_ref().is_some_and(|w| w.window.is_visible());
+                    // el clic que le quito el foco ya lo cerro: no reabrir
+                    let just_hidden = widget
+                        .as_ref()
+                        .and_then(|w| w.hidden_at)
+                        .is_some_and(|t| t.elapsed() < Duration::from_millis(350));
+                    if visible {
+                        if let Some(w) = widget.as_ref() {
+                            w.window.set_visible(false);
+                        }
+                    } else if !just_hidden {
+                        show(&mut widget, Some(rect), &status);
+                    }
+                }
+                UserEvent::ShowWidget => show(&mut widget, None, &status),
+                UserEvent::Menu(id) => {
+                    if id == *items.open_widget.id() {
+                        show(&mut widget, None, &status);
+                    } else if id == *items.toggle.id() {
+                        send(Cmd::Toggle);
+                    } else if id == *items.next.id() {
+                        send(Cmd::Next);
+                    } else if id == *items.previous.id() {
+                        send(Cmd::Previous);
+                    } else if id == *items.vol_up.id() {
+                        send(Cmd::Volume(VOLUME_STEP));
+                    } else if id == *items.vol_down.id() {
+                        send(Cmd::Volume(-VOLUME_STEP));
+                    } else if id == *items.open_web.id() {
+                        if let Some(b) = &status.base {
+                            let _ = open::that_detached(b);
+                        }
+                    } else if id == *items.autostart.id() {
+                        let want = items.autostart.is_checked();
+                        if let Err(e) = autostart::set(want) {
+                            eprintln!("[labnas-tray] iniciar con el sistema: {e}");
+                            items.autostart.set_checked(!want);
+                        }
+                    } else if id == *items.quit.id() {
+                        *control_flow = ControlFlow::Exit;
+                    }
+                }
+            },
+            _ => {}
         }
     });
 }
@@ -620,5 +1058,21 @@ mod tests {
     fn acortar() {
         assert_eq!(shorten("hola", 10), "hola");
         assert_eq!(shorten("ñandú volador", 6), "ñandú…");
+    }
+
+    #[test]
+    fn direcciones_escritas() {
+        assert_eq!(normalize_url("192.168.1.10:3001").map(|u| u.base()).as_deref(), Some("http://192.168.1.10:3001"));
+        assert_eq!(normalize_url(" https://labnas.local:3443/ ").map(|u| u.base()).as_deref(), Some("https://labnas.local:3443"));
+        assert!(normalize_url("   ").is_none());
+    }
+
+    #[test]
+    fn mensajes_del_widget() {
+        assert!(matches!(ipc_to_cmd(&json!({ "cmd": "volume", "value": 140 })), Some(Cmd::SetVolume(100))));
+        assert!(matches!(ipc_to_cmd(&json!({ "cmd": "queueMove", "from": 3, "to": 0 })), Some(Cmd::QueueMove(3, 0))));
+        assert!(matches!(ipc_to_cmd(&json!({ "cmd": "play", "id": "abc", "now": true })), Some(Cmd::Play { now: true, .. })));
+        assert!(ipc_to_cmd(&json!({ "cmd": "queuePlay" })).is_none());
+        assert!(ipc_to_cmd(&json!({ "cmd": "rm -rf" })).is_none());
     }
 }

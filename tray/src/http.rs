@@ -112,18 +112,39 @@ impl Response {
 }
 
 /// Huella SHA-256 (DER) en el formato que muestra LabNAS: AA:BB:...
+pub fn pct_encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
 pub fn fingerprint(der: &[u8]) -> String {
     Sha256::digest(der).iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":")
 }
 
 pub fn request(url: &Url, method: &str, path: &str, token: Option<&str>, body: Option<&str>) -> Result<Response, Error> {
+    request_timeout(url, method, path, token, body, TIMEOUT)
+}
+
+/// Igual que `request`, con otro plazo de lectura (buscar y reproducir llaman a yt-dlp)
+pub fn request_timeout(
+    url: &Url,
+    method: &str,
+    path: &str,
+    token: Option<&str>,
+    body: Option<&str>,
+    read_timeout: Duration,
+) -> Result<Response, Error> {
     let addr = (url.host.as_str(), url.port)
         .to_socket_addrs()
         .map_err(|e| Error::Net(e.to_string()))?
         .next()
         .ok_or_else(|| Error::Net("no se pudo resolver el nombre".into()))?;
     let tcp = TcpStream::connect_timeout(&addr, TIMEOUT).map_err(|e| Error::Net(e.to_string()))?;
-    let _ = tcp.set_read_timeout(Some(TIMEOUT));
+    let _ = tcp.set_read_timeout(Some(read_timeout));
     let _ = tcp.set_write_timeout(Some(TIMEOUT));
 
     let mut head = format!(

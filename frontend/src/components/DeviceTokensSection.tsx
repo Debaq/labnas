@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Download, MonitorSmartphone, Trash2 } from 'lucide-react'
+import { Check, Copy, Download, MonitorSmartphone, Trash2 } from 'lucide-react'
 import { fetchDeviceTokens, deleteDeviceToken, type DeviceToken } from '../api'
 import { errorMessage } from '../lib/errors'
 
@@ -24,6 +24,12 @@ export default function DeviceTokensSection() {
   const [list, setList] = useState<DeviceToken[]>([])
   const [error, setError] = useState<string | null>(null)
   const mine = detectPlatform()
+  const origin = window.location.origin
+  const [copied, setCopied] = useState(false)
+
+  async function copyOrigin() {
+    try { await navigator.clipboard.writeText(origin); setCopied(true); setTimeout(() => setCopied(false), 2000) } catch { /* sin portapapeles */ }
+  }
 
   async function load() {
     try { setList(await fetchDeviceTokens()) } catch { /* sin sesion */ }
@@ -48,7 +54,7 @@ export default function DeviceTokensSection() {
         </p>
         <div className="flex flex-wrap items-center gap-2">
           {PLATFORMS.map(p => (
-            <a key={p.id} href={`/api/music/tray/${p.id}`} download
+            <a key={p.id} href={`/api/music/tray/${p.id}?server=${encodeURIComponent(origin)}`} download
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium hover:opacity-80"
               style={p.id === mine
                 ? { backgroundColor: 'var(--accent)', color: '#fff' }
@@ -58,10 +64,17 @@ export default function DeviceTokensSection() {
           ))}
         </div>
         <ul className="text-xs list-disc pl-5 space-y-0.5" style={{ color: 'var(--text-secondary)' }}>
-          <li><strong>Windows:</strong> descomprime el .zip y abre <code>labnas-tray.exe</code>. Si Windows avisa que la app no es conocida, elige «Más información» › «Ejecutar de todas formas».</li>
+          <li><strong>Windows:</strong> abre el <code>.exe</code> descargado (conviene dejarlo en una carpeta fija, no en Descargas). Si Windows avisa que la app no es conocida, elige «Más información» › «Ejecutar de todas formas».</li>
           <li><strong>Linux:</strong> descomprime y ejecuta <code>./install.sh</code> dentro de la carpeta. En GNOME hace falta la extensión AppIndicator para ver el icono.</li>
-          <li>Después, en el icono: «Vincular con mi cuenta» y, si quieres, «Iniciar con el sistema».</li>
+          <li>La copia descargada ya sabe la dirección de este LabNAS: al abrirla te lleva directo a vincular tu cuenta.</li>
         </ul>
+        <div className="flex items-center gap-2 text-xs flex-wrap" style={{ color: 'var(--text-secondary)' }}>
+          Si te la pide, la dirección es
+          <code className="px-2 py-1 rounded" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)' }}>{origin}</code>
+          <button onClick={copyOrigin} className="p-1 rounded hover:opacity-80" title="Copiar" style={{ color: 'var(--accent)' }}>
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+          </button>
+        </div>
         {list.length === 0 ? (
           <p className="text-xs" style={{ color: 'var(--text-secondary)', opacity: 0.7 }}>Ningún dispositivo vinculado.</p>
         ) : (

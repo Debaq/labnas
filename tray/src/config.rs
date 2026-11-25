@@ -46,6 +46,47 @@ fn render(c: &Config) -> String {
     s
 }
 
+/// Ya hay configuracion guardada (si no, es la primera vez que se abre)
+pub fn exists() -> bool {
+    dir().is_some_and(|d| d.join("config").exists())
+}
+
+/// Marca del bloque de configuracion que LabNAS agrega al final del .exe al
+/// descargarlo (ver backend `handlers/music/tray_download.rs`)
+const TRAILER_MAGIC: &[u8; 8] = b"LNTCONF1";
+
+/// `url=...` del bloque al final de un ejecutable, si lo tiene
+pub fn trailer_conf(bytes_tail: &[u8]) -> Option<Config> {
+    let n = bytes_tail.len();
+    if n < 12 || &bytes_tail[n - 12..n - 4] != TRAILER_MAGIC {
+        return None;
+    }
+    let len = u32::from_le_bytes(bytes_tail[n - 4..].try_into().ok()?) as usize;
+    let start = (n - 12).checked_sub(len)?;
+    Some(parse(std::str::from_utf8(&bytes_tail[start..n - 12]).ok()?))
+}
+
+/// Direccion que trae esta copia: al final del ejecutable (descarga de Windows) o en
+/// `labnas-tray.conf` junto a el (tarball de Linux)
+pub fn bundled_url() -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let exe = std::env::current_exe().ok()?;
+    if let Ok(mut f) = std::fs::File::open(&exe) {
+        let size = f.metadata().map(|m| m.len()).unwrap_or(0);
+        let take = size.min(4096);
+        if take >= 12 && f.seek(SeekFrom::End(-(take as i64))).is_ok() {
+            let mut tail = vec![0u8; take as usize];
+            if f.read_exact(&mut tail).is_ok()
+                && let Some(url) = trailer_conf(&tail).and_then(|c| c.url)
+            {
+                return Some(url);
+            }
+        }
+    }
+    let conf = exe.parent()?.join("labnas-tray.conf");
+    parse(&std::fs::read_to_string(conf).ok()?).url
+}
+
 pub fn load() -> Config {
     dir().and_then(|d| std::fs::read_to_string(d.join("config")).ok()).map(|s| parse(&s)).unwrap_or_default()
 }
@@ -136,6 +177,22 @@ mod tests {
         let c = Config { url: Some("https://x:3443".into()), token: Some("lnd_ab".into()), user: None };
         assert_eq!(parse(&render(&c)), c);
         assert_eq!(parse("basura\nurl=\n"), Config::default());
+    }
+
+    #[test]
+    fn bloque_al_final_del_exe() {
+        let conf = "# comentario\nurl=https://10.0.0.5:3443\n";
+        let mut exe = b"MZ binario".to_vec();
+        exe.extend_from_slice(conf.as_bytes());
+        exe.extend_from_slice(TRAILER_MAGIC);
+        exe.extend_from_slice(&(conf.len() as u32).to_le_bytes());
+        assert_eq!(trailer_conf(&exe).and_then(|c| c.url).as_deref(), Some("https://10.0.0.5:3443"));
+        assert!(trailer_conf(b"MZ sin bloque").is_none());
+        // largo mayor que lo disponible
+        let mut bad = b"x".to_vec();
+        bad.extend_from_slice(TRAILER_MAGIC);
+        bad.extend_from_slice(&999u32.to_le_bytes());
+        assert!(trailer_conf(&bad).is_none());
     }
 
     #[test]

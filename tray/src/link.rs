@@ -21,15 +21,6 @@ fn random_state() -> String {
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn pct_encode(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
-}
-
 fn pct_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -125,7 +116,7 @@ pub fn link(base: &str) -> Result<Linked, String> {
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     let state = random_state();
     let name = gethostname::gethostname().to_string_lossy().into_owned();
-    let url = format!("{base}/vincular?port={port}&state={state}&name={}", pct_encode(&name));
+    let url = format!("{base}/vincular?port={port}&state={state}&name={}", crate::http::pct_encode(&name));
     open::that_detached(&url).map_err(|e| format!("no se pudo abrir el navegador: {e}"))?;
 
     let deadline = Instant::now() + WAIT;
@@ -152,7 +143,7 @@ mod tests {
 
     #[test]
     fn codificacion() {
-        assert_eq!(pct_encode("PC de Ana"), "PC%20de%20Ana");
+        assert_eq!(crate::http::pct_encode("PC de Ana"), "PC%20de%20Ana");
         assert_eq!(pct_decode("PC%20de%20Ana"), "PC de Ana");
         assert_eq!(pct_decode("a+b%2"), "a b%2");
         assert_eq!(query_param("state=ab&token=lnd_1", "token").as_deref(), Some("lnd_1"));

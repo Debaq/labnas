@@ -281,10 +281,10 @@ pub async fn move_track_in_playlist(
 /// POST /api/music/playlists/{id}/load - Load playlist into queue
 pub async fn load_playlist(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
     Path(id): Path<String>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
-    let username = get_session_username(&state, &headers).await;
+    let username = session.username.clone();
     let pl = crate::db::db_op_status(&state.db, move |conn| {
         use rusqlite::OptionalExtension;
         conn.query_row(

@@ -32,13 +32,24 @@ const MAX_PER_USER: i64 = 20;
 /// `last_used` se actualiza como mucho cada tanto (la bandeja consulta cada pocos segundos)
 const LAST_USED_EVERY_SECS: i64 = 300;
 
-/// Rutas que acepta un token de dispositivo: controlar el reproductor compartido
+/// Rutas que acepta un token de dispositivo: usar el reproductor compartido desde el
+/// widget de la bandeja (ver, controlar, buscar y encolar). `*` = un segmento cualquiera.
+/// Nada de administrar el reproductor (mpv-args, lastfm-key) ni editar listas.
 const DEVICE_SCOPE: &[(&str, &str)] = &[
     ("GET", "/api/music/current"),
     ("POST", "/api/music/pause"),
     ("POST", "/api/music/next"),
     ("POST", "/api/music/previous"),
     ("POST", "/api/music/volume"),
+    ("POST", "/api/music/shuffle"),
+    ("POST", "/api/music/repeat"),
+    ("GET", "/api/music/search"),
+    ("POST", "/api/music/play"),
+    ("POST", "/api/music/queue/play/*"),
+    ("POST", "/api/music/queue/move"),
+    ("DELETE", "/api/music/queue"),
+    ("GET", "/api/music/playlists"),
+    ("POST", "/api/music/playlists/*/load"),
     // la app comprueba que el token sigue vivo y a nombre de quien esta, y se desvincula
     ("GET", "/api/auth/device-tokens/me"),
     ("DELETE", "/api/auth/device-tokens/me"),
@@ -48,8 +59,20 @@ pub fn is_device_token(token: &str) -> bool {
     token.starts_with(PREFIX)
 }
 
+fn path_matches(pattern: &str, path: &str) -> bool {
+    let (mut pat, mut got) = (pattern.split('/'), path.split('/'));
+    loop {
+        match (pat.next(), got.next()) {
+            (None, None) => return true,
+            (Some("*"), Some(seg)) if !seg.is_empty() => {}
+            (Some(a), Some(b)) if a == b => {}
+            _ => return false,
+        }
+    }
+}
+
 pub fn scope_allows(method: &Method, path: &str) -> bool {
-    DEVICE_SCOPE.iter().any(|(m, p)| *m == method.as_str() && *p == path)
+    DEVICE_SCOPE.iter().any(|(m, p)| *m == method.as_str() && path_matches(p, path))
 }
 
 fn token_hash(token: &str) -> String {
@@ -259,7 +282,14 @@ mod tests {
         assert!(!valid_format(&t.replacen(PREFIX, "abc_", 1)));
         assert!(scope_allows(&Method::POST, "/api/music/next"));
         assert!(scope_allows(&Method::GET, "/api/music/current"));
-        assert!(!scope_allows(&Method::POST, "/api/music/play"));
+        assert!(scope_allows(&Method::POST, "/api/music/play"));
+        assert!(scope_allows(&Method::POST, "/api/music/queue/play/3"));
+        assert!(scope_allows(&Method::POST, "/api/music/playlists/abc/load"));
+        assert!(!scope_allows(&Method::POST, "/api/music/queue/play/"));
+        assert!(!scope_allows(&Method::POST, "/api/music/queue/play/3/x"));
+        assert!(!scope_allows(&Method::POST, "/api/music/mpv-args"));
+        assert!(!scope_allows(&Method::PUT, "/api/music/playlists/abc"));
+        assert!(!scope_allows(&Method::DELETE, "/api/music/playlists/abc"));
         assert!(!scope_allows(&Method::GET, "/api/music/next"));
         assert!(!scope_allows(&Method::POST, "/api/auth/device-tokens"));
         assert!(!scope_allows(&Method::GET, "/api/files"));

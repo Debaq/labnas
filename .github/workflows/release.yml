@@ -318,7 +318,7 @@ jobs:
 
       - name: Instalar deps GTK y AppIndicator
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libayatana-appindicator3-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libayatana-appindicator3-dev libwebkit2gtk-4.1-dev pkg-config
 
       - name: Cache Rust
         uses: actions/cache@v6
@@ -350,9 +350,9 @@ jobs:
         if: matrix.os == 'windows'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          ASSET="labnas-tray-v${VERSION}-windows-${{ matrix.arch }}.zip"
-          cp tray/target/release/labnas-tray.exe .
-          7z a "$ASSET" labnas-tray.exe
+          # El .exe solo: LabNAS le agrega su direccion al final al descargarlo
+          ASSET="labnas-tray-v${VERSION}-windows-${{ matrix.arch }}.exe"
+          cp tray/target/release/labnas-tray.exe "$ASSET"
           sha256sum "$ASSET" > "$ASSET.sha256"
           echo "asset=$ASSET" >> "$GITHUB_ENV"
 

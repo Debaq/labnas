@@ -13,11 +13,23 @@ async fn descarga_de_la_bandeja_desde_la_cache() {
     let tag = format!("v{}", env!("CARGO_PKG_VERSION"));
     let dir = crate::db::data_dir().join("downloads");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join(format!("labnas-tray-{tag}-windows-x86_64.zip")), b"PK-falso").unwrap();
+    std::fs::write(dir.join(format!("labnas-tray-{tag}-windows-x86_64.exe")), b"MZ-falso").unwrap();
 
     let r = s.get("/api/music/tray/windows-x86_64", &ana).await;
     assert_eq!(r.status, 200);
-    assert!(r.header("content-disposition").contains(&format!("labnas-tray-{tag}-windows-x86_64.zip")));
+    assert!(r.header("content-disposition").contains(&format!("labnas-tray-{tag}-windows-x86_64.exe")));
+
+    // Con ?server= igual al Host del pedido, el .exe lleva la direccion al final
+    let get = |q: String| {
+        let req = s.client().get(format!("{}/api/music/tray/windows-x86_64?server={}", s.base, q)).bearer_auth(&ana);
+        async move { req.send().await.unwrap().bytes().await.unwrap().to_vec() }
+    };
+    let with = get(s.base.clone()).await;
+    assert!(with.starts_with(b"MZ-falso"));
+    assert!(String::from_utf8_lossy(&with).contains(&format!("url={}\n", s.base)));
+    assert_eq!(&with[with.len() - 12..with.len() - 4], b"LNTCONF1");
+    // Otra direccion: se ignora
+    assert_eq!(get("https://otro.ejemplo:3443".into()).await, b"MZ-falso");
     assert_eq!(s.get("/api/music/tray/macos-arm64", &ana).await.status, 404);
     assert_eq!(s.get("/api/music/tray/..%2F..%2Fetc", &ana).await.status, 404);
 }
@@ -43,8 +55,11 @@ async fn token_de_dispositivo_solo_controla_la_musica() {
     assert_eq!(s.post("/api/music/pause", &token, json!({})).await.status, 200);
     assert_eq!(s.get("/api/auth/device-tokens/me", &token).await.json()["username"], "ana");
 
-    // Lo que no: otras rutas, ni siquiera de musica, ni crear mas tokens
-    assert_eq!(s.post("/api/music/play", &token, json!({ "id": "x" })).await.status, 403);
+    assert_eq!(s.get("/api/music/playlists", &token).await.status, 200);
+
+    // Lo que no: administrar el reproductor, editar listas, otras rutas, crear mas tokens
+    assert_eq!(s.post("/api/music/mpv-args", &token, json!({ "args": "" })).await.status, 403);
+    assert_eq!(s.post("/api/music/playlists", &token, json!({ "name": "x" })).await.status, 403);
     assert_eq!(s.get("/api/files", &token).await.status, 403);
     assert_eq!(s.get("/api/auth/me", &token).await.status, 403);
     assert_eq!(s.post("/api/auth/device-tokens", &token, json!({ "name": "otro" })).await.status, 403);

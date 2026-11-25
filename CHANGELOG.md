@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.6.0] — 2026-11-25
+
+Desde v3.5.1.
+
+### Control de música en la bandeja: widget y asistente
+
+- **Widget flotante** al pinchar el icono (en Linux, «Abrir control de música» del menú): carátula, progreso, anterior/pausa/siguiente, aleatorio, repetir y volumen; pestañas **Cola** (reproducir ya, que suene después, quitar), **Buscar** (agregar a la cola o reproducir ya) y **Listas** (cargar una lista guardada). Se cierra solo al hacer clic fuera, con Esc o con la ✕
+- **Asistente de configuración** en el mismo widget: busca el LabNAS y, si no lo encuentra, pide la dirección; luego guía la vinculación de la cuenta
+- **La descarga ya trae la dirección del LabNAS**: Windows baja un `.exe` suelto (sin zip) que la lleva dentro; en Linux va en el `.tar.gz` e `install.sh` la configura. La página muestra la dirección con un botón para copiarla
+- Si no hay dirección, prueba mDNS y `labnas.local`
+- Una sola copia: abrirla de nuevo muestra el widget en vez de crear otro icono
+- Linux con Wayland: el widget se ubica junto a la bandeja (usa XWayland; `LABNAS_TRAY_WAYLAND=1` para Wayland nativo). Requiere `webkit2gtk-4.1`
+- Lo que se agrega desde la bandeja queda a nombre de la persona vinculada. El token del dispositivo sigue limitado a la música: ahora también busca, encola, maneja la cola y carga listas, pero no administra el reproductor ni edita listas
+
 ## [3.5.1] — 2026-11-25
 
 Desde v3.5.0.

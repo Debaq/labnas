@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>LabNAS</title>
+<style>
+  :root {
+    --bg: #1e1f29; --card: #262836; --card2: #2e3142; --line: #3a3d52;
+    --text: #f2f2f7; --muted: #9a9cb5; --accent: #bd93f9; --accent2: #ff79c6;
+    --ok: #50fa7b; --bad: #ff5555; --warn: #f1fa8c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden;
+    font: 13px/1.35 system-ui, -apple-system, "Segoe UI", Ubuntu, sans-serif; color: var(--text);
+    user-select: none; -webkit-user-select: none; }
+  #app { position: absolute; inset: 6px; display: flex; flex-direction: column; border-radius: 16px;
+    background: linear-gradient(160deg, #262838 0%, var(--bg) 60%); border: 1px solid var(--line);
+    box-shadow: 0 12px 40px rgba(0,0,0,.45); overflow: hidden; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+  button:disabled { opacity: .35; cursor: default; }
+  input { font: inherit; color: var(--text); background: var(--card2); border: 1px solid var(--line);
+    border-radius: 10px; padding: 8px 10px; outline: none; width: 100%; user-select: text; -webkit-user-select: text; }
+  input:focus { border-color: var(--accent); }
+  svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; display: block; }
+
+  header { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; }
+  header .logo { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: grid; place-items: center; color: #1e1f29; font-weight: 800; font-size: 12px; }
+  header .title { font-weight: 650; flex: 1; min-width: 0; }
+  header .title small { display: block; color: var(--muted); font-weight: 400; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .icon-btn { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: var(--muted); }
+  .icon-btn:hover:not(:disabled) { background: var(--card2); color: var(--text); }
+
+  /* Reproduciendo */
+  .now { display: flex; gap: 12px; padding: 6px 14px 4px; align-items: center; }
+  .cover { width: 72px; height: 72px; border-radius: 12px; object-fit: cover; flex-shrink: 0; background: var(--card2);
+    box-shadow: 0 6px 18px rgba(0,0,0,.4); }
+  .cover.ph { display: grid; place-items: center; color: var(--muted); background: linear-gradient(135deg, #34374a, #2a2c3b); }
+  .cover.ph svg { width: 30px; height: 30px; }
+  .meta { min-width: 0; flex: 1; }
+  .meta .t { font-weight: 650; font-size: 14px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .meta .a { color: var(--muted); font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta .by { color: var(--muted); opacity: .7; font-size: 11px; margin-top: 2px; }
+  .progress { padding: 6px 14px 0; }
+  .bar { height: 4px; border-radius: 4px; background: var(--card2); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .9s linear; }
+  .times { display: flex; justify-content: space-between; color: var(--muted); font-size: 10.5px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .controls { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 4px 0 2px; }
+  .controls .main { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; color: #1e1f29;
+    background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 6px 18px rgba(189,147,249,.35); }
+  .controls .main svg { width: 22px; height: 22px; fill: currentColor; stroke: none; }
+  .controls .main:hover:not(:disabled) { transform: scale(1.05); }
+  .controls .sec { color: var(--text); }
+  .controls .sec svg { width: 22px; height: 22px; }
+  .controls .tog { color: var(--muted); position: relative; }
+  .controls .tog.on { color: var(--accent); }
+  .controls .tog .one { position: absolute; right: -5px; top: -4px; font-size: 9px; font-weight: 800; }
+  .volume { display: flex; align-items: center; gap: 8px; padding: 2px 16px 8px; color: var(--muted); }
+  input[type=range] { -webkit-appearance: none; appearance: none; height: 4px; padding: 0; border: 0; border-radius: 4px; background: var(--card2); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--text); cursor: pointer; }
+
+  /* Pestanas */
+  .tabs { display: flex; gap: 4px; padding: 0 10px; border-bottom: 1px solid var(--line); }
+  .tabs button { flex: 1; padding: 8px 0; color: var(--muted); font-weight: 600; font-size: 12px; border-bottom: 2px solid transparent;
+    display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .tabs button svg { width: 15px; height: 15px; }
+  .tabs button.on { color: var(--text); border-color: var(--accent); }
+  .tabs .count { font-size: 10px; background: var(--card2); color: var(--muted); border-radius: 8px; padding: 0 6px; }
+  .pane { flex: 1; overflow-y: auto; padding: 8px 8px 10px; }
+  .pane::-webkit-scrollbar { width: 6px; } .pane::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; }
+  .search { display: flex; gap: 6px; padding: 0 2px 8px; position: sticky; top: 0; background: var(--bg); z-index: 1; }
+  .search .go { width: 38px; border-radius: 10px; background: var(--accent); color: #1e1f29; display: grid; place-items: center; flex-shrink: 0; }
+
+  .row { display: flex; align-items: center; gap: 9px; padding: 6px; border-radius: 10px; }
+  .row:hover { background: var(--card); }
+  .row img { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; background: var(--card2); flex-shrink: 0; }
+  .row .info { flex: 1; min-width: 0; }
+  .row .info .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
+  .row .info .s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 11px; }
+  .row .n { width: 18px; text-align: center; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .row .acts { display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+  .row:hover .acts, .row .acts.always { opacity: 1; }
+  .row .acts button { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); }
+  .row .acts button:hover { background: var(--card2); color: var(--text); }
+  .row .acts button.play { color: var(--accent); }
+  .row .acts svg { width: 16px; height: 16px; }
+  .empty { color: var(--muted); text-align: center; padding: 26px 12px; font-size: 12px; }
+  .spinner { width: 26px; height: 26px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%;
+    animation: spin 1s linear infinite; margin: 18px auto; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Pantallas del asistente */
+  .wizard { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 18px 22px 26px; gap: 12px; }
+  .wizard h2 { margin: 0; font-size: 17px; }
+  .wizard p { margin: 0; color: var(--muted); }
+  .wizard .step { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+  .btn { padding: 10px 14px; border-radius: 11px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #1e1f29;
+    font-weight: 700; text-align: center; }
+  .btn.ghost { background: var(--card2); color: var(--text); font-weight: 600; }
+  .err { color: var(--bad); font-size: 12px; }
+  code { font: 11px ui-monospace, Consolas, monospace; color: var(--accent); word-break: break-all; }
+
+  .toast { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%) translateY(20px); opacity: 0;
+    background: var(--card2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; font-size: 12px;
+    transition: all .2s; pointer-events: none; max-width: 85%; text-align: center; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.bad { border-color: var(--bad); color: var(--bad); }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo">L</div>
+    <div class="title">LabNAS <small id="sub">Música</small></div>
+    <button class="icon-btn" id="btnWeb" title="Abrir LabNAS en el navegador"><svg viewBox="0 0 24 24"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg></button>
+    <button class="icon-btn" id="btnMenu" title="Cuenta y conexión"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+    <button class="icon-btn" id="btnClose" title="Cerrar (Esc)"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </header>
+
+  <!-- Asistente y estados -->
+  <section id="wizard" class="wizard hidden"></section>
+
+  <!-- Reproductor -->
+  <section id="player" class="hidden" style="display:flex;flex-direction:column;flex:1;min-height:0">
+    <div class="now">
+      <img class="cover" id="cover" alt="">
+      <div class="cover ph" id="coverPh"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>
+      <div class="meta">
+        <div class="t" id="title">Nada sonando</div>
+        <div class="a" id="artist"></div>
+        <div class="by" id="by"></div>
+      </div>
+    </div>
+    <div class="progress">
+      <div class="bar"><i id="bar"></i></div>
+      <div class="times"><span id="tNow">0:00</span><span id="tLen">0:00</span></div>
+    </div>
+    <div class="controls">
+      <button class="tog" id="btnShuffle" title="Aleatorio"><svg viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg></button>
+      <button class="sec" id="btnPrev" title="Anterior"><svg viewBox="0 0 24 24"><path d="M19 20 9 12l10-8v16z" fill="currentColor"/><path d="M5 19V5"/></svg></button>
+      <button class="main" id="btnToggle" title="Pausar / reanudar"><svg viewBox="0 0 24 24" id="icoToggle"></svg></button>
+      <button class="sec" id="btnNext" title="Siguiente"><svg viewBox="0 0 24 24"><path d="m5 4 10 8-10 8V4z" fill="currentColor"/><path d="M19 5v14"/></svg></button>
+      <button class="tog" id="btnRepeat" title="Repetir"><svg viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg><span class="one hidden" id="repOne">1</span></button>
+    </div>
+    <div class="volume">
+      <svg viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>
+      <input type="range" id="vol" min="0" max="100" step="1">
+      <span id="volTxt" style="width:30px;text-align:right;font-size:11px;font-variant-numeric:tabular-nums"></span>
+    </div>
+    <div class="tabs">
+      <button data-tab="queue" class="on"><svg viewBox="0 0 24 24"><path d="M3 6h13M3 12h13M3 18h9"/><path d="M19 15v6M16 18h6"/></svg>Cola <span class="count" id="qCount">0</span></button>
+      <button data-tab="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>Buscar</button>
+      <button data-tab="lists"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>Listas</button>
+    </div>
+    <div class="pane" id="pane-queue"></div>
+    <div class="pane hidden" id="pane-search">
+      <form class="search" id="searchForm">
+        <input id="q" placeholder="Buscar canción o artista…" autocomplete="off">
+        <button class="go" type="submit" title="Buscar"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></button>
+      </form>
+      <div id="results"><div class="empty">Busca en YouTube y agrega canciones a la cola compartida.</div></div>
+    </div>
+    <div class="pane hidden" id="pane-lists"><div class="spinner"></div></div>
+  </section>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const send = (msg) => window.ipc.postMessage(JSON.stringify(msg));
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = (s) => {
+  s = Math.max(0, Math.floor(s || 0));
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+};
+const ICON_PLAY = '<path d="M7 4v16l13-8z"/>';
+const ICON_PAUSE = '<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>';
+const ICO = {
+  play: '<svg viewBox="0 0 24 24"><path d="M7 4v16l13-8z" fill="currentColor" stroke="none"/></svg>',
+  plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+  x: '<svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  up: '<svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+  top: '<svg viewBox="0 0 24 24"><path d="M5 3h14M12 21V8M6 14l6-6 6 6"/></svg>',
+};
+
+let S = {};              // ultimo estado del programa
+let tab = 'queue';
+let tick = null, base = { at: 0, elapsed: 0 };
+let volDragging = false;
+let listsLoaded = false;
+
+function toast(text, bad) {
+  const t = $('toast');
+  t.textContent = text; t.className = 'toast show' + (bad ? ' bad' : '');
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.className = 'toast' + (bad ? ' bad' : ''), 2600);
+}
+
+function wizard(html) {
+  $('wizard').innerHTML = html;
+  $('wizard').classList.remove('hidden');
+  $('player').classList.add('hidden');
+}
+
+function renderWizard() {
+  const p = S.phase;
+  if (p === 'buscando') return wizard(`<div class="spinner"></div><p style="text-align:center">Buscando LabNAS en la red…</p>`);
+  if (p === 'configurar') {
+    wizard(`<div class="step">Paso 1 de 2</div><h2>¿Dónde está tu LabNAS?</h2>
+      <p>No lo encontré solo en la red. Escribe su dirección: la ves en LabNAS, en <b>Configuración › General › Dispositivos vinculados</b>.</p>
+      <form id="urlForm" style="display:flex;flex-direction:column;gap:10px">
+        <input id="url" placeholder="https://192.168.1.10:3443" value="${esc(S.base || S.suggest || '')}" autocomplete="off">
+        ${S.error ? `<div class="err">${esc(S.error)}</div>` : ''}
+        <button class="btn" type="submit">Conectar</button>
+      </form>
+      <button class="btn ghost" id="again">Buscar de nuevo en la red</button>`);
+    $('urlForm').onsubmit = (e) => { e.preventDefault(); const v = $('url').value.trim(); if (v) { send({ cmd: 'setUrl', url: v }); wizard('<div class="spinner"></div><p style="text-align:center">Conectando…</p>'); } };
+    $('again').onclick = () => send({ cmd: 'rediscover' });
+    setTimeout(() => $('url') && $('url').focus(), 50);
+    return;
+  }
+  if (p === 'vincular') {
+    wizard(`<div class="step">Paso 2 de 2</div><h2>Vincula tu cuenta</h2>
+      <p>Conectado a <code>${esc(S.base)}</code>.</p>
+      <p>Se abrirá LabNAS en el navegador: entra con tu cuenta y pulsa <b>Autorizar</b>. Este computador solo podrá usar la música.</p>
+      ${S.error ? `<div class="err">${esc(S.error)}</div>` : ''}
+      <button class="btn" id="link">Vincular con mi cuenta</button>
+      <button class="btn ghost" id="change">Usar otra dirección</button>`);
+    $('link').onclick = () => send({ cmd: 'link' });
+    $('change').onclick = () => send({ cmd: 'changeUrl' });
+    return;
+  }
+  if (p === 'vinculando') {
+    wizard(`<div class="spinner"></div><h2 style="text-align:center">Autoriza en el navegador</h2>
+      <p style="text-align:center">Abrí LabNAS en tu navegador. Entra con tu cuenta y pulsa <b>Autorizar</b>; esto se actualiza solo.</p>`);
+    return;
+  }
+  if (p === 'certificado') {
+    const c = S.cert || {};
+    wizard(`<h2 style="color:var(--bad)">El certificado cambió</h2>
+      <p>${esc(c.host)} presentó un certificado distinto al de la primera conexión. Puede que alguien lo haya regenerado en LabNAS… o que otro equipo se haga pasar por él.</p>
+      <p>Guardado:<br><code>${esc(c.old)}</code></p><p>Actual:<br><code>${esc(c.new)}</code></p>
+      <p>Compáralo con LabNAS › Configuración › HTTPS (desde otro equipo). Solo si coincide:</p>
+      <button class="btn ghost" id="trust">Confiar en el certificado nuevo</button>`);
+    $('trust').onclick = () => send({ cmd: 'trustCert' });
+    return;
+  }
+  if (p === 'sin-conexion') {
+    wizard(`<h2>LabNAS no responde</h2><p>No hay conexión con <code>${esc(S.base)}</code>. Reintento solo cada pocos segundos.</p>
+      <button class="btn ghost" id="again">Buscar de nuevo en la red</button><button class="btn ghost" id="change">Usar otra dirección</button>`);
+    $('again').onclick = () => send({ cmd: 'rediscover' });
+    $('change').onclick = () => send({ cmd: 'changeUrl' });
+    return;
+  }
+}
+
+function renderPlayer() {
+  $('wizard').classList.add('hidden');
+  $('player').classList.remove('hidden');
+  const m = S.music || {};
+  const cur = m.current;
+  if (cur?.thumbnail) { if ($('cover').getAttribute('src') !== cur.thumbnail) $('cover').src = cur.thumbnail; }
+  $('cover').classList.toggle('hidden', !cur?.thumbnail);
+  $('coverPh').classList.toggle('hidden', !!cur?.thumbnail);
+  $('title').textContent = cur ? cur.title : (S.notice || 'Nada sonando');
+  $('artist').textContent = cur?.artist || (cur ? '' : 'Busca algo y agrégalo a la cola');
+  $('by').textContent = cur && (cur.added_by || m.started_by) ? `Puesta por ${cur.added_by || m.started_by}` : '';
+  $('icoToggle').innerHTML = cur && !m.paused ? ICON_PAUSE : ICON_PLAY;
+  for (const id of ['btnToggle', 'btnPrev']) $(id).disabled = !cur;
+  $('btnNext').disabled = !cur && !(m.queue || []).length;
+  $('btnShuffle').classList.toggle('on', !!m.shuffle);
+  $('btnRepeat').classList.toggle('on', m.repeat && m.repeat !== 'off');
+  $('repOne').classList.toggle('hidden', m.repeat !== 'one');
+  if (!volDragging && typeof m.volume === 'number') { $('vol').value = m.volume; $('volTxt').textContent = m.volume + '%'; }
+  // progreso: se interpola entre consultas
+  base = { at: Date.now(), elapsed: m.elapsed || 0, len: cur?.duration || 0, run: !!cur && !m.paused };
+  drawProgress();
+  clearInterval(tick); if (base.run) tick = setInterval(drawProgress, 1000);
+  $('sub').textContent = S.user ? `Música · ${S.user}` : 'Música';
+  renderQueue();
+}
+
+function drawProgress() {
+  const el = base.run ? base.elapsed + (Date.now() - base.at) / 1000 : base.elapsed;
+  const len = base.len || 0;
+  $('tNow').textContent = fmt(Math.min(el, len || el));
+  // sin duracion = transmision en vivo
+  $('tLen').textContent = len ? fmt(len) : (base.run || base.elapsed ? 'EN VIVO' : '0:00');
+  $('bar').style.width = len ? Math.min(100, el / len * 100) + '%' : (base.run || base.elapsed ? '100%' : '0');
+}
+
+function trackRow(t, { n, acts }) {
+  return `<div class="row">${n != null ? `<span class="n">${n}</span>` : ''}
+    <img src="${esc(t.thumbnail)}" alt="" loading="lazy"><div class="info"><div class="t" title="${esc(t.title)}">${esc(t.title)}</div>
+    <div class="s">${esc(t.artist)}${t.duration ? ' · ' + fmt(t.duration) : ''}${t.added_by ? ' · ' + esc(t.added_by) : ''}</div></div>
+    <div class="acts">${acts}</div></div>`;
+}
+
+function renderQueue() {
+  const q = (S.music && S.music.queue) || [];
+  $('qCount').textContent = q.length;
+  if (!q.length) { $('pane-queue').innerHTML = '<div class="empty">La cola está vacía.<br>Usa <b>Buscar</b> para agregar canciones.</div>'; return; }
+  $('pane-queue').innerHTML = q.map((t, i) => trackRow(t, { n: i + 1, acts:
+    `<button class="play" data-a="qplay" data-i="${i}" title="Reproducir ahora">${ICO.play}</button>` +
+    (i > 0 ? `<button data-a="qtop" data-i="${i}" title="Que suene después">${ICO.top}</button>` : '') +
+    `<button data-a="qdel" data-i="${i}" title="Quitar de la cola">${ICO.x}</button>` })).join('');
+}
+
+function renderResults(list) {
+  if (!list.length) { $('results').innerHTML = '<div class="empty">Sin resultados.</div>'; return; }
+  window._results = list;
+  $('results').innerHTML = list.map((t, i) => trackRow(t, { acts:
+    `<button data-a="add" data-i="${i}" title="Agregar a la cola">${ICO.plus}</button>` +
+    `<button class="play" data-a="now" data-i="${i}" title="Reproducir ahora">${ICO.play}</button>` })).join('');
+  $('results').querySelectorAll('.acts').forEach(a => a.classList.add('always'));
+}
+
+function renderLists(items) {
+  listsLoaded = true;
+  if (!items.length) { $('pane-lists').innerHTML = '<div class="empty">No hay listas guardadas en LabNAS.</div>'; return; }
+  $('pane-lists').innerHTML = items.map(pl => `<div class="row"><div class="info"><div class="t">${esc(pl.name)}</div>
+    <div class="s">${pl.tracks?.length || 0} canciones · de ${esc(pl.created_by)}</div></div>
+    <div class="acts always"><button class="play" data-a="load" data-id="${esc(pl.id)}" title="Agregar a la cola">${ICO.plus}</button></div></div>`).join('');
+}
+
+function render() {
+  if (S.phase === 'listo') renderPlayer(); else renderWizard();
+}
+
+// ─── Mensajes desde el programa ───
+window.labnas = {
+  update(st) { S = st; render(); },
+  event(ev) {
+    if (ev.type === 'search') { if (ev.error) { $('results').innerHTML = `<div class="empty err">${esc(ev.error)}</div>`; } else renderResults(ev.results || []); }
+    else if (ev.type === 'playlists') renderLists(ev.items || []);
+    else if (ev.type === 'toast') toast(ev.text, ev.bad);
+    else if (ev.type === 'shown') { if (tab === 'search') setTimeout(() => $('q').focus(), 30); }
+  },
+};
+
+// ─── Acciones ───
+$('btnClose').onclick = () => send({ cmd: 'hide' });
+$('btnWeb').onclick = () => send({ cmd: 'openWeb' });
+$('btnMenu').onclick = () => {
+  if (S.phase !== 'listo') return;
+  const who = S.user ? `vinculado como ${S.user}` : 'vinculado';
+  wizard(`<h2>Cuenta y conexión</h2><p>LabNAS: <code>${esc(S.base)}</code><br>Este computador está ${esc(who)}.</p>
+    <button class="btn ghost" id="back">Volver al reproductor</button>
+    <button class="btn ghost" id="change">Usar otra dirección</button>
+    <button class="btn ghost" id="unlink" style="color:var(--bad)">Desvincular este computador</button>`);
+  $('back').onclick = render;
+  $('change').onclick = () => send({ cmd: 'changeUrl' });
+  $('unlink').onclick = () => send({ cmd: 'unlink' });
+};
+$('btnToggle').onclick = () => send({ cmd: 'toggle' });
+$('btnPrev').onclick = () => send({ cmd: 'previous' });
+$('btnNext').onclick = () => send({ cmd: 'next' });
+$('btnShuffle').onclick = () => send({ cmd: 'shuffle' });
+$('btnRepeat').onclick = () => send({ cmd: 'repeat' });
+$('vol').oninput = () => { volDragging = true; $('volTxt').textContent = $('vol').value + '%'; };
+$('vol').onchange = () => { volDragging = false; send({ cmd: 'volume', value: Number($('vol').value) }); };
+
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  tab = b.dataset.tab;
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+  for (const t of ['queue', 'search', 'lists']) $('pane-' + t).classList.toggle('hidden', t !== tab);
+  if (tab === 'search') setTimeout(() => $('q').focus(), 30);
+  if (tab === 'lists') send({ cmd: 'playlists' });
+});
+
+$('searchForm').onsubmit = (e) => {
+  e.preventDefault();
+  const q = $('q').value.trim(); if (!q) return;
+  $('results').innerHTML = '<div class="spinner"></div>';
+  send({ cmd: 'search', q });
+};
+
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-a]'); if (!b) return;
+  const i = Number(b.dataset.i), a = b.dataset.a;
+  if (a === 'add' || a === 'now') {
+    const t = window._results[i];
+    send({ cmd: 'play', id: t.id, now: a === 'now' });
+    toast(a === 'now' ? `Poniendo «${t.title}»…` : `Agregando «${t.title}» a la cola…`);
+    b.disabled = true;
+  }
+  else if (a === 'qplay') send({ cmd: 'queuePlay', index: i });
+  else if (a === 'qtop') send({ cmd: 'queueMove', from: i, to: 0 });
+  else if (a === 'qdel') send({ cmd: 'queueRemove', index: i });
+  else if (a === 'load') { send({ cmd: 'loadPlaylist', id: b.dataset.id }); toast('Agregando la lista a la cola…'); }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') send({ cmd: 'hide' });
+  else if (e.key === ' ' && e.target.tagName !== 'INPUT' && S.phase === 'listo') { e.preventDefault(); send({ cmd: 'toggle' }); }
+});
+document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+send({ cmd: 'ready' });
+</script>
+</body>
+</html>
