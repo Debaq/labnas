@@ -1795,7 +1795,7 @@ dependencies = [
 
 [[package]]
 name = "labnas-backend"
-version = "3.6.0"
+version = "3.6.1"
 dependencies = [
  "async-imap",
  "axum",
