@@ -19,6 +19,8 @@ mod autostart;
 mod config;
 mod http;
 mod link;
+#[macro_use]
+mod logfile;
 
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
@@ -92,7 +94,7 @@ impl Status {
 enum UserEvent {
     Menu(MenuId),
     /// Clic izquierdo en el icono, con su posicion en pantalla (Windows)
-    TrayClick(tray_icon::Rect),
+    TrayClick(Option<tray_icon::Rect>),
     Status(Box<Status>),
     /// Evento para la pagina del widget (resultados de busqueda, listas, avisos)
     Widget(Value),
@@ -116,6 +118,8 @@ enum Cmd {
     QueueMove(usize, usize),
     Playlists,
     LoadPlaylist(String),
+    /// Mix: llena la cola con recomendaciones (como el boton del reproductor web)
+    Mix,
     Link,
     Linked(Result<link::Linked, String>),
     Unlink,
@@ -269,9 +273,10 @@ impl Worker {
         }
     }
 
-    /// Busca el servidor: variable de entorno, configuracion, direccion de la descarga,
-    /// mDNS y labnas.local, en ese orden
-    fn find_server(&mut self) {
+    /// Busca el servidor: variable de entorno, configuracion, direccion de la descarga y,
+    /// con `broad`, mDNS y labnas.local. Vinculado no se busca en la red: un LabNAS
+    /// cualquiera que conteste no debe recibir el token de este computador.
+    fn find_server(&mut self, broad: bool) {
         self.last_discovery = Some(Instant::now());
         let mut known: Vec<String> = Vec::new();
         if let Ok(env) = std::env::var("LABNAS_URL") {
@@ -283,8 +288,11 @@ impl Worker {
             let Some(url) = Url::parse(&c) else { continue };
             match self.try_url(&url) {
                 Ok(()) => return,
-                Err(e) => eprintln!("[labnas-tray] {c}: {e}"),
+                Err(e) => log!("{c}: {e}"),
             }
+        }
+        if !broad {
+            return;
         }
         for c in discover().into_iter().chain(std::iter::once(FALLBACK_URL.to_string())) {
             let Some(url) = Url::parse(&c) else { continue };
@@ -313,15 +321,11 @@ impl Worker {
                 None
             }
             Err(e) => {
-                eprintln!("[labnas-tray] {path}: {e}");
-                self.offline = true;
-                if self.last_discovery.is_none_or(|t| t.elapsed() > REDISCOVER_EVERY) {
-                    let before = self.base.clone();
-                    self.find_server();
-                    if self.base.is_none() {
-                        self.base = before;
-                    }
+                if !self.offline {
+                    log!("{path}: {e}");
                 }
+                // se reintenta la misma direccion en la proxima consulta
+                self.offline = true;
                 None
             }
         }
@@ -333,6 +337,11 @@ impl Worker {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let res = http::request_timeout(&base, method, &path, Some(&token), body.as_deref(), SLOW).map_err(|e| e.to_string());
+            match &res {
+                Ok(r) if r.status == 200 => log!("{method} {path}: 200"),
+                Ok(r) => log!("{method} {path}: {} {}", r.status, shorten(&r.text(), 160)),
+                Err(e) => log!("{method} {path}: {e}"),
+            }
             let _ = tx.send(Cmd::Applied(res));
         });
     }
@@ -385,7 +394,7 @@ impl Worker {
         }
         if self.base.is_none() {
             if self.last_discovery.is_none_or(|t| t.elapsed() > REDISCOVER_EVERY) {
-                self.find_server();
+                self.find_server(false);
             }
             if self.base.is_none() {
                 return;
@@ -427,7 +436,12 @@ impl Worker {
                 let proxy = self.proxy.clone();
                 std::thread::spawn(move || {
                     let path = format!("/api/music/search?q={}", http::pct_encode(&q));
-                    let ev = match http::request_timeout(&base, "GET", &path, Some(&token), None, SLOW) {
+                    let res = http::request_timeout(&base, "GET", &path, Some(&token), None, SLOW);
+                    match &res {
+                        Ok(r) => log!("buscar {q:?}: {}", r.status),
+                        Err(e) => log!("buscar {q:?}: {e}"),
+                    }
+                    let ev = match res {
                         Ok(r) if r.status == 200 => json!({ "type": "search", "q": q, "results": r.json().unwrap_or(json!([])) }),
                         Ok(r) => json!({ "type": "search", "q": q, "error": error_text(&r, "La búsqueda falló") }),
                         Err(e) => json!({ "type": "search", "q": q, "error": format!("La búsqueda falló: {e}") }),
@@ -446,6 +460,10 @@ impl Worker {
                     let items = if r.status == 200 { r.json().unwrap_or(json!([])) } else { json!([]) };
                     self.widget(json!({ "type": "playlists", "items": items }));
                 }
+                return;
+            }
+            Cmd::Mix => {
+                self.slow("POST", "/api/music/recommend".into(), Some("{}".into()));
                 return;
             }
             Cmd::LoadPlaylist(id) => {
@@ -485,7 +503,7 @@ impl Worker {
                         let _ = self.proxy.send_event(UserEvent::ShowWidget);
                     }
                     Err(e) => {
-                        eprintln!("[labnas-tray] vincular: {e}");
+                        log!("vincular: {e}");
                         self.status.error = Some(format!("No se vinculó: {e}"));
                     }
                 }
@@ -505,11 +523,23 @@ impl Worker {
                 self.searching = true;
                 self.publish();
                 let before = (self.base.take(), self.cfg.url.take());
-                self.find_server();
+                self.find_server(true);
                 self.searching = false;
+                let changed = self.base.as_ref().map(Url::base) != before.0.as_ref().map(Url::base);
                 if self.base.is_none() {
-                    self.cfg.url = before.1;
+                    (self.base, self.cfg.url) = before;
+                    config::save(&self.cfg);
                     self.status.error = Some("No lo encontré en la red. Escribe la dirección.".into());
+                } else if changed && self.token().is_some() {
+                    // otro LabNAS: solo se adopta si reconoce este computador
+                    let ok = self.call("GET", "/api/auth/device-tokens/me", None).is_some_and(|r| r.status == 200);
+                    if !ok {
+                        let found = self.base.as_ref().map(Url::base).unwrap_or_default();
+                        (self.base, self.cfg.url) = before;
+                        config::save(&self.cfg);
+                        self.offline = false;
+                        self.status.error = Some(format!("Encontré {found}, pero no reconoce este computador. Usa «Usar otra dirección» para cambiarte a él."));
+                    }
                 }
             }
             Cmd::ChangeUrl => {
@@ -538,7 +568,7 @@ impl Worker {
             Cmd::TrustNewCert => {
                 if let Some((host, _, _)) = self.status.cert_changed.take() {
                     config::remove_pin(&host);
-                    self.find_server();
+                    self.find_server(self.cfg.token.is_none());
                 }
             }
             Cmd::Refresh => {}
@@ -552,7 +582,7 @@ impl Worker {
         self.status.suggest = config::bundled_url();
         self.searching = true;
         self.publish();
-        self.find_server();
+        self.find_server(self.cfg.token.is_none());
         self.searching = false;
         self.refresh();
         self.publish();
@@ -595,6 +625,7 @@ fn ipc_to_cmd(msg: &Value) -> Option<Cmd> {
         "queueMove" => Cmd::QueueMove(int("from")?, int("to")?),
         "playlists" => Cmd::Playlists,
         "loadPlaylist" => Cmd::LoadPlaylist(msg["id"].as_str()?.to_string()),
+        "mix" => Cmd::Mix,
         "link" => Cmd::Link,
         "unlink" => Cmd::Unlink,
         "rediscover" => Cmd::Rediscover,
@@ -614,6 +645,8 @@ struct Widget {
     _context: WebContext,
     /// Cuando se oculto por perder el foco (el clic en el icono que lo causo no debe reabrirlo)
     hidden_at: Option<Instant>,
+    /// Cuando se mostro (en Windows el foco tarda un instante en llegar)
+    shown_at: Option<Instant>,
 }
 
 fn build_widget(target: &EventLoopWindowTarget<UserEvent>, proxy: &EventLoopProxy<UserEvent>) -> Option<Widget> {
@@ -638,7 +671,7 @@ fn build_widget(target: &EventLoopWindowTarget<UserEvent>, proxy: &EventLoopProx
     };
     let window = builder
         .build(target)
-        .map_err(|e| eprintln!("[labnas-tray] no se pudo crear el widget: {e}"))
+        .map_err(|e| log!("no se pudo crear el widget: {e}"))
         .ok()?;
 
     // Datos del webview fuera de la carpeta del .exe (puede no tener permiso de escritura)
@@ -666,8 +699,8 @@ fn build_widget(target: &EventLoopWindowTarget<UserEvent>, proxy: &EventLoopProx
     };
     #[cfg(not(target_os = "linux"))]
     let webview = wb.build(&window);
-    let webview = webview.map_err(|e| eprintln!("[labnas-tray] no se pudo crear el webview: {e}")).ok()?;
-    Some(Widget { window, webview, _context: context, hidden_at: None })
+    let webview = webview.map_err(|e| log!("no se pudo crear el webview: {e}")).ok()?;
+    Some(Widget { window, webview, _context: context, hidden_at: None, shown_at: None })
 }
 
 /// Ubica el widget junto al icono (Windows da su posicion) o arriba a la derecha
@@ -705,9 +738,38 @@ fn place_widget(w: &Window, target: &EventLoopWindowTarget<UserEvent>, rect: Opt
         _ => (mx + mw - ww - margin, my + mh - wh - 56.0 * scale),
     };
     if std::env::var_os("LABNAS_TRAY_DEBUG").is_some() {
-        eprintln!("[labnas-tray] monitor {:?} {:?} escala {scale} -> widget en ({x:.0}, {y:.0})", m.position(), m.size());
+        log!("monitor {:?} {:?} escala {scale} -> widget en ({x:.0}, {y:.0})", m.position(), m.size());
     }
     w.set_outer_position(PhysicalPosition::new(x, y));
+}
+
+/// Windows: oculta el widget si otra ventana paso a ser la activa; mientras se ve, el
+/// bucle despierta cada 200 ms para revisarlo
+#[cfg(windows)]
+fn auto_hide(widget: &mut Option<Widget>, control_flow: &mut ControlFlow) {
+    if *control_flow == ControlFlow::Exit {
+        return;
+    }
+    let Some(w) = widget.as_mut() else { return };
+    if !w.window.is_visible() {
+        return;
+    }
+    let settled = w.shown_at.is_none_or(|t| t.elapsed() > Duration::from_millis(400));
+    if settled && !is_foreground(&w.window) {
+        w.window.set_visible(false);
+        w.hidden_at = Some(Instant::now());
+    } else {
+        *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(200));
+    }
+}
+
+/// El widget (o su webview) es la ventana activa del sistema
+#[cfg(windows)]
+fn is_foreground(w: &Window) -> bool {
+    use tao::platform::windows::WindowExtWindows;
+    // SAFETY: GetForegroundWindow no tiene precondiciones
+    let fg = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+    fg as isize == w.hwnd()
 }
 
 fn panel_on_top() -> bool {
@@ -843,6 +905,11 @@ fn probe(url: &str) -> ! {
 /// Devuelve el listener de la copia principal.
 fn single_instance() -> Option<std::net::TcpListener> {
     use std::io::Write;
+    // pruebas: convivir con la copia instalada
+    #[cfg(debug_assertions)]
+    if std::env::var_os("LABNAS_TRAY_TEST_JS").is_some() {
+        return None;
+    }
     match std::net::TcpListener::bind(("127.0.0.1", SINGLE_INSTANCE_PORT)) {
         Ok(l) => Some(l),
         Err(_) => {
@@ -862,6 +929,8 @@ fn main() {
         probe(args.get(2).map(String::as_str).unwrap_or(""));
     }
     let listener = single_instance();
+    logfile::init();
+    log!("labnas-tray {} iniciado", env!("CARGO_PKG_VERSION"));
     #[cfg(target_os = "linux")]
     prefer_xwayland();
 
@@ -874,7 +943,12 @@ fn main() {
     }));
     let click_proxy = proxy.clone();
     TrayIconEvent::set_event_handler(Some(move |e: TrayIconEvent| {
-        if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, rect, .. } = e {
+        if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, mut rect, position, .. } = e {
+            // Linux (StatusNotifierItem) no da el rectangulo del icono, solo donde se hizo clic
+            if rect.size.width == 0 && (position.x != 0.0 || position.y != 0.0) {
+                rect = tray_icon::Rect { position, size: tray_icon::dpi::PhysicalSize::new(1, 1) };
+            }
+            let rect = (rect.size.width > 0).then_some(rect);
             let _ = click_proxy.send_event(UserEvent::TrayClick(rect));
         }
     }));
@@ -888,12 +962,12 @@ fn main() {
             // clic izquierdo: widget; el menu va con el derecho
             .with_menu_on_left_click(false)
             .build()
-            .map_err(|e| eprintln!("[labnas-tray] no se pudo crear el icono de la bandeja: {e}"))
+            .map_err(|e| log!("no se pudo crear el icono de la bandeja: {e}"))
             .ok(),
         _ => None,
     };
     if tray.is_none() {
-        eprintln!("[labnas-tray] este escritorio no tiene bandeja del sistema (en GNOME instala la extension AppIndicator)");
+        log!("este escritorio no tiene bandeja del sistema (en GNOME instala la extension AppIndicator)");
         std::process::exit(1);
     }
 
@@ -946,10 +1020,14 @@ fn main() {
             w.window.set_visible(true);
             w.window.set_focus();
             w.hidden_at = None;
+            w.shown_at = Some(Instant::now());
             push_status(w, status);
             push_event(w, &json!({ "type": "shown" }));
         };
         match event {
+            // Windows: tao avisa "sin foco" tambien cuando el foco pasa al webview (ventana
+            // hija); ahi se mira la ventana activa del sistema (ver mas abajo)
+            #[cfg(not(windows))]
             Event::WindowEvent { event: WindowEvent::Focused(false), .. } => {
                 if let Some(w) = widget.as_mut()
                     && w.window.is_visible()
@@ -992,6 +1070,11 @@ fn main() {
                         Some("ready") => {
                             if let Some(w) = widget.as_ref() {
                                 push_status(w, &status);
+                                // pruebas: LABNAS_TRAY_TEST_JS=<archivo> se ejecuta en el widget
+                                #[cfg(debug_assertions)]
+                                if let Some(js) = std::env::var_os("LABNAS_TRAY_TEST_JS").and_then(|p| std::fs::read_to_string(p).ok()) {
+                                    let _ = w.webview.evaluate_script(&js);
+                                }
                             }
                         }
                         _ => {
@@ -1013,7 +1096,7 @@ fn main() {
                             w.window.set_visible(false);
                         }
                     } else if !just_hidden {
-                        show(&mut widget, Some(rect), &status);
+                        show(&mut widget, rect, &status);
                     }
                 }
                 UserEvent::ShowWidget => show(&mut widget, None, &status),
@@ -1037,7 +1120,7 @@ fn main() {
                     } else if id == *items.autostart.id() {
                         let want = items.autostart.is_checked();
                         if let Err(e) = autostart::set(want) {
-                            eprintln!("[labnas-tray] iniciar con el sistema: {e}");
+                            log!("iniciar con el sistema: {e}");
                             items.autostart.set_checked(!want);
                         }
                     } else if id == *items.quit.id() {
@@ -1047,6 +1130,9 @@ fn main() {
             },
             _ => {}
         }
+        // Windows: se cierra cuando otra ventana pasa a ser la activa (clic afuera)
+        #[cfg(windows)]
+        auto_hide(&mut widget, control_flow);
     });
 }
 

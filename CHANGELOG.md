@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.6.1] — 2026-11-25
+
+Desde v3.6.0.
+
+### Control de música en la bandeja
+
+- **Windows**: el widget ya no se cierra apenas se abre; se oculta al hacer clic en otra ventana
+- **Linux**: clic izquierdo en el icono abre el widget junto a donde se pinchó (clic derecho: menú). Ya no requiere libappindicator
+- **Botón Mix** en la cola, como en el reproductor web
+- Una bandeja vinculada ya no se cambia sola a otro LabNAS de la red si el suyo no responde (antes podía mandarle su token y perder la vinculación)
+- Registro de lo que hace en `labnas-tray.log` (Linux: `~/.local/share/labnas-tray/`, Windows: `%LOCALAPPDATA%\labnas-tray\`) para diagnosticar problemas
+
 ## [3.6.0] — 2026-11-25
 
 Desde v3.5.1.

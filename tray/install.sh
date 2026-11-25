@@ -1,10 +1,10 @@
 #!/bin/bash
 # Instala labnas-tray (control de musica de LabNAS en la bandeja) para el usuario actual.
-# Requiere: gtk3, webkit2gtk-4.1 y libayatana-appindicator
-#   Arch:          pacman -S webkit2gtk-4.1 libayatana-appindicator
-#   Debian/Ubuntu: apt install libwebkit2gtk-4.1-0 libayatana-appindicator3-1
-# En GNOME hace falta la extension "AppIndicator and KStatusNotifierItem Support" para
-# ver el icono.
+# Requiere: gtk3 y webkit2gtk-4.1
+#   Arch:          pacman -S webkit2gtk-4.1
+#   Debian/Ubuntu: apt install libwebkit2gtk-4.1-0
+# El icono usa StatusNotifierItem (KDE, XFCE, Cinnamon... lo traen). En GNOME hace
+# falta la extension "AppIndicator and KStatusNotifierItem Support".
 set -e
 
 cd "$(dirname "$0")"

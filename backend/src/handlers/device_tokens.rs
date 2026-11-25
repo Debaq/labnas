@@ -45,6 +45,7 @@ const DEVICE_SCOPE: &[(&str, &str)] = &[
     ("POST", "/api/music/repeat"),
     ("GET", "/api/music/search"),
     ("POST", "/api/music/play"),
+    ("POST", "/api/music/recommend"),
     ("POST", "/api/music/queue/play/*"),
     ("POST", "/api/music/queue/move"),
     ("DELETE", "/api/music/queue"),

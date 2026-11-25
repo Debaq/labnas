@@ -6,7 +6,7 @@ use super::*;
 /// Usa múltiples seeds y limita tracks por artista para diversificar
 pub async fn recommend(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
 ) -> Result<Json<MusicState>, (StatusCode, String)> {
     let ms = state.music.lock().await;
 
@@ -35,10 +35,8 @@ pub async fn recommend(
     for h in &ms.history { existing.insert(h.id.clone()); }
     drop(ms);
 
-    let username = {
-        let sessions = state.sessions.lock().await;
-        extract_username(&sessions, &headers)
-    };
+    // de la sesion del middleware: vale tambien con token de dispositivo (labnas-tray)
+    let username = session.username.clone();
 
     // Recoger titulos/artistas de las seeds para fallback de busqueda
     let seed_info: Vec<(String, String)> = {

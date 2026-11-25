@@ -316,9 +316,9 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Instalar deps GTK y AppIndicator
+      - name: Instalar deps GTK y WebKitGTK
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libayatana-appindicator3-dev libwebkit2gtk-4.1-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev pkg-config
 
       - name: Cache Rust
         uses: actions/cache@v6

@@ -84,6 +84,13 @@
   .row .acts button:hover { background: var(--card2); color: var(--text); }
   .row .acts button.play { color: var(--accent); }
   .row .acts svg { width: 16px; height: 16px; }
+  .qbar { display: flex; align-items: center; gap: 8px; padding: 2px 4px 8px; }
+  .qbar .hint { flex: 1; color: var(--muted); font-size: 11px; }
+  .pill { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; font-weight: 650; font-size: 12px;
+    background: linear-gradient(135deg, rgba(189,147,249,.18), rgba(255,121,198,.18)); border: 1px solid rgba(189,147,249,.45); color: var(--text); }
+  .pill:hover:not(:disabled) { border-color: var(--accent); }
+  .pill svg { width: 15px; height: 15px; color: var(--accent); }
+  .pill .mini { width: 13px; height: 13px; border-width: 2px; margin: 0; }
   .empty { color: var(--muted); text-align: center; padding: 26px 12px; font-size: 12px; }
   .spinner { width: 26px; height: 26px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%;
     animation: spin 1s linear infinite; margin: 18px auto; }
@@ -184,7 +191,9 @@ const ICO = {
   x: '<svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>',
   up: '<svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
   top: '<svg viewBox="0 0 24 24"><path d="M5 3h14M12 21V8M6 14l6-6 6 6"/></svg>',
+  sparkles: '<svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>',
 };
+let mixing = false;
 
 let S = {};              // ultimo estado del programa
 let tab = 'queue';
@@ -300,9 +309,13 @@ function trackRow(t, { n, acts }) {
 
 function renderQueue() {
   const q = (S.music && S.music.queue) || [];
+  const hasSeed = !!(S.music && (S.music.current || (S.music.history || []).length));
   $('qCount').textContent = q.length;
-  if (!q.length) { $('pane-queue').innerHTML = '<div class="empty">La cola está vacía.<br>Usa <b>Buscar</b> para agregar canciones.</div>'; return; }
-  $('pane-queue').innerHTML = q.map((t, i) => trackRow(t, { n: i + 1, acts:
+  const bar = `<div class="qbar"><span class="hint">${q.length ? `${q.length} en cola` : 'Cola vacía'}</span>
+    <button class="pill" id="mix" ${mixing || !hasSeed ? 'disabled' : ''} title="${hasSeed ? 'Agrega a la cola canciones parecidas a lo que ha sonado' : 'Reproduce algo primero'}">
+    ${mixing ? '<div class="spinner mini"></div>' : ICO.sparkles}Mix</button></div>`;
+  if (!q.length) { $('pane-queue').innerHTML = bar + '<div class="empty">Usa <b>Buscar</b> para agregar canciones' + (hasSeed ? ' o pide un <b>Mix</b>.' : '.') + '</div>'; return; }
+  $('pane-queue').innerHTML = bar + q.map((t, i) => trackRow(t, { n: i + 1, acts:
     `<button class="play" data-a="qplay" data-i="${i}" title="Reproducir ahora">${ICO.play}</button>` +
     (i > 0 ? `<button data-a="qtop" data-i="${i}" title="Que suene después">${ICO.top}</button>` : '') +
     `<button data-a="qdel" data-i="${i}" title="Quitar de la cola">${ICO.x}</button>` })).join('');
@@ -331,11 +344,11 @@ function render() {
 
 // ─── Mensajes desde el programa ───
 window.labnas = {
-  update(st) { S = st; render(); },
+  update(st) { const before = JSON.stringify((S.music || {}).queue || []); S = st; if (mixing && JSON.stringify((S.music || {}).queue || []) !== before) mixing = false; render(); },
   event(ev) {
     if (ev.type === 'search') { if (ev.error) { $('results').innerHTML = `<div class="empty err">${esc(ev.error)}</div>`; } else renderResults(ev.results || []); }
     else if (ev.type === 'playlists') renderLists(ev.items || []);
-    else if (ev.type === 'toast') toast(ev.text, ev.bad);
+    else if (ev.type === 'toast') { if (ev.bad && mixing) { mixing = false; renderQueue(); } toast(ev.text, ev.bad); }
     else if (ev.type === 'shown') { if (tab === 'search') setTimeout(() => $('q').focus(), 30); }
   },
 };
@@ -390,6 +403,13 @@ document.addEventListener('click', (e) => {
   else if (a === 'qtop') send({ cmd: 'queueMove', from: i, to: 0 });
   else if (a === 'qdel') send({ cmd: 'queueRemove', index: i });
   else if (a === 'load') { send({ cmd: 'loadPlaylist', id: b.dataset.id }); toast('Agregando la lista a la cola…'); }
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#mix')) return;
+  mixing = true; renderQueue();
+  setTimeout(() => { if (mixing) { mixing = false; renderQueue(); } }, 100000);
+  toast('Armando un mix… puede tardar un poco');
+  send({ cmd: 'mix' });
 });
 
 document.addEventListener('keydown', (e) => {
