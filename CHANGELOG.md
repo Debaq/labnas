@@ -1,5 +1,37 @@
 # Changelog
 
+## [3.5.0] — 2026-11-24
+
+Desde v3.4.3.
+
+### Control de música en la bandeja del sistema (nuevo: `labnas-tray`)
+
+- App liviana para los **computadores de quienes usan el laboratorio**, en **Windows y Linux**: un icono en la bandeja muestra qué suena y permite pausar/reanudar, pasar, retroceder y cambiar el volumen (en Windows, clic izquierdo = pausar)
+- Encuentra el LabNAS sola por mDNS y se vincula desde el navegador con «Vincular con mi cuenta» (sirve con 2FA y passkeys)
+- Usa un **token de dispositivo** que no vence pero **solo puede controlar el reproductor**: no da acceso a archivos ni a nada más. Cada persona ve y quita sus computadores en Configuración › General › Dispositivos vinculados
+- HTTPS con la huella del certificado fijada al primer uso, como el visor; «Iniciar con el sistema» desde el mismo menú
+- Descargas: `labnas-tray-v3.5.0-windows-x86_64.zip` y `labnas-tray-v3.5.0-linux-{x86_64,aarch64}.tar.gz` (en GNOME hace falta la extensión AppIndicator)
+
+### Impresoras 3D
+
+- **Detección de impresión fallida con Obico**: nueva regla en Cámaras › Detección que analiza la cámara de una impresora solo mientras imprime; avisa y puede pausarla (pausar exige una falla más clara que avisar). La regla muestra el nivel de falla en vivo. Requiere `setup-obico.sh`
+- **Foto de la pieza por Telegram** al terminar una impresión (si la impresora tiene cámara): llega a administradores, operadores y a quien la encargó
+
+### Música
+
+- El nombre del artista en el reproductor se puede pinchar: busca sus canciones
+
+### Mejoras
+
+- La foto de las detecciones por Telegram llega siempre a todas las personas autorizadas a verla
+- Visor de escritorio: ahora va por **HTTPS**, fijando la huella del certificado la primera vez (`labnas-viewer --olvidar <host>` la borra)
+- El bot de Telegram y las tareas de fondo ya no bloquean el servidor al usar la base de datos
+- Ajustes, Tareas e Impresoras 3D reorganizados por dentro (sin cambios visibles)
+
+### Seguridad
+
+- Visor: `cookie` 0.18.3 (RUSTSEC-2026-0594); dependencias actualizadas (mdns-sd, dav-server, ESLint 10)
+
 ## [3.4.3] — 2026-11-23
 
 Desde v3.4.1. La v3.4.2 no alcanzó a compilarse para x86_64 ni aarch64; esta versión trae lo mismo.
