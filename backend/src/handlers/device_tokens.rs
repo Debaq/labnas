@@ -21,9 +21,8 @@ use sha2::{Digest, Sha256};
 
 use crate::db::db_op;
 use crate::error::ApiError;
-use crate::handlers::auth::role_from_str;
-use crate::models::notifications::{UserPermissions, UserRole};
-use crate::state::{now_unix, AppState, SessionInfo};
+use crate::models::notifications::UserRole;
+use crate::state::{AppState, SessionInfo};
 
 /// Prefijo que distingue un token de dispositivo de un token de sesion
 pub const PREFIX: &str = "lnd_";
@@ -112,23 +111,16 @@ pub async fn session_for(state: &AppState, token: &str) -> Option<SessionInfo> {
     let now_s = now.to_rfc3339();
     db_op(&state.db, move |conn| {
         let row = conn.query_row(
-            "SELECT u.username, u.role, u.perm_terminal, u.perm_impresion, u.perm_archivos_escritura
-             FROM device_tokens t JOIN web_users u ON u.username = t.username WHERE t.token_hash = ?1",
+            "SELECT t.username FROM device_tokens t WHERE t.token_hash = ?1",
             params![hash],
-            |r| {
-                Ok(SessionInfo {
-                    username: r.get(0)?,
-                    role: role_from_str(&r.get::<_, String>(1)?),
-                    permissions: UserPermissions {
-                        terminal: r.get(2)?,
-                        impresion: r.get(3)?,
-                        archivos_escritura: r.get(4)?,
-                    },
-                    created_at: now_unix(),
-                })
-            },
+            |r| r.get::<_, String>(0),
         );
-        let Ok(session) = row else { return Ok(None) };
+        let Ok(username) = row else { return Ok(None) };
+        let Some((role, grants, expires)) = crate::roles::load_user(conn, &username) else { return Ok(None) };
+        let session = SessionInfo::new(username, UserRole(role), grants, expires);
+        if session.is_expired() {
+            return Ok(None);
+        }
         let _ = conn.execute(
             "UPDATE device_tokens SET last_used = ?1 WHERE token_hash = ?2 AND (last_used IS NULL OR last_used < ?3)",
             params![now_s, hash, stale],
@@ -174,7 +166,7 @@ pub async fn create(
     Extension(session): Extension<SessionInfo>,
     Json(req): Json<CreateRequest>,
 ) -> Result<Json<Created>, ApiError> {
-    if session.role == UserRole::Pendiente {
+    if session.role.is_pending() {
         return Err((StatusCode::FORBIDDEN, "Tu cuenta esta pendiente de aprobacion".into()));
     }
     let name = clean_name(&req.name);
@@ -225,7 +217,7 @@ pub async fn list(
 /// GET /api/auth/device-tokens/me: a nombre de quien esta el token (para la app)
 pub async fn me(Extension(session): Extension<SessionInfo>) -> Json<serde_json::Value> {
     // `admin`: la bandeja ofrece los avisos de administracion solo a quien los recibe
-    Json(serde_json::json!({ "username": session.username, "admin": session.role == UserRole::Admin }))
+    Json(serde_json::json!({ "username": session.username, "admin": session.role.is_admin() }))
 }
 
 /// DELETE /api/auth/device-tokens/me: la app se desvincula con su propio token

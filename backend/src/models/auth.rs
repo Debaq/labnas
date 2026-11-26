@@ -35,7 +35,6 @@ pub struct AuthResponse {
     pub token: String,
     pub username: String,
     pub role: UserRole,
-    pub permissions: UserPermissions,
     pub enabled_modules: Vec<ModuleInfo>,
 }
 
@@ -43,7 +42,13 @@ pub struct AuthResponse {
 pub struct MeResponse {
     pub username: String,
     pub role: UserRole,
-    pub permissions: UserPermissions,
+    /// Nombre visible del rol
+    pub role_name: String,
+    pub admin: bool,
+    /// Nivel en cada modulo (con las excepciones de la persona)
+    pub levels: std::collections::BTreeMap<String, crate::roles::Level>,
+    /// Fecha de termino de la cuenta (unix)
+    pub expires_at: Option<i64>,
     pub linked_telegram: Option<i64>,
     pub enabled_modules: Vec<ModuleInfo>,
     /// Doble factor activo
@@ -53,8 +58,23 @@ pub struct MeResponse {
 #[derive(Debug, Deserialize)]
 pub struct SetWebUserRoleRequest {
     pub role: UserRole,
+    /// Fecha de termino (unix); None = sin vencimiento
     #[serde(default)]
-    pub permissions: Option<UserPermissions>,
+    pub expires_at: Option<i64>,
+    /// Excepciones de la persona: reemplazan las que tenia
+    #[serde(default)]
+    pub overrides: std::collections::BTreeMap<String, crate::roles::Level>,
+}
+
+/// Fila de la lista de usuarios (admin)
+#[derive(Debug, Serialize)]
+pub struct UserRow {
+    pub username: String,
+    pub role: UserRole,
+    pub linked_telegram: Option<i64>,
+    pub totp_enabled: bool,
+    pub expires_at: Option<i64>,
+    pub overrides: std::collections::BTreeMap<String, crate::roles::Level>,
 }
 
 #[derive(Debug, Deserialize)]

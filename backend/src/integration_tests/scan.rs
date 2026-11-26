@@ -20,7 +20,7 @@ async fn escaneo_desde_la_web() {
     let admin = s.admin().await;
     let op = s.user(&admin, "op", "operador").await;
     let obs = s.user(&admin, "obs", "observador").await;
-    let no_print = json!({ "role": "observador", "permissions": { "terminal": false, "impresion": false, "archivos_escritura": false } });
+    let no_print = json!({ "role": "observador", "overrides": { "printing": "ver" } });
     s.post("/api/auth/users/obs/role", &admin, no_print).await;
 
     // Sin permiso de impresion no se escanea ni se listan escaneres

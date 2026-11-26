@@ -16,8 +16,8 @@ import DeadlineFormModal from '../components/deadlines/DeadlineFormModal'
 type Filter = 'todos' | 'urgentes' | string
 
 export default function DeadlinesPage() {
-  const { user } = useAuth()
-  const staff = user?.role === 'admin' || user?.role === 'operador'
+  const { user, canModule } = useAuth()
+  const staff = canModule('deadlines', 'gestionar')
   const { addToast } = useToast()
   const [list, setList] = useState<Deadline[]>([])
   const [done, setDone] = useState<Deadline[]>([])

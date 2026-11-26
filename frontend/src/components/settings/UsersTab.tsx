@@ -1,22 +1,113 @@
 import { useEffect, useState } from 'react'
-import { Users, MessageCircle, X, Trash2, Link2, UserCheck } from 'lucide-react'
+import { Users, MessageCircle, X, Trash2, Link2, UserCheck, SlidersHorizontal, Save } from 'lucide-react'
 import { useAuth } from '../../auth/AuthContext'
-import { fetchWebUsers, fetchNotificationConfig, resetUserTwoFactor, deleteWebUser, setWebUserRole, adminLinkChat, deleteTelegramChat, setChatRole } from '../../api'
-import type { NotificationConfig, UserRole, UserPermissions } from '../../types'
+import { fetchWebUsers, fetchNotificationConfig, resetUserTwoFactor, deleteWebUser, setWebUserRole, adminLinkChat, deleteTelegramChat, setChatRole, fetchRoles } from '../../api'
+import type { WebUserRow } from '../../api/auth'
+import type { ModuleLevel, NotificationConfig, RoleInfo } from '../../types'
 import { errorMessage } from '../../lib/errors'
+import RolesSection from './RolesSection'
+import { LEVELS, MODULE_LABELS } from '../../lib/roles'
+
+const inputStyle = { backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }
+
+function roleColor(role: string): string {
+  if (role === 'admin') return 'var(--accent)'
+  if (role === 'pendiente') return 'var(--warning)'
+  return 'var(--success)'
+}
+
+/** unix -> 'aaaa-mm-dd' (input date) y vuelta (fin del dia local) */
+function toDateInput(ts: number | null): string {
+  if (!ts) return ''
+  const d = new Date(ts * 1000)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+function fromDateInput(v: string): number | null {
+  if (!v) return null
+  const [y, m, d] = v.split('-').map(Number)
+  return Math.floor(new Date(y, m - 1, d, 23, 59, 59).getTime() / 1000)
+}
+
+/** Vencimiento y excepciones por modulo de una persona */
+function AccessEditor({ u, role, modules, onSaved }: { u: WebUserRow; role?: RoleInfo; modules: string[]; onSaved: () => void }) {
+  const [expires, setExpires] = useState(toDateInput(u.expires_at))
+  const [overrides, setOverrides] = useState<Record<string, ModuleLevel>>(u.overrides)
+  const [busy, setBusy] = useState(false)
+  const dirty = expires !== toDateInput(u.expires_at) || JSON.stringify(overrides) !== JSON.stringify(u.overrides)
+
+  return (
+    <div className="rounded-lg p-3 space-y-3" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+      <label className="flex items-center gap-2 text-xs flex-wrap" style={{ color: 'var(--text-secondary)' }}>
+        Fecha de termino de la cuenta
+        <input type="date" value={expires} onChange={e => setExpires(e.target.value)} className="px-2 py-1 rounded-lg text-xs outline-none" style={inputStyle} />
+        {expires && <button type="button" onClick={() => setExpires('')} className="underline">sin fecha</button>}
+        <span>(despues de ese dia no puede entrar)</span>
+      </label>
+      <div>
+        <div className="text-xs mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+          Excepciones a su rol{role ? ` (${role.name})` : ''}: solo para esta persona
+        </div>
+        <div className="grid gap-x-6 gap-y-1.5 md:grid-cols-2">
+          {modules.map(m => {
+            const own = overrides[m]
+            const base = role?.levels[m] ?? 'ninguno'
+            const baseLabel = LEVELS.find(l => l.id === base)?.label ?? base
+            return (
+              <div key={m} className="flex items-center justify-between gap-2">
+                <span className="text-xs" style={{ color: own ? 'var(--warning)' : 'var(--text-primary)' }}>{MODULE_LABELS[m] ?? m}</span>
+                <select value={own ?? ''} onChange={e => {
+                  const next = { ...overrides }
+                  if (e.target.value) next[m] = e.target.value as ModuleLevel
+                  else delete next[m]
+                  setOverrides(next)
+                }} className="px-2 py-1 rounded-lg text-[11px] outline-none cursor-pointer" style={inputStyle}>
+                  <option value="">Como su rol ({baseLabel})</option>
+                  {LEVELS.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}
+                </select>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+      <button type="button" disabled={!dirty || busy} onClick={async () => {
+        setBusy(true)
+        try {
+          await setWebUserRole(u.username, u.role, { expires_at: fromDateInput(expires), overrides })
+          onSaved()
+        } catch (e) { alert(errorMessage(e)) } finally { setBusy(false) }
+      }} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40" style={{ backgroundColor: 'var(--accent)', color: 'white' }}>
+        <Save size={12} /> Guardar
+      </button>
+    </div>
+  )
+}
 
 export default function UsersTab() {
   const { user: authUser } = useAuth()
-  const [webUsers, setWebUsers] = useState<{ username: string; role: UserRole; permissions: UserPermissions; totp_enabled?: boolean }[]>([])
+  const [webUsers, setWebUsers] = useState<WebUserRow[]>([])
   const [notifConfig, setNotifConfig] = useState<NotificationConfig | null>(null)
+  const [roles, setRoles] = useState<RoleInfo[]>([])
+  const [modules, setModules] = useState<string[]>([])
+  const [editing, setEditing] = useState<string | null>(null)
+
+  async function loadRoles() {
+    const r = await fetchRoles().catch(() => null)
+    if (r) { setRoles(r.roles); setModules(r.modules) }
+  }
 
   useEffect(() => {
     fetchWebUsers().then(setWebUsers).catch(() => {})
     fetchNotificationConfig().then(setNotifConfig).catch(() => {})
+    fetchRoles().then(r => { setRoles(r.roles); setModules(r.modules) }).catch(() => {})
   }, [])
+
+  const roleName = (id: string) => id === 'pendiente' ? 'Pendiente' : roles.find(r => r.id === id)?.name ?? id
+  const [now] = useState(() => Date.now() / 1000)
 
   return (
     <>
+      <RolesSection onChanged={loadRoles} />
+
       {/* Usuarios y Telegram (admin only) */}
       <section>
         <div className="flex items-center gap-3 mb-4">
@@ -31,22 +122,34 @@ export default function UsersTab() {
 
         <div className="space-y-2">
           {webUsers.map((u) => {
-            const roleColor = u.role === 'admin' ? 'var(--accent)' : u.role === 'operador' ? 'var(--success)' : u.role === 'observador' ? 'var(--text-secondary)' : 'var(--warning)'
+            const color = roleColor(u.role)
+            const expired = u.expires_at !== null && u.expires_at <= now
             const linkedChat = notifConfig?.telegram_chats.find(c => c.linked_web_user === u.username)
             return (
               <div key={u.username} className="rounded-xl p-4 space-y-3" style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
                 {/* User header */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold" style={{ backgroundColor: roleColor + '20', color: roleColor }}>
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold" style={{ backgroundColor: color + '20', color }}>
                       {u.username[0].toUpperCase()}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{u.username}</span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: roleColor + '20', color: roleColor }}>
-                          {u.role === 'admin' ? 'Admin' : u.role === 'operador' ? 'Operador' : u.role === 'observador' ? 'Observador' : 'Pendiente'}
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: color + '20', color }}>
+                          {roleName(u.role)}
                         </span>
+                        {u.expires_at !== null && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: (expired ? 'var(--danger)' : 'var(--warning)') + '20', color: expired ? 'var(--danger)' : 'var(--warning)' }}>
+                            {expired ? 'Vencida' : `Vence ${new Date(u.expires_at * 1000).toLocaleDateString()}`}
+                          </span>
+                        )}
+                        {Object.keys(u.overrides).length > 0 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: 'var(--warning)' + '20', color: 'var(--warning)' }}
+                            title={Object.entries(u.overrides).map(([m, l]) => `${MODULE_LABELS[m] ?? m}: ${l}`).join(', ')}>
+                            {Object.keys(u.overrides).length} {Object.keys(u.overrides).length === 1 ? 'excepcion' : 'excepciones'}
+                          </span>
+                        )}
                         {u.totp_enabled && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium flex items-center gap-1" style={{ backgroundColor: 'var(--success)' + '20', color: 'var(--success)' }}>
                             2FA
@@ -86,27 +189,23 @@ export default function UsersTab() {
                     <select value={u.role} onChange={async (e) => {
                       const role = e.target.value
                       if (role === 'admin' && !confirm(`¿Dar rol de administrador a ${u.username}? Tendrá control total del NAS (usuarios, respaldos, terminal, configuración).`)) return
-                      try { await setWebUserRole(u.username, role, u.permissions); setWebUsers(await fetchWebUsers()) }
-                      catch (err) { alert(err instanceof Error ? err.message : String(err)) }
-                    }} className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer"
-                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}>
+                      // El admin no vence; un rol con vencimiento sugerido (auditor) lo propone si no tenia fecha
+                      const days = roles.find(r => r.id === role)?.expiry_days
+                      const expires_at = role === 'admin' ? null : u.expires_at ?? (days ? Math.floor(now) + days * 86400 : null)
+                      try { await setWebUserRole(u.username, role, { expires_at, overrides: u.overrides }); setWebUsers(await fetchWebUsers()); loadRoles() }
+                      catch (err) { alert(errorMessage(err)) }
+                    }} className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer" style={inputStyle}>
                       <option value="pendiente">Pendiente</option>
-                      <option value="observador">Observador</option>
-                      <option value="operador">Operador</option>
-                      <option value="admin">Admin</option>
+                      {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      {!roles.some(r => r.id === u.role) && u.role !== 'pendiente' && <option value={u.role}>{u.role}</option>}
                     </select>
 
-                    {u.role === 'operador' && (
-                      <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                        {(['terminal', 'impresion', 'archivos_escritura'] as const).map((perm) => (
-                          <label key={perm} className="flex items-center gap-1 cursor-pointer">
-                            <input type="checkbox" checked={u.permissions[perm]} onChange={async (e) => {
-                              try { await setWebUserRole(u.username, u.role, { ...u.permissions, [perm]: e.target.checked }); setWebUsers(await fetchWebUsers()) } catch {}
-                            }} />
-                            {perm === 'terminal' ? 'Terminal' : perm === 'impresion' ? 'Impresion' : 'Archivos'}
-                          </label>
-                        ))}
-                      </div>
+                    {u.role !== 'admin' && u.role !== 'pendiente' && (
+                      <button type="button" onClick={() => setEditing(editing === u.username ? null : u.username)}
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs"
+                        style={{ color: editing === u.username ? 'var(--accent)' : 'var(--text-secondary)', border: '1px solid var(--input-border)' }}>
+                        <SlidersHorizontal size={12} /> Vencimiento y excepciones
+                      </button>
                     )}
 
                     {/* Telegram link selector */}
@@ -129,13 +228,18 @@ export default function UsersTab() {
                     )}
                   </div>
                 )}
+                {editing === u.username && u.role !== 'admin' && u.role !== 'pendiente' && (
+                  <AccessEditor key={`${u.username}-${u.role}-${u.expires_at}-${JSON.stringify(u.overrides)}`} u={u}
+                    role={roles.find(r => r.id === u.role)} modules={modules}
+                    onSaved={async () => { setWebUsers(await fetchWebUsers()); setEditing(null) }} />
+                )}
               </div>
             )
           })}
 
           {/* Telegram chats sin vincular */}
           {notifConfig?.telegram_chats.filter(c => !c.linked_web_user).map(c => {
-            const roleColor = c.role === 'admin' ? 'var(--accent)' : c.role === 'operador' ? 'var(--success)' : c.role === 'observador' ? 'var(--text-secondary)' : 'var(--warning)'
+            const color = roleColor(c.role)
             return (
               <div key={c.chat_id} className="rounded-xl p-4 space-y-2" style={{ backgroundColor: 'var(--card-bg)', border: '1px dashed var(--border)' }}>
                 <div className="flex items-center justify-between">
@@ -147,8 +251,8 @@ export default function UsersTab() {
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{c.name}</span>
                         {c.username && <span className="text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>@{c.username}</span>}
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: roleColor + '20', color: roleColor }}>
-                          {c.role === 'admin' ? 'Admin' : c.role === 'operador' ? 'Operador' : c.role === 'observador' ? 'Observador' : 'Pendiente'}
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: color + '20', color }}>
+                          {roleName(c.role)}
                         </span>
                         <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--warning)' + '20', color: 'var(--warning)' }}>
                           Solo Telegram
@@ -173,12 +277,10 @@ export default function UsersTab() {
                       </button>
                     )}
                     <select value={c.role} onChange={async (e) => {
-                      try { await setChatRole(c.chat_id, e.target.value); setNotifConfig(await fetchNotificationConfig()) } catch {}
-                    }} className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer"
-                      style={{ backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }}>
+                      try { await setChatRole(c.chat_id, e.target.value); setNotifConfig(await fetchNotificationConfig()) } catch (err) { alert(errorMessage(err)) }
+                    }} className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer" style={inputStyle}>
                       <option value="pendiente">Pendiente</option>
-                      <option value="observador">Observador</option>
-                      <option value="operador">Operador</option>
+                      {roles.filter(r => !r.locked).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
                     <select value="" onChange={async (e) => {
                       if (!e.target.value) return

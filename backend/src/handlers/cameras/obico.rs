@@ -26,7 +26,6 @@ use serde::{Deserialize, Serialize};
 use super::vision::Detection;
 use super::{bad, ApiError};
 use crate::db::db_op;
-use crate::models::notifications::UserRole;
 use crate::state::{AppState, SessionInfo};
 
 const URL_SETTING: &str = "obico_url";
@@ -91,7 +90,7 @@ async fn status(state: &AppState) -> ObicoStatus {
 }
 
 fn require_admin(s: &SessionInfo) -> Result<(), ApiError> {
-    if s.role == UserRole::Admin {
+    if s.role.is_admin() {
         Ok(())
     } else {
         Err((StatusCode::FORBIDDEN, "Solo el administrador".into()))

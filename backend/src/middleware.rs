@@ -5,7 +5,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use crate::models::notifications::UserRole;
 use crate::state::{AppState, SessionInfo};
 
 /// Mapeo modulo -> prefijos de ruta API
@@ -98,16 +97,16 @@ pub fn bridge_denied(method: &Method, path: &str) -> Option<&'static str> {
     None
 }
 
-/// Lo que exige una ruta
+/// Lo que exige una ruta. Ver, Usar y Gestionar son niveles en el modulo de la ruta
+/// (ver `MODULE_ROUTE_PREFIXES` y roles.rs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
-    /// Cualquier usuario aprobado
-    User,
-    /// Admin u operador
-    Operator,
+    /// Cualquier usuario aprobado, sin importar el modulo
+    Any,
+    Ver,
+    Usar,
+    Gestionar,
     Admin,
-    PermTerminal,
-    PermPrint,
 }
 
 /// Permisos por ruta. **Denegar por defecto**: toda ruta no listada es solo admin,
@@ -116,129 +115,138 @@ pub fn required_access(method: &Method, path: &str) -> Access {
     use Access::*;
     let seg: Vec<&str> = path.trim_start_matches("/api/").split('/').collect();
     let m = method.as_str();
+    let read = m == "GET";
 
     match (m, seg.as_slice()) {
         // --- Auth (autoservicio) ---
-        (_, ["auth", "me"]) | (_, ["auth", "logout"]) => User,
-        ("POST", ["auth", "password"]) | ("POST", ["auth", "rename"]) | ("POST", ["auth", "link-code"]) => User,
-        ("GET", ["auth", "usernames"]) => User,
-        ("GET", ["auth", "2fa"]) | ("POST", ["auth", "2fa", _]) => User,
-        ("POST", ["auth", "passkey", "register", ..]) | ("GET", ["auth", "passkeys"]) | ("DELETE", ["auth", "passkeys", _]) => User,
+        (_, ["auth", "me"]) | (_, ["auth", "logout"]) => Any,
+        ("POST", ["auth", "password"]) | ("POST", ["auth", "rename"]) | ("POST", ["auth", "link-code"]) => Any,
+        ("GET", ["auth", "usernames"]) => Any,
+        ("GET", ["auth", "2fa"]) | ("POST", ["auth", "2fa", _]) => Any,
+        ("POST", ["auth", "passkey", "register", ..]) | ("GET", ["auth", "passkeys"]) | ("DELETE", ["auth", "passkeys", _]) => Any,
         // Preferencias de la interfaz (piel)
-        ("GET", ["auth", "preferences"]) | ("PUT", ["auth", "preferences"]) => User,
+        ("GET", ["auth", "preferences"]) | ("PUT", ["auth", "preferences"]) => Any,
         // Tokens de dispositivo propios (labnas-tray)
-        ("GET", ["auth", "device-tokens"]) | ("POST", ["auth", "device-tokens"]) => User,
-        ("GET", ["auth", "device-tokens", "me"]) | ("DELETE", ["auth", "device-tokens", _]) => User,
+        ("GET", ["auth", "device-tokens"]) | ("POST", ["auth", "device-tokens"]) => Any,
+        ("GET", ["auth", "device-tokens", "me"]) | ("DELETE", ["auth", "device-tokens", _]) => Any,
 
         // --- Modulos ---
-        ("GET", ["modules"]) => User,
+        ("GET", ["modules"]) => Any,
 
-        // --- Eventos en tiempo real ---
-        ("POST", ["live", "ticket"]) | ("GET", ["live"]) | ("GET", ["live", "poll"]) | ("GET", ["live", "notices"]) => User,
+        // --- Eventos en tiempo real (cada evento se filtra por el nivel en su modulo) ---
+        ("POST", ["live", "ticket"]) | ("GET", ["live"]) | ("GET", ["live", "poll"]) | ("GET", ["live", "notices"]) => Any,
 
-        // --- Archivos ---
-        ("GET", ["files"]) | ("GET", ["files", "download"]) | ("GET", ["files", "quickaccess"]) => User,
-        ("GET", ["files", "roots"]) | ("POST", ["files", "preview-token"]) => User,
-        // Escritura: el handler verifica el permiso de la carpeta (storage::Storage).
-        // Por defecto escriben los usuarios con permiso de escritura, como antes.
-        ("POST", ["files", "upload"]) | ("POST", ["files", "directory"]) | ("DELETE", ["files"]) => User,
-        (_, ["files", "upload", "chunked", ..]) => User,
-        ("POST", ["download-url"]) => User,
-        ("GET", ["trash"]) | ("POST", ["trash", _, "restore"]) | ("DELETE", ["trash", _]) => User,
-        ("GET", ["shares"]) | ("POST", ["shares"]) | ("DELETE", ["shares", _]) => User,
+        // --- Archivos: lectura y escritura las decide storage::Storage por carpeta;
+        // "con permiso de escritura" = nivel Usar en Archivos ---
+        ("GET", ["files"]) | ("GET", ["files", "download"]) | ("GET", ["files", "quickaccess"]) => Ver,
+        ("GET", ["files", "roots"]) | ("POST", ["files", "preview-token"]) => Ver,
+        ("POST", ["files", "upload"]) | ("POST", ["files", "directory"]) | ("DELETE", ["files"]) => Ver,
+        (_, ["files", "upload", "chunked", ..]) => Ver,
+        ("POST", ["download-url"]) => Ver,
+        ("GET", ["trash"]) | ("POST", ["trash", _, "restore"]) | ("DELETE", ["trash", _]) => Ver,
+        // Un enlace publico saca el archivo del laboratorio: hace falta Usar
+        ("GET", ["shares"]) => Ver,
+        ("POST", ["shares"]) | ("DELETE", ["shares", _]) => Usar,
 
         // --- Sistema (lectura) ---
-        ("GET", ["storage"]) | ("GET", ["system", "disks"]) | ("GET", ["system", "info"]) => User,
-        ("GET", ["system", "update", "check"]) => User,
-        ("GET", ["system", "mdns"]) | ("GET", ["system", "services"]) => User,
+        ("GET", ["storage"]) | ("GET", ["system", "disks"]) | ("GET", ["system", "info"]) => Any,
+        ("GET", ["system", "update", "check"]) => Any,
+        ("GET", ["system", "mdns"]) | ("GET", ["system", "services"]) => Any,
 
         // --- Red ---
-        ("GET", ["network", "hosts"]) | ("POST", ["network", "scan"]) => User,
-        ("POST", ["network", "wake", _]) => Operator,
+        ("GET", ["network", "hosts"]) => Ver,
+        ("POST", ["network", "scan"]) => Usar,
+        ("POST", ["network", "wake", _]) => Gestionar,
 
         // --- Musica (reproductor compartido) ---
         ("POST", ["music", "lastfm-key"]) | ("POST", ["music", "mpv-args"]) => Admin,
-        (_, ["music", ..]) => User,
+        (_, ["music", ..]) => if read { Ver } else { Usar },
 
         // --- Terminal ---
-        ("GET", ["terminal"]) => PermTerminal,
+        ("GET", ["terminal"]) => Usar,
 
         // --- Impresoras 3D ---
-        ("GET", ["printers3d", ..]) => User,
+        ("GET", ["printers3d", ..]) => Ver,
         // Cola compartida: cualquiera pide; el handler limita editar/borrar a lo propio
-        ("POST", ["printers3d", "queue"]) | ("PUT", ["printers3d", "queue", _]) | ("DELETE", ["printers3d", "queue", _]) => User,
-        (_, ["printers3d", ..]) => Operator,
+        ("POST", ["printers3d", "queue"]) | ("PUT", ["printers3d", "queue", _]) | ("DELETE", ["printers3d", "queue", _]) => Usar,
+        (_, ["printers3d", ..]) => Gestionar,
 
         // --- Impresion CUPS ---
         ("GET", ["printing", "user-costs"]) => Admin,
         ("POST", ["printing", "printers", _, "costs"]) | ("POST", ["printing", "printers", _, "stats", "reset"]) => Admin,
         ("POST", ["printing", "printers", _, "enable"]) | ("POST", ["printing", "printers", _, "disable"]) => Admin,
         ("POST", ["printing", "printers", _, "visibility"]) => Admin,
-        // Escaner: mismo permiso que imprimir (tambien para ver las paginas)
-        (_, ["printing", "scan", ..]) => PermPrint,
-        ("GET", ["printing", ..]) => User,
-        ("POST", ["printing", "printers", _, "wake"]) => PermPrint,
-        ("POST", ["printing", "print"]) | ("POST", ["printing", "print-file"]) => PermPrint,
-        ("DELETE", ["printing", "jobs", _]) => PermPrint,
-        (_, ["printing", "duplex", ..]) => PermPrint,
+        // Escaner: mismo nivel que imprimir (tambien para ver las paginas)
+        (_, ["printing", "scan", ..]) => Usar,
+        ("GET", ["printing", ..]) => Ver,
+        ("POST", ["printing", "printers", _, "wake"]) => Usar,
+        ("POST", ["printing", "print"]) | ("POST", ["printing", "print-file"]) => Usar,
+        ("DELETE", ["printing", "jobs", _]) => Usar,
+        (_, ["printing", "duplex", ..]) => Usar,
         // Token propio de la impresora de red (IPP)
-        ("POST", ["printing", "ipp", "token"]) | ("DELETE", ["printing", "ipp", "token"]) => PermPrint,
+        ("POST", ["printing", "ipp", "token"]) | ("DELETE", ["printing", "ipp", "token"]) => Usar,
 
-        // --- Tareas, proyectos, calendario (los handlers validan autoria) ---
-        (_, ["tasks", ..]) | (_, ["projects", ..]) | (_, ["events", ..]) => User,
+        // --- Tareas, proyectos, calendario (los handlers validan autoria; Gestionar edita lo ajeno) ---
+        (_, ["tasks", ..]) | (_, ["projects", ..]) | (_, ["events", ..]) => if read { Ver } else { Usar },
 
         // --- Notas, portafolio, inventario ---
-        (_, ["notes", ..]) | (_, ["portfolio", ..]) | (_, ["inventory", ..]) => User,
+        (_, ["notes", ..]) | (_, ["portfolio", ..]) | (_, ["inventory", ..]) => if read { Ver } else { Usar },
 
         // --- Correo (cuenta propia de cada usuario) ---
         ("PUT", ["email", "oauth", "microsoft", "config"]) => Admin,
-        (_, ["email", ..]) => User,
+        (_, ["email", ..]) => if read { Ver } else { Usar },
 
         // --- Reportes ---
-        ("GET", ["reports", "config"]) | ("GET", ["reports", "mine"]) | ("POST", ["reports"]) => User,
+        ("GET", ["reports", "config"]) | ("GET", ["reports", "mine"]) | ("POST", ["reports"]) => Any,
 
-        // --- Camaras: ver y grabar operadores; configurar y borrar, admin ---
-        ("GET", ["cameras", "recording-now"]) => User,
+        // --- Camaras: ver y grabar segun el nivel; configurar y borrar, admin ---
+        // El aviso de grabacion lo ve todo el mundo, tenga o no acceso a las camaras
+        ("GET", ["cameras", "recording-now"]) => Any,
         // Deteccion con IA: el handler permite solo al admin y a las personas autorizadas
-        ("GET", ["cameras", "detectors"]) | ("GET", ["cameras", "detections"]) => User,
-        // Descargas: el handler exige admin/operador, o estar autorizado si la hizo la IA
-        ("GET", ["cameras", "recordings", _, "download"]) => User,
+        ("GET", ["cameras", "detectors"]) | ("GET", ["cameras", "detections"]) => Any,
+        // Descargas: el handler exige Ver en Camaras, o estar autorizado si la hizo la IA
+        ("GET", ["cameras", "recordings", _, "download"]) => Any,
         ("GET", ["cameras", "detect"]) => Admin,
-        ("GET", ["cameras", ..]) => Operator,
-        ("POST", ["cameras", _, "record" | "stop" | "photo"]) => Operator,
+        ("GET", ["cameras", ..]) => Ver,
+        ("POST", ["cameras", _, "record" | "stop" | "photo"]) => Usar,
 
         // --- Sensores ---
-        ("GET", ["sensors", ..]) => User,
+        ("GET", ["sensors", ..]) => Ver,
 
-        // --- Maquinas: todos ven, reservan y reportan fallas (el handler limita cancelar
-        // a lo propio y bloquear horarios al staff); operadores editan, aprueban y reparan ---
-        ("GET", ["machines", ..]) => User,
-        ("POST", ["machines", _, "bookings"]) | ("POST", ["machines", _, "faults"]) => User,
-        ("POST", ["machines", "bookings", _, "cancel"]) => User,
+        // --- Maquinas: ver, reservar y reportar fallas (el handler limita cancelar a lo
+        // propio y bloquear horarios a quien gestiona); Gestionar edita, aprueba y repara ---
+        ("GET", ["machines", ..]) => Ver,
+        ("POST", ["machines", _, "bookings"]) | ("POST", ["machines", _, "faults"]) => Usar,
+        ("POST", ["machines", "bookings", _, "cancel"]) => Usar,
         // Induccion: pedirla (y retirar la propia solicitud, el handler lo limita)
-        ("POST", ["machines", _, "certifications", "request"]) => User,
-        ("DELETE", ["machines", _, "certifications", _]) => User,
+        ("POST", ["machines", _, "certifications", "request"]) => Usar,
+        ("DELETE", ["machines", _, "certifications", _]) => Usar,
         ("DELETE", ["machines", _]) => Admin,
-        (_, ["machines", ..]) => Operator,
+        (_, ["machines", ..]) => Gestionar,
 
-        // --- Plazos: todos ven y crean; el handler limita editar, cumplir y borrar a quien
-        // lo creo o al staff ---
-        (_, ["deadlines", ..]) => User,
+        // --- Plazos: ver y crear; el handler limita editar, cumplir y borrar a quien lo creo
+        // o a quien gestiona ---
+        (_, ["deadlines", ..]) => if read { Ver } else { Usar },
 
-        // Todo lo demas: admin (usuarios, modulos, telegram, apagar, actualizar, branding,
-        // mdns, servicios, limite de subida, raices de almacenamiento...)
+        // Todo lo demas: admin (usuarios, roles, modulos, telegram, apagar, actualizar,
+        // branding, mdns, servicios, limite de subida, raices de almacenamiento...)
         _ => Admin,
     }
 }
 
-fn allowed(access: Access, s: &SessionInfo) -> bool {
-    let is_admin = s.role == UserRole::Admin;
-    match access {
-        Access::User => true,
-        Access::Operator => is_admin || s.role == UserRole::Operador,
-        Access::Admin => is_admin,
-        Access::PermTerminal => is_admin || s.permissions.terminal,
-        Access::PermPrint => is_admin || s.permissions.impresion,
+fn allowed(access: Access, path: &str, s: &SessionInfo) -> bool {
+    use crate::roles::Level;
+    let level = match access {
+        Access::Any => return true,
+        Access::Admin => return s.is_admin(),
+        Access::Ver => Level::Ver,
+        Access::Usar => Level::Usar,
+        Access::Gestionar => Level::Gestionar,
+    };
+    // Un nivel sin modulo no deberia existir (test `niveles_siempre_con_modulo`): solo admin
+    match resolve_module_for_path(path) {
+        Some(m) => s.can(m, level),
+        None => s.is_admin(),
     }
 }
 
@@ -316,10 +324,10 @@ pub async fn permission_check(
         let Some(session) = crate::handlers::device_tokens::session_for(&state, &token).await else {
             return (StatusCode::UNAUTHORIZED, "Dispositivo no vinculado o revocado").into_response();
         };
-        if session.role == UserRole::Pendiente {
+        if session.role.is_pending() {
             return (StatusCode::FORBIDDEN, "Tu cuenta esta pendiente de aprobacion").into_response();
         }
-        if !allowed(required_access(&method, &path), &session) {
+        if !allowed(required_access(&method, &path), &path, &session) {
             return (StatusCode::FORBIDDEN, "Sin permisos para esta accion").into_response();
         }
         request.extensions_mut().insert(session);
@@ -340,7 +348,7 @@ pub async fn permission_check(
 
     // Pendiente: solo puede ver su propia cuenta, cerrar sesion y escuchar sus
     // eventos (para enterarse al instante cuando lo aprueban)
-    if session.role == UserRole::Pendiente {
+    if session.role.is_pending() {
         if matches!(path.as_str(), "/api/auth/me" | "/api/auth/logout" | "/api/live/ticket" | "/api/live") {
             request.extensions_mut().insert(session);
             return next.run(request).await;
@@ -348,7 +356,7 @@ pub async fn permission_check(
         return (StatusCode::FORBIDDEN, "Tu cuenta esta pendiente de aprobacion").into_response();
     }
 
-    if !allowed(required_access(&method, &path), &session) {
+    if !allowed(required_access(&method, &path), &path, &session) {
         return (StatusCode::FORBIDDEN, "Sin permisos para esta accion").into_response();
     }
 
@@ -388,7 +396,7 @@ mod tests {
         assert_eq!(acc(Method::POST, "/api/sensors/devices/abc/token"), Admin);
         assert_eq!(acc(Method::PUT, "/api/sensors/security"), Admin);
         assert_eq!(acc(Method::PUT, "/api/files/webdav"), Admin);
-        assert_eq!(acc(Method::POST, "/api/network/wake/aa:bb:cc:dd:ee:ff"), Operator);
+        assert_eq!(acc(Method::POST, "/api/network/wake/aa:bb:cc:dd:ee:ff"), Gestionar);
         assert_eq!(acc(Method::GET, "/api/system/smart"), Admin);
         assert_eq!(acc(Method::POST, "/api/snapshots/now"), Admin);
         assert_eq!(acc(Method::PUT, "/api/system/tls"), Admin);
@@ -421,72 +429,137 @@ mod tests {
 
     #[test]
     fn archivos_delegan_en_permisos_por_carpeta() {
-        // el middleware deja pasar; storage::Storage decide por carpeta (tests de integracion)
-        assert_eq!(acc(Method::POST, "/api/download-url"), User);
-        assert_eq!(acc(Method::POST, "/api/files/upload"), User);
-        assert_eq!(acc(Method::DELETE, "/api/files"), User);
-        assert_eq!(acc(Method::GET, "/api/files/download"), User);
-        assert_eq!(acc(Method::GET, "/api/trash"), User);
+        // el middleware exige ver Archivos; storage::Storage decide por carpeta
+        assert_eq!(acc(Method::POST, "/api/download-url"), Ver);
+        assert_eq!(acc(Method::POST, "/api/files/upload"), Ver);
+        assert_eq!(acc(Method::DELETE, "/api/files"), Ver);
+        assert_eq!(acc(Method::GET, "/api/files/download"), Ver);
+        assert_eq!(acc(Method::GET, "/api/trash"), Ver);
         assert_eq!(acc(Method::DELETE, "/api/trash"), Admin);
+        assert_eq!(acc(Method::POST, "/api/shares"), Usar);
     }
 
     #[test]
     fn impresion_y_3d() {
-        assert_eq!(acc(Method::POST, "/api/printing/print-file"), PermPrint);
-        assert_eq!(acc(Method::POST, "/api/printing/duplex/prepare"), PermPrint);
+        assert_eq!(acc(Method::POST, "/api/printing/print-file"), Usar);
+        assert_eq!(acc(Method::POST, "/api/printing/duplex/prepare"), Usar);
         assert_eq!(acc(Method::POST, "/api/printing/printers/hp/enable"), Admin);
         assert_eq!(acc(Method::POST, "/api/printing/printers/hp/visibility"), Admin);
-        assert_eq!(acc(Method::GET, "/api/printing/ipp"), User);
-        assert_eq!(acc(Method::POST, "/api/printing/ipp/token"), PermPrint);
-        assert_eq!(acc(Method::DELETE, "/api/printing/ipp/token"), PermPrint);
-        assert_eq!(acc(Method::GET, "/api/printing/scan/devices"), PermPrint);
-        assert_eq!(acc(Method::GET, "/api/printing/scan/sessions/abc/pages/0"), PermPrint);
-        assert_eq!(acc(Method::POST, "/api/printing/scan/pages"), PermPrint);
+        assert_eq!(acc(Method::GET, "/api/printing/ipp"), Ver);
+        assert_eq!(acc(Method::POST, "/api/printing/ipp/token"), Usar);
+        assert_eq!(acc(Method::DELETE, "/api/printing/ipp/token"), Usar);
+        assert_eq!(acc(Method::GET, "/api/printing/scan/devices"), Usar);
+        assert_eq!(acc(Method::GET, "/api/printing/scan/sessions/abc/pages/0"), Usar);
+        assert_eq!(acc(Method::POST, "/api/printing/scan/pages"), Usar);
     }
 
     #[test]
     fn camaras() {
-        assert_eq!(acc(Method::GET, "/api/cameras/recording-now"), User);
-        assert_eq!(acc(Method::GET, "/api/cameras/detections"), User);
+        assert_eq!(acc(Method::GET, "/api/cameras/recording-now"), Any);
+        assert_eq!(acc(Method::GET, "/api/cameras/detections"), Any);
         assert_eq!(acc(Method::PUT, "/api/cameras/detectors/watchers"), Admin);
         assert_eq!(acc(Method::POST, "/api/cameras/detectors"), Admin);
         assert_eq!(acc(Method::POST, "/api/cameras/detectors/test"), Admin);
         assert_eq!(acc(Method::PUT, "/api/cameras/detectors/x"), Admin);
         assert_eq!(acc(Method::POST, "/api/cameras/ai/model"), Admin);
-        assert_eq!(acc(Method::GET, "/api/cameras"), Operator);
-        assert_eq!(acc(Method::GET, "/api/cameras/abc/stream"), Operator);
-        assert_eq!(acc(Method::POST, "/api/cameras/abc/record"), Operator);
-        assert_eq!(acc(Method::POST, "/api/cameras/abc/photo"), Operator);
+        assert_eq!(acc(Method::GET, "/api/cameras"), Ver);
+        assert_eq!(acc(Method::GET, "/api/cameras/abc/stream"), Ver);
+        assert_eq!(acc(Method::POST, "/api/cameras/abc/record"), Usar);
+        assert_eq!(acc(Method::POST, "/api/cameras/abc/photo"), Usar);
         assert_eq!(acc(Method::GET, "/api/cameras/detect"), Admin);
         assert_eq!(acc(Method::POST, "/api/cameras"), Admin);
         assert_eq!(acc(Method::PUT, "/api/cameras/settings"), Admin);
         assert_eq!(acc(Method::DELETE, "/api/cameras/recordings/x"), Admin);
         assert!(bridge_denied(&Method::GET, "/api/cameras/abc/stream").is_some());
         assert!(bridge_denied(&Method::GET, "/api/cameras/recording-now").is_none());
-        assert_eq!(acc(Method::PUT, "/api/printers3d/abc"), Operator);
-        assert_eq!(acc(Method::GET, "/api/printers3d/abc/status"), User);
-        assert_eq!(acc(Method::POST, "/api/printers3d/queue"), User);
-        assert_eq!(acc(Method::POST, "/api/printers3d/queue/reorder"), Operator);
+        assert_eq!(acc(Method::PUT, "/api/printers3d/abc"), Gestionar);
+        assert_eq!(acc(Method::GET, "/api/printers3d/abc/status"), Ver);
+        assert_eq!(acc(Method::POST, "/api/printers3d/queue"), Usar);
+        assert_eq!(acc(Method::POST, "/api/printers3d/queue/reorder"), Gestionar);
     }
 
     #[test]
     fn autoservicio() {
-        assert_eq!(acc(Method::GET, "/api/auth/me"), User);
-        assert_eq!(acc(Method::POST, "/api/auth/password"), User);
-        assert_eq!(acc(Method::POST, "/api/auth/passkey/register/options"), User);
-        assert_eq!(acc(Method::DELETE, "/api/auth/passkeys/abc"), User);
+        assert_eq!(acc(Method::GET, "/api/auth/me"), Any);
+        assert_eq!(acc(Method::POST, "/api/auth/password"), Any);
+        assert_eq!(acc(Method::POST, "/api/auth/passkey/register/options"), Any);
+        assert_eq!(acc(Method::DELETE, "/api/auth/passkeys/abc"), Any);
         assert!(is_public("/api/auth/passkey/login"));
-        assert_eq!(acc(Method::POST, "/api/music/play"), User);
-        assert_eq!(acc(Method::POST, "/api/auth/device-tokens"), User);
-        assert_eq!(acc(Method::DELETE, "/api/auth/device-tokens/abc"), User);
-        assert_eq!(acc(Method::GET, "/api/auth/device-tokens/me"), User);
-        assert_eq!(acc(Method::PUT, "/api/auth/preferences"), User);
-        assert_eq!(acc(Method::GET, "/api/email/proposals"), User);
-        assert_eq!(acc(Method::POST, "/api/email/oauth/microsoft/start"), User);
-        assert_eq!(acc(Method::GET, "/api/email/oauth/microsoft/config"), User);
-        assert_eq!(acc(Method::POST, "/api/email/proposals/abc/approve"), User);
-        assert_eq!(acc(Method::GET, "/api/terminal"), PermTerminal);
-        assert_eq!(acc(Method::POST, "/api/live/ticket"), User);
-        assert_eq!(acc(Method::GET, "/api/live"), User);
+        assert_eq!(acc(Method::POST, "/api/music/play"), Usar);
+        assert_eq!(acc(Method::GET, "/api/music/status"), Ver);
+        assert_eq!(acc(Method::POST, "/api/auth/device-tokens"), Any);
+        assert_eq!(acc(Method::DELETE, "/api/auth/device-tokens/abc"), Any);
+        assert_eq!(acc(Method::GET, "/api/auth/device-tokens/me"), Any);
+        assert_eq!(acc(Method::PUT, "/api/auth/preferences"), Any);
+        assert_eq!(acc(Method::GET, "/api/email/proposals"), Ver);
+        assert_eq!(acc(Method::POST, "/api/email/oauth/microsoft/start"), Usar);
+        assert_eq!(acc(Method::GET, "/api/email/oauth/microsoft/config"), Ver);
+        assert_eq!(acc(Method::POST, "/api/email/proposals/abc/approve"), Usar);
+        assert_eq!(acc(Method::GET, "/api/terminal"), Usar);
+        assert_eq!(acc(Method::POST, "/api/live/ticket"), Any);
+        assert_eq!(acc(Method::GET, "/api/live"), Any);
+    }
+
+    #[test]
+    fn roles_y_usuarios_son_admin() {
+        assert_eq!(acc(Method::GET, "/api/roles"), Admin);
+        assert_eq!(acc(Method::POST, "/api/roles"), Admin);
+        assert_eq!(acc(Method::PUT, "/api/roles/docente"), Admin);
+        assert_eq!(acc(Method::DELETE, "/api/roles/docente"), Admin);
+        assert_eq!(acc(Method::POST, "/api/auth/users/pepe/role"), Admin);
+    }
+
+    /// Toda ruta que pide Ver/Usar/Gestionar cae en un modulo (si no, `allowed` la deja
+    /// solo al admin y la funcion quedaria rota sin que nadie lo note)
+    #[test]
+    fn niveles_siempre_con_modulo() {
+        let mut checked = 0;
+        // Rutas declaradas en main.rs: `.route("/api/x/{id}", get(..).post(..))`
+        let src = include_str!("main.rs");
+        let mut routes = Vec::new();
+        for line in src.lines().map(str::trim).filter(|l| l.starts_with(".route(\"/api/")) {
+            let path = line.split('"').nth(1).unwrap_or_default();
+            let path: String = path.split('/').map(|p| if p.starts_with('{') { "x" } else { p }).collect::<Vec<_>>().join("/");
+            for verb in ["get", "post", "put", "delete", "patch"] {
+                if line.contains(&format!("{verb}(")) {
+                    routes.push((verb.to_uppercase(), path.clone()));
+                }
+            }
+        }
+        assert!(routes.len() > 200, "no se leyeron las rutas de main.rs");
+        for (method, path) in routes {
+            let Ok(m) = method.parse::<Method>() else { continue };
+            if matches!(required_access(&m, &path), Access::Ver | Access::Usar | Access::Gestionar) {
+                assert!(resolve_module_for_path(&path).is_some(), "{} {} pide nivel pero no tiene modulo", method, path);
+                checked += 1;
+            }
+        }
+        assert!(checked > 20);
+    }
+
+    fn sess(role: &str, levels: &[(&str, crate::roles::Level)]) -> SessionInfo {
+        let grants = crate::roles::Grants {
+            admin: role == "admin",
+            levels: levels.iter().map(|(m, l)| (m.to_string(), *l)).collect(),
+        };
+        SessionInfo::new("ana".into(), crate::models::notifications::UserRole(role.into()), grants, None)
+    }
+
+    #[test]
+    fn niveles_por_modulo() {
+        use crate::roles::Level;
+        let est = sess("estudiante", &[("machines", Level::Usar), ("files", Level::Ver)]);
+        assert!(allowed(acc(Method::GET, "/api/machines"), "/api/machines", &est));
+        assert!(allowed(acc(Method::POST, "/api/machines/x/bookings"), "/api/machines/x/bookings", &est));
+        assert!(!allowed(acc(Method::PUT, "/api/machines/x"), "/api/machines/x", &est));
+        assert!(!allowed(acc(Method::GET, "/api/terminal"), "/api/terminal", &est));
+        assert!(!allowed(acc(Method::GET, "/api/notes"), "/api/notes", &est), "sin fila = sin acceso");
+        assert!(allowed(acc(Method::GET, "/api/files"), "/api/files", &est));
+        assert!(!allowed(acc(Method::POST, "/api/shares"), "/api/shares", &est));
+        assert!(allowed(acc(Method::GET, "/api/auth/me"), "/api/auth/me", &est));
+        assert!(!allowed(acc(Method::GET, "/api/auth/users"), "/api/auth/users", &est));
+        let admin = sess("admin", &[]);
+        assert!(allowed(acc(Method::PUT, "/api/machines/x"), "/api/machines/x", &admin));
+        assert!(allowed(acc(Method::GET, "/api/auth/users"), "/api/auth/users", &admin));
     }
 }

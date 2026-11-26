@@ -66,11 +66,11 @@ declara hoy en **cuatro lugares** que hay que mantener a mano:
 
 El bus de eventos en vivo y WebDAV ya respetan el estado del módulo.
 
-**Usuarios y permisos.** Cuatro roles globales (`Pendiente`, `Observador`, `Operador`,
-`Admin`), tres permisos sueltos (`terminal`, `impresion`, `archivos_escritura`) y
-permisos por carpeta en las raíces de almacenamiento. Cada ruta declara su nivel
-mínimo y el middleware niega por defecto. Los módulos son **globales**: no se puede
-encender un módulo solo para ciertos roles.
+**Usuarios y permisos.** Roles editables (tabla `roles`) con un nivel por módulo
+(sin acceso / ver / usar / gestionar), excepciones por persona y fecha de término de la
+cuenta; además, permisos por carpeta en las raíces de almacenamiento. Cada ruta declara
+el nivel que exige en su módulo y el middleware niega por defecto. Detalle en
+`docs/ROLES.md`.
 
 **Ajustes.** Tabla clave/valor (`settings`, con variantes cifradas para secretos) y
 una sola página `SettingsPage.tsx` de ~1.850 líneas con 9 pestañas.
@@ -129,13 +129,15 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
 - [ ] **Tarjetas del dashboard por módulo**, que aparecen solo si está encendido.
 
 ### Personas y acceso
-- [ ] **Permisos por módulo y por rol:** cada rol tiene, en cada módulo, «sin
-      acceso», «lectura» o «escritura». Reemplaza los tres permisos sueltos de hoy
+- [x] **Permisos por módulo y por rol:** cada rol tiene, en cada módulo, «sin
+      acceso», «ver», «usar» o «gestionar». Reemplaza los tres permisos sueltos de antes
       (`terminal`, `impresion`, `archivos_escritura`) por algo uniforme, y permite que
-      `finanzas` lo vean solo el responsable y el administrativo.
-- [ ] **Roles nuevos sobre los cuatro actuales:** investigador responsable,
+      `finanzas` lo vean solo el responsable y el administrativo. *(hecho: roles editables
+      con excepciones por persona, ver `docs/ROLES.md`)*
+- [x] **Roles nuevos sobre los cuatro actuales:** investigador responsable,
       administrativo, docente, estudiante, usuario externo, auditor (solo lectura y con
-      fecha de término).
+      fecha de término). *(hecho, más encargado técnico y ayudante; la fecha de término
+      vale para cualquier cuenta)*
 - [ ] **Niveles de acceso** privado / con autorización / público, aplicables a
       cualquier registro o archivo.
 - [x] **Catálogo único de máquinas y bienes con QR:** cada equipo tiene una ficha

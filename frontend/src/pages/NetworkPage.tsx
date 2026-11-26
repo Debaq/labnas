@@ -8,9 +8,9 @@ import { errorMessage } from '../lib/errors'
 import type { NetworkHost } from '../types'
 
 export default function NetworkPage() {
-  const { user } = useAuth()
+  const { canModule } = useAuth()
   const { addToast } = useToast()
-  const canWake = user?.role === 'admin' || user?.role === 'operador'
+  const canWake = canModule('network', 'gestionar')
 
   async function handleWake(host: NetworkHost) {
     if (!host.mac) return

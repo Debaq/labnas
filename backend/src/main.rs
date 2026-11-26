@@ -18,6 +18,7 @@ mod module_tasks;
 mod ledger;
 mod proc;
 mod error;
+mod roles;
 
 use axum::{
     http::Method,
@@ -463,6 +464,10 @@ fn api_routes() -> Router<AppState> {
         .route("/api/auth/usernames", get(handlers::auth::list_usernames))
         .route("/api/auth/users/{username}/role", post(handlers::auth::set_user_role))
         .route("/api/auth/users/{username}", delete(handlers::auth::delete_user))
+        // Roles y permisos por modulo (admin)
+        .route("/api/roles", get(handlers::roles::list).post(handlers::roles::create))
+        .route("/api/roles/{id}", put(handlers::roles::update).delete(handlers::roles::remove))
+        .route("/api/roles/{id}/reset", post(handlers::roles::reset))
         .route("/api/auth/link-code", post(handlers::auth::generate_link_code))
         .route("/api/auth/2fa", get(handlers::twofa::status))
         .route("/api/auth/2fa/setup", post(handlers::twofa::setup))

@@ -81,11 +81,9 @@ fn query(conn: &Connection, filter: &str, args: &[&dyn rusqlite::ToSql]) -> rusq
     rows.collect()
 }
 
-/// Usernames de administradores y operadores
+/// Quienes gestionan Maquinas (y los admin)
 fn staff_users(conn: &Connection) -> rusqlite::Result<Vec<String>> {
-    let mut stmt = conn.prepare("SELECT username FROM web_users WHERE role IN ('admin', 'operador')")?;
-    let rows = stmt.query_map([], |r| r.get(0))?;
-    rows.collect()
+    crate::roles::users_with_level(conn, "machines", crate::roles::Level::Gestionar)
 }
 
 fn tell(state: &AppState, users: Vec<String>, title: &str, body: &str) {

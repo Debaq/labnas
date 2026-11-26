@@ -223,21 +223,22 @@ async fn user_for_token(state: &AppState, token: &str) -> Option<(String, bool)>
     }
     let hash = token_hash(token);
     db_op(&state.db, move |conn| {
-        let row = conn.query_row(
-            "SELECT u.username, u.role, u.perm_impresion FROM ipp_tokens t
-             JOIN web_users u ON u.username = t.username WHERE t.token_hash = ?1",
+        let Ok(user) = conn.query_row(
+            "SELECT username FROM ipp_tokens WHERE token_hash = ?1",
             params![hash],
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, bool>(2)?)),
-        );
-        Ok(row.ok())
+            |r| r.get::<_, String>(0),
+        ) else {
+            return Ok(None);
+        };
+        // Imprimir = nivel Usar en Impresion (cuenta vigente y aprobada)
+        let allowed = crate::roles::load_user(conn, &user).is_some_and(|(role, grants, expires)| {
+            role != crate::roles::PENDING && !crate::roles::is_expired(expires) && grants.can("printing", crate::roles::Level::Usar)
+        });
+        Ok(Some((user, allowed)))
     })
     .await
     .ok()
     .flatten()
-    .map(|(user, role, perm)| {
-        let allowed = role == "admin" || (perm && role != "pendiente");
-        (user, allowed)
-    })
 }
 
 #[derive(Serialize)]
@@ -261,7 +262,7 @@ async fn ipp_info_for(state: &AppState, session: &crate::state::SessionInfo) -> 
     Ok(IppInfo {
         port: ipp_port(),
         token,
-        can_print: session.role == crate::models::notifications::UserRole::Admin || session.permissions.impresion,
+        can_print: session.can("printing", crate::roles::Level::Usar),
         listen_error: LISTEN_ERROR.lock().ok().and_then(|g| g.clone()),
     })
 }

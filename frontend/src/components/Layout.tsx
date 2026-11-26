@@ -142,10 +142,10 @@ export default function Layout() {
     .filter(m => m.enabled && moduleNav[m.id])
     .sort((a, b) => a.display_order - b.display_order)
     .filter(m => {
+      // enabledModules ya viene sin lo que el rol no puede ver
       if (m.id === 'terminal') return can('terminal') && !viaBridge
-      if (m.id === 'printing') return can('impresion')
-      // Camaras: solo operadores y admin (en la LAN)
-      if (m.id === 'cameras') return (user?.role === 'admin' || user?.role === 'operador') && !viaBridge
+      // Camaras: solo en la LAN
+      if (m.id === 'cameras') return !viaBridge
       return true
     })
     .map(m => ({ ...moduleNav[m.id], show: true }))
@@ -162,7 +162,7 @@ export default function Layout() {
   // (la sesion sigue viva al navegar a otras paginas)
   const [terminalOpened, setTerminalOpened] = useState(false)
   if (!terminalOpened && location.pathname === '/terminal') setTerminalOpened(true)
-  const roleLabel = user?.role === 'admin' ? 'Admin' : user?.role === 'operador' ? 'Operador' : user?.role === 'observador' ? 'Observador' : 'Pendiente'
+  const roleLabel = user?.roleName || (user?.role === 'admin' ? 'Admin' : user?.role === 'pendiente' ? 'Pendiente' : user?.role ?? '')
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--bg-primary)' }}>

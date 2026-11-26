@@ -9,8 +9,8 @@ const inputStyle = { backgroundColor: 'var(--input-bg)', color: 'var(--text-prim
 
 /** Timelapse por impresora: fotos durante la impresion y video al terminar */
 export default function TimelapseModal({ printers, onClose }: { printers: Printer3DConfig[]; onClose: () => void }) {
-  const { user } = useAuth()
-  const canEdit = user?.role === 'admin' || user?.role === 'operador'
+  const { canModule } = useAuth()
+  const canEdit = canModule('printers3d', 'gestionar')
   const [cfg, setCfg] = useState<TimelapseSettings | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)

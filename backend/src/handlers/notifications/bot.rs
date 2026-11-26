@@ -1,6 +1,7 @@
 //! Loop del bot: despacho de mensajes, registro, vinculacion, horario y ayuda
 
 use super::*;
+use crate::roles::{Grants, Level};
 
 // =====================
 // Bot polling loop
@@ -101,17 +102,19 @@ pub(super) async fn handle_message(state: &AppState, token: &str, msg: &TgMessag
                 .ok()
                 .flatten()
                 .map(|c| c.role)
-                .unwrap_or(UserRole::Pendiente)
+                .unwrap_or_default()
         })
         .await
         else {
             return;
         };
 
-        let response = match role {
-            UserRole::Admin => "Hola! Eres el *administrador* de LabNAS.\n\nUsa /ayuda para ver los comandos.".to_string(),
-            UserRole::Pendiente => "Solicitud enviada. El administrador debe aprobar tu acceso desde la web.".to_string(),
-            _ => "Hola! Ya estas registrado en LabNAS.\n\nUsa /ayuda para ver los comandos.".to_string(),
+        let response = if role.is_admin() {
+            "Hola! Eres el *administrador* de LabNAS.\n\nUsa /ayuda para ver los comandos.".to_string()
+        } else if role.is_pending() {
+            "Solicitud enviada. El administrador debe aprobar tu acceso desde la web.".to_string()
+        } else {
+            "Hola! Ya estas registrado en LabNAS.\n\nUsa /ayuda para ver los comandos.".to_string()
         };
         let _ = send_telegram_message(&state.http_client, token, chat_id, &response).await;
         return;
@@ -127,25 +130,40 @@ pub(super) async fn handle_message(state: &AppState, token: &str, msg: &TgMessag
         return;
     };
 
-    if chat.role == UserRole::Pendiente {
+    if chat.role.is_pending() {
         let _ = send_telegram_message(&state.http_client, token, chat_id, "Tu acceso esta pendiente de aprobacion.").await;
         return;
     }
 
-    let role = chat.role.clone();
     let chat_name = chat.name.clone();
-    let is_admin = chat.role == UserRole::Admin;
-    let is_operator = chat.role == UserRole::Operador;
-    let has_terminal = is_admin || chat.permissions.terminal;
-    let has_printer3d = is_admin || is_operator;
+    // Permisos: los de la cuenta web vinculada (rol + excepciones) o, sin cuenta, los del rol del chat
+    let c = chat.clone();
+    let Ok((grants, expired, role_name)) = crate::db::bg(&state.db, move |conn| chat_grants(conn, &c)).await else {
+        return;
+    };
+    if expired {
+        let _ = send_telegram_message(&state.http_client, token, chat_id, "Tu cuenta llego a su fecha de termino.").await;
+        return;
+    }
+    let has_terminal = grants.can("terminal", Level::Usar);
+    let has_printer3d = grants.can("printers3d", Level::Gestionar);
 
     // Un modulo apagado lo esta tambien por Telegram (no solo en la web)
-    let modules = state.enabled_modules.lock().await.clone();
-    if let Some(off) = command_modules(text).iter().find(|m| !modules.contains(**m)) {
+    let enabled = state.enabled_modules.lock().await.clone();
+    if let Some(off) = command_modules(text).iter().find(|m| !enabled.contains(**m)) {
         let msg = format!("El modulo *{}* esta desactivado.", module_label(off));
         let _ = send_telegram_message(&state.http_client, token, chat_id, &msg).await;
         return;
     }
+    let need = command_level(text);
+    if let Some(m) = command_modules(text).iter().find(|m| !grants.can(m, need)) {
+        let msg = format!("Tu rol no permite esto en *{}*.", module_label(m));
+        let _ = send_telegram_message(&state.http_client, token, chat_id, &msg).await;
+        return;
+    }
+    // Lo que el rol ve (para /ayuda)
+    let modules: std::collections::HashSet<String> =
+        enabled.into_iter().filter(|m| grants.can(m, Level::Ver)).collect();
 
     let response = match text {
         s if s.starts_with("/cmd ") => {
@@ -240,34 +258,23 @@ pub(super) async fn handle_message(state: &AppState, token: &str, msg: &TgMessag
         }
         s if s.starts_with("/temp") => handle_printer_temps(state).await,
         s if s.starts_with("/imprimir ") => {
-            if !has_printer3d { "Sin permisos. Se requiere rol Operador o Admin.".to_string() }
+            if !has_printer3d { "Sin permisos: hace falta gestionar Impresoras 3D.".to_string() }
             else { handle_printer_control(state, &chat_name, s, "start").await }
         }
         s if s.starts_with("/pausar") => {
-            if !has_printer3d { "Sin permisos. Se requiere rol Operador o Admin.".to_string() }
+            if !has_printer3d { "Sin permisos: hace falta gestionar Impresoras 3D.".to_string() }
             else { handle_printer_control(state, &chat_name, s, "pause").await }
         }
         s if s.starts_with("/cancelar3d") => {
-            if !has_printer3d { "Sin permisos. Se requiere rol Operador o Admin.".to_string() }
+            if !has_printer3d { "Sin permisos: hace falta gestionar Impresoras 3D.".to_string() }
             else { handle_printer_control(state, &chat_name, s, "cancel").await }
         }
         s if s.starts_with("/impresoras") => build_printers_message(state).await,
         s if s.starts_with("/mirol") => {
-            let emoji = match role {
-                UserRole::Admin => "👑",
-                UserRole::Operador => "🔧",
-                UserRole::Observador => "👁",
-                UserRole::Pendiente => "⏳",
-            };
-            let role_name = match role {
-                UserRole::Admin => "Administrador",
-                UserRole::Operador => "Operador",
-                UserRole::Observador => "Observador",
-                UserRole::Pendiente => "Pendiente",
-            };
+            let emoji = if grants.admin { "👑" } else { "👤" };
             format!("{} Tu rol: *{}*", emoji, role_name)
         }
-        s if s.starts_with("/ayuda") | s.starts_with("/help") => build_help_message(&role, has_terminal, has_printer3d, &modules),
+        s if s.starts_with("/ayuda") | s.starts_with("/help") => build_help_message(&role_name, has_terminal, has_printer3d, &modules),
         _ => {
             // Check if user has active terminal session - pipe input
             if has_terminal && modules.contains("terminal") {
@@ -338,27 +345,13 @@ pub(super) async fn register_chat(state: &AppState, token: &str, msg: &TgMessage
 
     // First user ever = admin, rest = pendiente
     let is_first = all_chats.is_empty();
-    let role = if is_first {
-        UserRole::Admin
-    } else {
-        UserRole::Pendiente
-    };
-    let perms = if is_first {
-        UserPermissions {
-            terminal: true,
-            impresion: true,
-            archivos_escritura: true,
-        }
-    } else {
-        UserPermissions::default()
-    };
-    let role_str = role_to_str(&role).to_string();
+    let role_str = if is_first { UserRole::admin() } else { UserRole::pending() }.0;
 
     // Notify admins about new pending user
     if !is_first {
         let admins: Vec<i64> = all_chats
             .iter()
-            .filter(|c| c.role == UserRole::Admin)
+            .filter(|c| c.role.is_admin())
             .map(|c| c.chat_id)
             .collect();
         let uname = username.as_deref().map(|u| format!(" (@{})", u)).unwrap_or_default();
@@ -374,8 +367,8 @@ pub(super) async fn register_chat(state: &AppState, token: &str, msg: &TgMessage
     // Insert new chat
     let _ = crate::db::bg(&state.db, move |conn| {
         conn.execute(
-            "INSERT OR REPLACE INTO telegram_chats (chat_id, name, username, role, perm_terminal, perm_impresion, perm_archivos_escritura, linked_web_user, daily_enabled, daily_hour, daily_minute) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, 0, 8, 0)",
-            params![chat_id, name, username, role_str, perms.terminal, perms.impresion, perms.archivos_escritura],
+            "INSERT OR REPLACE INTO telegram_chats (chat_id, name, username, role, linked_web_user, daily_enabled, daily_hour, daily_minute) VALUES (?1, ?2, ?3, ?4, NULL, 0, 8, 0)",
+            params![chat_id, name, username, role_str],
         )
     })
     .await;
@@ -423,12 +416,12 @@ pub(super) async fn handle_link_command(state: &AppState, chat_id: i64, _chat_na
             return Err("Usuario web no encontrado.".to_string());
         }
 
-        // Get web user's role and permissions
-        let (role_str, perm_t, perm_i, perm_a): (String, bool, bool, bool) = conn
+        // El chat toma el rol de la cuenta web
+        let role_str: String = conn
             .query_row(
-                "SELECT role, perm_terminal, perm_impresion, perm_archivos_escritura FROM web_users WHERE username = ?1",
+                "SELECT role FROM web_users WHERE username = ?1",
                 params![username_clone],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| row.get(0),
             )
             .map_err(|e| format!("DB: {}", e))?;
 
@@ -441,8 +434,8 @@ pub(super) async fn handle_link_command(state: &AppState, chat_id: i64, _chat_na
 
         // Update telegram -> web user link + sync role/perms
         conn.execute(
-            "UPDATE telegram_chats SET linked_web_user = ?1, role = ?2, perm_terminal = ?3, perm_impresion = ?4, perm_archivos_escritura = ?5 WHERE chat_id = ?6",
-            params![username_clone, role_str, perm_t, perm_i, perm_a, chat_id],
+            "UPDATE telegram_chats SET linked_web_user = ?1, role = ?2 WHERE chat_id = ?3",
+            params![username_clone, role_str, chat_id],
         )
         .map_err(|e| format!("DB: {}", e))?;
 
@@ -505,6 +498,26 @@ pub(super) fn command_modules(text: &str) -> &'static [&'static str] {
     COMMAND_MODULES.iter().find(|(p, _)| text.starts_with(p)).map(|(_, m)| *m).unwrap_or(&[])
 }
 
+/// Comandos de solo consulta: basta con Ver el modulo; el resto pide Usar
+/// (los de control de impresoras 3D y la terminal se revisan aparte)
+fn command_level(text: &str) -> Level {
+    const READ_ONLY: &[&str] = &[
+        "/eventos", "/proyectos", "/tareas", "/avance", "/leer ", "/propuestas", "/correos",
+        "/musica", "/music", "/temp", "/camara", "/foto", "/impresoras", "/red",
+    ];
+    if READ_ONLY.iter().any(|p| text.starts_with(p)) { Level::Ver } else { Level::Usar }
+}
+
+/// Permisos de un chat: (permisos, cuenta vencida, nombre del rol)
+fn chat_grants(conn: &rusqlite::Connection, chat: &TelegramChat) -> (Grants, bool, String) {
+    if let Some((role, grants, expires)) = chat.linked_web_user.as_deref().and_then(|u| crate::roles::load_user(conn, u)) {
+        let name = crate::handlers::roles::role_name(conn, &role);
+        return (grants, crate::roles::is_expired(expires), name);
+    }
+    let role = chat.role.as_str();
+    (crate::roles::grants_for_role(conn, role), false, crate::handlers::roles::role_name(conn, role))
+}
+
 fn module_label(id: &str) -> &str {
     match id {
         "terminal" => "Terminal",
@@ -518,7 +531,7 @@ fn module_label(id: &str) -> &str {
 }
 
 pub(super) fn build_help_message(
-    role: &UserRole,
+    role_name: &str,
     has_terminal: bool,
     has_printer3d: bool,
     modules: &std::collections::HashSet<String>,
@@ -590,12 +603,6 @@ pub(super) fn build_help_message(
         msg.push_str("/vol 0-100 - Ajustar volumen\n");
     }
 
-    let role_name = match role {
-        UserRole::Admin => "Admin",
-        UserRole::Operador => "Operador",
-        UserRole::Observador => "Observador",
-        UserRole::Pendiente => "Pendiente",
-    };
     msg.push_str(&format!("\nTu rol: *{}*", role_name));
     msg
 }
@@ -677,7 +684,6 @@ pub(super) async fn handle_schedule_command(state: &AppState, chat_id: i64, text
 #[cfg(test)]
 mod tests {
     use super::{build_help_message, command_modules};
-    use crate::models::notifications::UserRole;
 
     #[test]
     fn comandos_ligados_a_su_modulo() {
@@ -699,7 +705,7 @@ mod tests {
     #[test]
     fn ayuda_oculta_modulos_apagados() {
         let mods: std::collections::HashSet<String> = ["tasks".to_string()].into();
-        let help = build_help_message(&UserRole::Admin, true, true, &mods);
+        let help = build_help_message("Administrador", true, true, &mods);
         assert!(help.contains("/tareas"));
         assert!(!help.contains("/cmd"));
         assert!(!help.contains("/propuestas"));

@@ -74,20 +74,35 @@ export interface ModuleInfo {
 
 // --- Notifications (Telegram) ---
 
-export type UserRole = 'pendiente' | 'observador' | 'operador' | 'admin'
+/** Id del rol: 'admin', 'pendiente' o uno de la tabla de roles (editables) */
+export type UserRole = string
 
-export interface UserPermissions {
-  terminal: boolean
-  impresion: boolean
-  archivos_escritura: boolean
+/** Nivel de un rol en un modulo */
+export type ModuleLevel = 'ninguno' | 'ver' | 'usar' | 'gestionar'
+
+export interface RoleInfo {
+  id: string
+  name: string
+  description: string
+  template: string | null
+  expiry_days: number | null
+  /** admin: no se edita */
+  locked: boolean
+  levels: Record<string, ModuleLevel>
+  users: number
 }
+
+export interface RolesResponse {
+  modules: string[]
+  roles: RoleInfo[]
+}
+
 
 export interface TelegramChat {
   chat_id: number
   name: string
   username: string | null
   role: UserRole
-  permissions: UserPermissions
   linked_web_user: string | null
   daily_enabled: boolean
   daily_hour: number

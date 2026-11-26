@@ -425,7 +425,7 @@ pub async fn get_roots(
     Extension(session): Extension<SessionInfo>,
 ) -> Result<Json<RootsResponse>, ApiError> {
     let mut resp = roots_response(&state).await?;
-    if session.role != crate::models::notifications::UserRole::Admin {
+    if !session.role.is_admin() {
         let st = storage::Storage::load(&state.db).await?;
         let visible = st.visible_roots(&session);
         resp.roots.retain(|r| std::fs::canonicalize(&r.path).map(|c| visible.contains(&c)).unwrap_or(false));

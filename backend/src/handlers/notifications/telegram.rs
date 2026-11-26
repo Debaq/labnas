@@ -54,12 +54,18 @@ pub async fn notify_admins(state: &AppState, text: &str) -> usize {
 const ADMIN_CHATS: &str =
     "role = 'admin' OR linked_web_user IN (SELECT username FROM web_users WHERE role = 'admin')";
 
-/// Administradores y operadores (p.ej. fallas de maquinas, reservas por aprobar)
-const STAFF_CHATS: &str = "role IN ('admin', 'operador') OR linked_web_user IN (SELECT username FROM web_users WHERE role IN ('admin', 'operador'))";
-
-/// Envia un mensaje (Markdown) a los chats de administradores y operadores
-pub async fn notify_staff(state: &AppState, text: &str) -> usize {
-    notify_chats_where(state, STAFF_CHATS, text).await
+/// Envia un mensaje (Markdown) a quienes gestionan `module` (p.ej. fallas de maquinas,
+/// reservas por aprobar) y al admin
+pub async fn notify_staff(state: &AppState, module: &'static str, text: &str) -> usize {
+    let filter = format!("role != 'pendiente' AND {}", crate::roles::chats_with_level_sql(module, crate::roles::Level::Gestionar));
+    let Some((token, chats)) = tg_targets_with(state, filter, vec![]).await else { return 0 };
+    let mut sent = 0;
+    for chat_id in chats {
+        if send_telegram_message(&state.http_client, &token, chat_id, text).await.is_ok() {
+            sent += 1;
+        }
+    }
+    sent
 }
 
 /// Envia un mensaje (Markdown) a los chats vinculados a esas cuentas web
@@ -125,8 +131,7 @@ pub async fn notify_admins_photo(state: &AppState, jpeg: Vec<u8>, caption: &str,
     if sent == 0 { Err(last_err) } else { Ok(sent) }
 }
 
-/// Fin de impresion: la foto (si hay) llega al personal (admin y operador, los mismos que
-/// pueden pedir `/camara`) y a los chats de `owners` (quien encargo la pieza); el resto de
+/// Fin de impresion: la foto (si hay) llega a quien puede ver las camaras y a los chats de `owners` (quien encargo la pieza); el resto de
 /// los chats activos recibe solo el texto. Sin foto, o si la foto no sale, el texto llega
 /// a todos. Devuelve a cuantos chats llego algo.
 pub async fn notify_print_finished(
@@ -137,7 +142,8 @@ pub async fn notify_print_finished(
     owners: &[String],
 ) -> usize {
     let Some(jpeg) = photo else { return notify_active_chats(state, text).await };
-    let mut viewers = format!("({})", STAFF_CHATS);
+    // La foto la ven quienes pueden ver las camaras (los mismos de `/camara`) y el dueño
+    let mut viewers = crate::roles::chats_with_level_sql("cameras", crate::roles::Level::Ver);
     if !owners.is_empty() {
         let marks: Vec<String> = (1..=owners.len()).map(|i| format!("?{}", i)).collect();
         viewers = format!("({} OR linked_web_user IN ({}))", viewers, marks.join(", "));

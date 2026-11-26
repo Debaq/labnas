@@ -205,7 +205,7 @@ pub async fn delete_event(
             .map_err(|_| "Evento no encontrado".to_string())?;
 
         // Solo el creador o admin puede eliminar
-        if created_by != username && role != UserRole::Admin {
+        if created_by != username && !role.can("tasks", crate::roles::Level::Gestionar) {
             return Err("Sin permisos para eliminar este evento".to_string());
         }
 

@@ -16,7 +16,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::{db_op, db_op_status};
 use crate::events::{Audience, Level};
-use crate::models::notifications::UserRole;
 use crate::models::portfolio::Milestone;
 use crate::state::{AppState, SessionInfo};
 use crate::error::ApiError;
@@ -42,7 +41,7 @@ fn db_err(e: rusqlite::Error) -> ApiError {
 }
 
 fn is_staff(s: &SessionInfo) -> bool {
-    matches!(s.role, UserRole::Admin | UserRole::Operador)
+    s.can("deadlines", crate::roles::Level::Gestionar)
 }
 
 fn today() -> NaiveDate {
@@ -481,9 +480,7 @@ fn countdown_text(days: i64) -> String {
 /// Quienes reciben el aviso: `None` = todos los chats aprobados
 fn recipients(conn: &Connection, d: &Deadline) -> rusqlite::Result<Option<Vec<String>>> {
     let staff = || -> rusqlite::Result<Vec<String>> {
-        let mut stmt = conn.prepare("SELECT username FROM web_users WHERE role IN ('admin', 'operador')")?;
-        let v = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
-        Ok(v)
+        crate::roles::users_with_level(conn, "deadlines", crate::roles::Level::Gestionar)
     };
     let mut users: Vec<String> = match (d.source, d.notify.as_str()) {
         ("manual", "todos") => return Ok(None),

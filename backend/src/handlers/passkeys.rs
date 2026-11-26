@@ -435,19 +435,13 @@ pub async fn login(
             params![i, c, chrono::Utc::now().to_rfc3339()],
         )
         .map_err(|e| e.to_string())?;
-        conn.query_row(
-            "SELECT role, perm_terminal, perm_impresion, perm_archivos_escritura FROM web_users WHERE username = ?1",
-            [&u],
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, r.get::<_, bool>(2)?, r.get::<_, bool>(3)?)),
-        )
-        .optional()
-        .map_err(|e| e.to_string())
+        conn.query_row("SELECT 1 FROM web_users WHERE username = ?1", [&u], |_| Ok(()))
+            .optional()
+            .map_err(|e| e.to_string())
     })
-    .await?
-    .ok_or_else(unknown)?;
+    .await?;
+    user.ok_or_else(unknown)?;
 
-    let role = crate::handlers::auth::role_from_str(&user.0);
-    let permissions = crate::models::notifications::UserPermissions { terminal: user.1, impresion: user.2, archivos_escritura: user.3 };
     let detail = match &bridge {
         Some(Extension(o)) => {
             crate::handlers::auth::notify_internet_login(&state, &username, &o.client_ip);
@@ -456,7 +450,7 @@ pub async fn login(
         None => "Inicio de sesion con passkey".to_string(),
     };
     state.log_activity("login_passkey", &detail, &username).await;
-    crate::handlers::auth::issue_login(&state, &username, role, permissions, bridge.is_some()).await
+    crate::handlers::auth::issue_login(&state, &username, bridge.is_some()).await
 }
 
 // ─── Gestion (usuario con sesion) ───

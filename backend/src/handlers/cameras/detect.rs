@@ -669,7 +669,7 @@ pub(crate) async fn watchers(state: &AppState) -> Vec<String> {
 }
 
 pub(crate) async fn can_view(state: &AppState, s: &SessionInfo) -> bool {
-    s.role == crate::models::notifications::UserRole::Admin || watchers(state).await.contains(&s.username)
+    s.role.is_admin() || watchers(state).await.contains(&s.username)
 }
 
 async fn require_view(state: &AppState, s: &SessionInfo) -> Result<(), ApiError> {
@@ -747,7 +747,7 @@ pub struct DetectorsResponse {
 /// GET /api/cameras/detectors
 pub async fn list_detectors(State(state): State<AppState>, Extension(session): Extension<SessionInfo>) -> Result<Json<DetectorsResponse>, ApiError> {
     require_view(&state, &session).await?;
-    let is_admin = session.role == crate::models::notifications::UserRole::Admin;
+    let is_admin = session.role.is_admin();
     let rules = load_rules(&state).await?;
     let cams: HashMap<String, String> = super::all_cameras(&state).await?.into_iter().map(|c| (c.id, c.name)).collect();
     let now = chrono::Local::now().naive_local();

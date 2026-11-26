@@ -5,7 +5,6 @@ use axum::Extension;
 use rusqlite::OptionalExtension;
 
 use crate::events::{Audience, Level};
-use crate::models::notifications::UserRole;
 use crate::state::SessionInfo;
 
 const STATUSES: &[&str] = &["pendiente", "imprimiendo", "terminado", "cancelado"];
@@ -85,7 +84,7 @@ fn row_to_item(r: &rusqlite::Row) -> rusqlite::Result<QueueItem> {
 }
 
 fn is_manager(s: &SessionInfo) -> bool {
-    matches!(s.role, UserRole::Admin | UserRole::Operador)
+    s.can("printers3d", crate::roles::Level::Gestionar)
 }
 
 fn publish(state: &AppState) {

@@ -7,7 +7,8 @@ use axum::{
 use rusqlite::{params, OptionalExtension};
 
 use crate::models::auth::*;
-use crate::models::notifications::{UserPermissions, UserRole};
+use crate::models::notifications::UserRole;
+use crate::roles::Grants;
 use crate::state::{now_unix, AppState, LoginFailures, SessionInfo, SESSION_TTL_SECS};
 use crate::error::internal;
 
@@ -23,7 +24,8 @@ pub async fn create_session(
     state: &AppState,
     username: &str,
     role: UserRole,
-    permissions: UserPermissions,
+    grants: Grants,
+    account_expires: Option<i64>,
 ) -> Result<String, (StatusCode, String)> {
     let token = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
     let created_at = now_unix();
@@ -40,7 +42,8 @@ pub async fn create_session(
     state.sessions.lock().await.insert(token.clone(), SessionInfo {
         username: username.to_string(),
         role,
-        permissions,
+        grants,
+        account_expires,
         created_at,
     });
     Ok(token)
@@ -63,30 +66,17 @@ pub fn load_sessions(conn: &rusqlite::Connection) -> std::collections::HashMap<S
 
     let mut map = std::collections::HashMap::new();
     let Ok(mut stmt) = conn.prepare(
-        "SELECT s.token, s.username, s.created_at, u.role, u.perm_terminal, u.perm_impresion, u.perm_archivos_escritura
-         FROM sessions s JOIN web_users u ON u.username = s.username",
+        "SELECT s.token, s.username, s.created_at FROM sessions s JOIN web_users u ON u.username = s.username",
     ) else {
         return map;
     };
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            SessionInfo {
-                username: row.get(1)?,
-                created_at: row.get(2)?,
-                role: role_from_str(&row.get::<_, String>(3)?),
-                permissions: UserPermissions {
-                    terminal: row.get(4)?,
-                    impresion: row.get(5)?,
-                    archivos_escritura: row.get(6)?,
-                },
-            },
-        ))
-    });
-    if let Ok(rows) = rows {
-        for (token, session) in rows.flatten() {
-            map.insert(token, session);
-        }
+    let rows: Vec<(String, String, i64)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default();
+    for (token, username, created_at) in rows {
+        let Some((role, grants, account_expires)) = crate::roles::load_user(conn, &username) else { continue };
+        map.insert(token, SessionInfo { username, role: UserRole(role), grants, account_expires, created_at });
     }
     map
 }
@@ -145,18 +135,26 @@ pub fn notify_internet_login(state: &AppState, username: &str, ip: &str) {
     );
 }
 
+pub(crate) const EXPIRED_MSG: &str = "Tu cuenta llego a su fecha de termino. Pidele al administrador que la extienda.";
+
 /// Abre una sesion y responde como el login (token + cookie). La usan las passkeys.
 pub async fn issue_login(
     state: &AppState,
     username: &str,
-    role: UserRole,
-    permissions: UserPermissions,
     secure: bool,
 ) -> Result<Response, (StatusCode, String)> {
-    let token = create_session(state, username, role.clone(), permissions.clone()).await?;
+    let u = username.to_string();
+    let (role, grants, expires) = crate::db::db_op(&state.db, move |conn| Ok(crate::roles::load_user(conn, &u)))
+        .await?
+        .ok_or((StatusCode::UNAUTHORIZED, "Usuario no encontrado".to_string()))?;
+    if crate::roles::is_expired(expires) {
+        return Err((StatusCode::FORBIDDEN, EXPIRED_MSG.to_string()));
+    }
+    let role = UserRole(role);
+    let token = create_session(state, username, role.clone(), grants, expires).await?;
     let modules = crate::db::db_op(&state.db, |conn| Ok(crate::db::get_modules(conn))).await.unwrap_or_default();
     let cookie_token = token.clone();
-    let resp = Json(AuthResponse { token, username: username.to_string(), role, permissions, enabled_modules: modules }).into_response();
+    let resp = Json(AuthResponse { token, username: username.to_string(), role, enabled_modules: modules }).into_response();
     Ok(with_cookie(resp, &cookie_token, secure))
 }
 
@@ -168,23 +166,6 @@ fn extract_token(headers: &HeaderMap) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-pub fn role_from_str(s: &str) -> UserRole {
-    match s {
-        "admin" => UserRole::Admin,
-        "operador" => UserRole::Operador,
-        "observador" => UserRole::Observador,
-        _ => UserRole::Pendiente,
-    }
-}
-
-fn role_to_str(role: &UserRole) -> &'static str {
-    match role {
-        UserRole::Admin => "admin",
-        UserRole::Operador => "operador",
-        UserRole::Observador => "observador",
-        UserRole::Pendiente => "pendiente",
-    }
-}
 
 // --- Has Users (publico, sin auth) ---
 
@@ -220,7 +201,7 @@ pub async fn register(
     let password_hash = bcrypt_hash(req.password.clone()).await?;
 
     let username_clone = username.clone();
-    let (role, permissions) = crate::db::db_op_status(&state.db, move |conn| {
+    let (role, grants) = crate::db::db_op_status(&state.db, move |conn| {
         // IMMEDIATE: dos registros simultaneos no pueden crear dos admins
         let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
             .map_err(internal)?;
@@ -244,35 +225,23 @@ pub async fn register(
         ).map_err(internal)?;
 
         let is_first = user_count == 0;
-        let (role, permissions) = if is_first {
-            (UserRole::Admin, UserPermissions {
-                terminal: true,
-                impresion: true,
-                archivos_escritura: true,
-            })
-        } else {
-            (UserRole::Pendiente, UserPermissions::default())
-        };
+        let (role, grants) = if is_first { (UserRole::admin(), Grants::admin()) } else { (UserRole::pending(), Grants::default()) };
 
         conn.execute(
-            "INSERT INTO web_users (username, password_hash, role, perm_terminal, perm_impresion, perm_archivos_escritura)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                &username_clone, &password_hash, role_to_str(&role),
-                permissions.terminal, permissions.impresion, permissions.archivos_escritura,
-            ],
+            "INSERT INTO web_users (username, password_hash, role) VALUES (?1, ?2, ?3)",
+            params![&username_clone, &password_hash, role.as_str()],
         ).map_err(internal)?;
 
         tx.commit().map_err(internal)?;
-        Ok((role, permissions))
+        Ok((role, grants))
     }).await?;
 
-    let token = create_session(&state, &username, role.clone(), permissions.clone()).await?;
+    let token = create_session(&state, &username, role.clone(), grants, None).await?;
 
-    let detail = if role == UserRole::Pendiente { format!("{} (pendiente de aprobacion)", username) } else { username.clone() };
+    let detail = if role.is_pending() { format!("{} (pendiente de aprobacion)", username) } else { username.clone() };
     state.log_activity("Registro", &detail, &username).await;
 
-    if role == UserRole::Pendiente {
+    if role.is_pending() {
         crate::events::notify(
             &state,
             crate::events::Audience::Admins,
@@ -300,7 +269,6 @@ pub async fn register(
         token,
         username,
         role,
-        permissions,
         enabled_modules: modules,
     })
     .into_response();
@@ -337,27 +305,24 @@ pub async fn login(
     let username_clone = username.clone();
     let user_opt = crate::db::db_op(&state.db, move |conn| {
         conn.query_row(
-            "SELECT password_hash, role, perm_terminal, perm_impresion, perm_archivos_escritura,
-                    totp_secret IS NOT NULL
+            "SELECT password_hash, role, expires_at, totp_secret IS NOT NULL
              FROM web_users WHERE username = ?1",
             params![&username_clone],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, bool>(2)?,
+                    row.get::<_, Option<i64>>(2)?,
                     row.get::<_, bool>(3)?,
-                    row.get::<_, bool>(4)?,
-                    row.get::<_, bool>(5)?,
                 ))
             },
         ).optional().map_err(|e| e.to_string())
     }).await?;
 
     // Usuario inexistente: igual se verifica contra un hash para no revelar si existe
-    let (password_hash, role_str, perm_terminal, perm_impresion, perm_archivos, has_totp, exists) = match user_opt {
-        Some((h, r, t, i, a, totp)) => (h, r, t, i, a, totp, true),
-        None => (dummy_hash(), String::new(), false, false, false, false, false),
+    let (password_hash, expires, has_totp, exists) = match user_opt {
+        Some((h, _, exp, totp)) => (h, exp, totp, true),
+        None => (dummy_hash(), None, false, false),
     };
 
     let valid = bcrypt_verify(req.password.clone(), password_hash).await && exists;
@@ -382,14 +347,17 @@ pub async fn login(
     }
     state.login_failures.lock().await.remove(&username);
 
-    let role = role_from_str(&role_str);
-    let permissions = UserPermissions {
-        terminal: perm_terminal,
-        impresion: perm_impresion,
-        archivos_escritura: perm_archivos,
-    };
+    // Cuenta con fecha de termino (p.ej. auditor): solo se avisa tras la contrasena correcta
+    if crate::roles::is_expired(expires) {
+        return Err((StatusCode::FORBIDDEN, EXPIRED_MSG.to_string()));
+    }
+    let u = username.clone();
+    let (role_str, grants, _) = crate::db::db_op(&state.db, move |conn| Ok(crate::roles::load_user(conn, &u)))
+        .await?
+        .ok_or((StatusCode::UNAUTHORIZED, "Usuario o contrasena incorrectos".to_string()))?;
+    let role = UserRole(role_str);
 
-    let token = create_session(&state, &username, role.clone(), permissions.clone()).await?;
+    let token = create_session(&state, &username, role.clone(), grants, expires).await?;
 
     let secure = bridge.is_some();
     // Inicio de sesion desde internet: queda en la auditoria con la IP real
@@ -408,7 +376,6 @@ pub async fn login(
         token,
         username,
         role,
-        permissions,
         enabled_modules: modules,
     })
     .into_response();
@@ -431,6 +398,15 @@ pub(crate) async fn login_failed(state: &AppState, username: &str) {
 
 // --- Me ---
 
+/// Modulos para la interfaz: los que el rol no puede ver salen como apagados
+pub async fn modules_for(state: &AppState, grants: &Grants) -> Vec<crate::db::ModuleInfo> {
+    let mut modules = crate::db::db_op(&state.db, |conn| Ok(crate::db::get_modules(conn))).await.unwrap_or_default();
+    for m in modules.iter_mut() {
+        m.enabled = m.enabled && grants.can(&m.id, crate::roles::Level::Ver);
+    }
+    modules
+}
+
 pub async fn me(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -440,26 +416,32 @@ pub async fn me(
     let session = sessions.get(&token).ok_or(StatusCode::UNAUTHORIZED)?;
     let username = session.username.clone();
     let role = session.role.clone();
-    let permissions = session.permissions.clone();
+    let grants = session.grants.clone();
+    let expires_at = session.account_expires;
     drop(sessions);
 
     // Get linked telegram from DB
     let username_clone = username.clone();
-    let (linked, totp_enabled) = crate::db::db_op(&state.db, move |conn| {
-        conn.query_row(
+    let role_id = role.as_str().to_string();
+    let (linked, totp_enabled, role_name) = crate::db::db_op(&state.db, move |conn| {
+        let row = conn.query_row(
             "SELECT linked_telegram, totp_secret IS NOT NULL FROM web_users WHERE username = ?1",
             params![&username_clone],
             |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, bool>(1)?)),
-        ).optional().map_err(|e| e.to_string())
-    }).await.ok().flatten().unwrap_or((None, false));
+        ).optional().map_err(|e| e.to_string())?;
+        let name = crate::handlers::roles::role_name(conn, &role_id);
+        Ok(row.map(|(l, t)| (l, t, name)))
+    }).await.ok().flatten().unwrap_or((None, false, String::new()));
 
-    let modules = crate::db::db_op(&state.db, |conn| Ok(crate::db::get_modules(conn))).await
-        .unwrap_or_default();
+    let modules = modules_for(&state, &grants).await;
 
     Ok(Json(MeResponse {
         username,
         role,
-        permissions,
+        role_name,
+        admin: grants.admin,
+        levels: grants.all_levels(),
+        expires_at,
         linked_telegram: linked,
         enabled_modules: modules,
         totp_enabled,
@@ -548,32 +530,27 @@ pub async fn change_password(
 
 pub async fn list_users(
     State(state): State<AppState>,
-) -> Result<Json<Vec<MeResponse>>, (StatusCode, String)> {
+) -> Result<Json<Vec<UserRow>>, (StatusCode, String)> {
     let users = crate::db::db_op(&state.db, |conn| {
         let mut stmt = conn.prepare(
-            "SELECT username, role, perm_terminal, perm_impresion, perm_archivos_escritura, linked_telegram,
-                    totp_secret IS NOT NULL
-             FROM web_users"
+            "SELECT username, role, linked_telegram, totp_secret IS NOT NULL, expires_at FROM web_users ORDER BY username"
         ).map_err(|e| e.to_string())?;
-
-        let rows = stmt.query_map([], |row| {
-            Ok(MeResponse {
-                username: row.get(0)?,
-                role: role_from_str(&row.get::<_, String>(1)?),
-                permissions: UserPermissions {
-                    terminal: row.get(2)?,
-                    impresion: row.get(3)?,
-                    archivos_escritura: row.get(4)?,
-                },
-                linked_telegram: row.get(5)?,
-                enabled_modules: vec![],
-                totp_enabled: row.get(6)?,
+        let mut users: Vec<UserRow> = stmt
+            .query_map([], |row| {
+                Ok(UserRow {
+                    username: row.get(0)?,
+                    role: UserRole(row.get(1)?),
+                    linked_telegram: row.get(2)?,
+                    totp_enabled: row.get(3)?,
+                    expires_at: row.get(4)?,
+                    overrides: Default::default(),
+                })
             })
-        }).map_err(|e| e.to_string())?;
-
-        let mut users = Vec::new();
-        for row in rows {
-            users.push(row.map_err(|e| e.to_string())?);
+            .map_err(|e| e.to_string())?
+            .collect::<Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        for u in users.iter_mut() {
+            u.overrides = crate::roles::user_overrides(conn, &u.username);
         }
         Ok(users)
     }).await?;
@@ -611,20 +588,27 @@ pub async fn set_user_role(
     let role = req.role.clone();
     // Nunca quedarse sin administrador: no se quita el rol a uno mismo (otro admin
     // puede hacerlo) ni al ultimo admin
-    if role != UserRole::Admin && username == me.username {
+    if !role.is_admin() && username == me.username {
         return Err((StatusCode::BAD_REQUEST, "No puedes quitarte el rol de administrador; pidele a otro admin que lo haga".into()));
     }
-    let permissions = req.permissions.clone().unwrap_or_else(|| {
-        crate::handlers::notifications::default_permissions_for_role(&role)
-    });
+    if role.is_admin() && req.expires_at.is_some() {
+        return Err((StatusCode::BAD_REQUEST, "Un administrador no puede tener fecha de termino".into()));
+    }
+    let known = crate::db::module_ids();
+    if let Some(bad) = req.overrides.keys().find(|m| !known.contains(&m.as_str()) || *m == "dashboard") {
+        return Err((StatusCode::BAD_REQUEST, format!("Modulo desconocido: {}", bad)));
+    }
 
-    let role_str = role_to_str(&role).to_string();
-    let new_role = role.clone();
-    let new_perms = permissions.clone();
+    let role_str = role.as_str().to_string();
     let username_clone = username.clone();
+    let expires_at = req.expires_at;
+    let overrides = req.overrides.clone();
 
-    let demoting = new_role != UserRole::Admin;
-    let linked_tg = crate::db::db_op_status(&state.db, move |conn| {
+    let demoting = !role.is_admin();
+    crate::db::db_op_status(&state.db, move |conn| {
+        if !crate::roles::role_exists(conn, &role_str) {
+            return Err((StatusCode::BAD_REQUEST, "Ese rol no existe".to_string()));
+        }
         if demoting {
             let (was_admin, admins): (bool, i64) = conn
                 .query_row(
@@ -637,49 +621,32 @@ pub async fn set_user_role(
                 return Err((StatusCode::BAD_REQUEST, "Es el unico administrador: nombra a otro antes".to_string()));
             }
         }
-        // Update web user
-        let rows = conn.execute(
-            "UPDATE web_users SET role = ?1, perm_terminal = ?2, perm_impresion = ?3, perm_archivos_escritura = ?4
-             WHERE username = ?5",
-            params![&role_str, permissions.terminal, permissions.impresion, permissions.archivos_escritura, &username_clone],
+        let tx = conn.unchecked_transaction().map_err(internal)?;
+        let rows = tx.execute(
+            "UPDATE web_users SET role = ?1, expires_at = ?2 WHERE username = ?3",
+            params![&role_str, expires_at, &username_clone],
         ).map_err(internal)?;
-
         if rows == 0 {
             return Err((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()));
         }
-
-        // Get linked telegram
-        let linked: Option<i64> = conn.query_row(
-            "SELECT linked_telegram FROM web_users WHERE username = ?1",
-            params![&username_clone],
-            |row| row.get(0),
-        ).optional()
-        .map_err(internal)?
-        .flatten();
-
-        // Sync role to linked telegram chat
-        if let Some(tg_id) = linked {
-            conn.execute(
-                "UPDATE telegram_chats SET role = ?1, perm_terminal = ?2, perm_impresion = ?3, perm_archivos_escritura = ?4
-                 WHERE chat_id = ?5",
-                params![&role_str, new_perms.terminal, new_perms.impresion, new_perms.archivos_escritura, tg_id],
+        tx.execute("DELETE FROM user_module_overrides WHERE username = ?1", params![&username_clone]).map_err(internal)?;
+        for (m, l) in &overrides {
+            tx.execute(
+                "INSERT INTO user_module_overrides (username, module_id, level) VALUES (?1, ?2, ?3)",
+                params![&username_clone, m, *l as i64],
             ).map_err(internal)?;
         }
-
-        Ok(linked)
+        // El chat de Telegram vinculado toma el mismo rol
+        tx.execute(
+            "UPDATE telegram_chats SET role = ?1 WHERE chat_id = (SELECT linked_telegram FROM web_users WHERE username = ?2)",
+            params![&role_str, &username_clone],
+        ).map_err(internal)?;
+        tx.commit().map_err(internal)?;
+        Ok(())
     }).await?;
 
-    let _ = linked_tg; // used inside closure
-
-    {
-        let mut sessions = state.sessions.lock().await;
-        for session in sessions.values_mut() {
-            if session.username == username {
-                session.role = new_role.clone();
-                session.permissions = new_perms.clone();
-            }
-        }
-    }
+    crate::roles::refresh_sessions(&state).await;
+    state.log_activity("Rol de usuario", &format!("{} -> {}", username, role.as_str()), &me.username).await;
     // La UI del usuario recarga su rol/permisos al instante (p.ej. al ser aprobado)
     state.events.publish("auth.changed", (), crate::events::Audience::User(username.clone()), None);
 
@@ -741,63 +708,34 @@ pub async fn rename_user(
 
     let old_clone = old_username.clone();
     let new_clone = new_username.clone();
-    let (role, permissions) = crate::db::db_op_status(&state.db, move |conn| {
-        // Check if new username already exists
+    let role = crate::db::db_op_status(&state.db, move |conn| {
         let exists: bool = conn.query_row(
             "SELECT COUNT(*) FROM web_users WHERE username = ?1",
             params![&new_clone],
             |row| row.get::<_, i64>(0),
         ).map_err(internal)?
         > 0;
-
         if exists {
             return Err((StatusCode::CONFLICT, "Ese nombre de usuario ya esta en uso".to_string()));
         }
-
-        // Get current user data
-        let (password_hash, role_str, perm_t, perm_i, perm_a, linked_tg): (String, String, bool, bool, bool, Option<i64>) =
-            conn.query_row(
-                "SELECT password_hash, role, perm_terminal, perm_impresion, perm_archivos_escritura, linked_telegram
-                 FROM web_users WHERE username = ?1",
-                params![&old_clone],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
-            ).optional()
-            .map_err(internal)?
-            .ok_or((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()))?;
-
-        // Insert new row with new username
-        conn.execute(
-            "INSERT INTO web_users (username, password_hash, role, perm_terminal, perm_impresion, perm_archivos_escritura, linked_telegram)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![&new_clone, &password_hash, &role_str, perm_t, perm_i, perm_a, linked_tg],
-        ).map_err(internal)?;
-
-        // Mover sesiones a la fila nueva antes de borrar la vieja (FK ON DELETE CASCADE)
-        conn.execute(
-            "UPDATE sessions SET username = ?1 WHERE username = ?2",
+        // Las tablas hijas (sesiones, passkeys, tokens, excepciones...) siguen por ON UPDATE CASCADE
+        let tx = conn.unchecked_transaction().map_err(internal)?;
+        let rows = tx.execute(
+            "UPDATE web_users SET username = ?1 WHERE username = ?2",
             params![&new_clone, &old_clone],
         ).map_err(internal)?;
-
-        // Delete old row
-        conn.execute(
-            "DELETE FROM web_users WHERE username = ?1",
-            params![&old_clone],
-        ).map_err(internal)?;
-
-        // Update linked_web_user in telegram_chats
-        conn.execute(
+        if rows == 0 {
+            return Err((StatusCode::NOT_FOUND, "Usuario no encontrado".to_string()));
+        }
+        tx.execute(
             "UPDATE telegram_chats SET linked_web_user = ?1 WHERE linked_web_user = ?2",
             params![&new_clone, &old_clone],
         ).map_err(internal)?;
-
-        let role = role_from_str(&role_str);
-        let permissions = UserPermissions {
-            terminal: perm_t,
-            impresion: perm_i,
-            archivos_escritura: perm_a,
-        };
-
-        Ok((role, permissions))
+        let role: String = tx
+            .query_row("SELECT role FROM web_users WHERE username = ?1", params![&new_clone], |r| r.get(0))
+            .map_err(internal)?;
+        tx.commit().map_err(internal)?;
+        Ok(UserRole(role))
     }).await?;
 
     // Actualizar todas las sesiones del usuario
@@ -817,7 +755,6 @@ pub async fn rename_user(
         token,
         username: new_username,
         role,
-        permissions,
         enabled_modules: modules,
     }))
 }

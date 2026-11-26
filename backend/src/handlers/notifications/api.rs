@@ -91,34 +91,13 @@ pub async fn set_chat_role(
     Path(chat_id): Path<i64>,
     Json(req): Json<SetRoleRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let new_role = req.role;
-    let new_perms = req.permissions.unwrap_or_else(|| default_permissions_for_role(&new_role));
-    let role_str = role_to_str(&new_role).to_string();
-    let perms_clone = new_perms.clone();
-    let role_clone = new_role.clone();
+    let role_str = req.role.as_str().to_string();
+    let to_admin = req.role.is_admin();
 
-    let linked_user = crate::db::db_op_status(&state.db, move |conn| {
-        // Check chat exists
-        let exists: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM telegram_chats WHERE chat_id = ?1",
-                params![chat_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .map_err(db_err)?
-            > 0;
-
-        if !exists {
-            return Err((StatusCode::NOT_FOUND, "Chat no encontrado".to_string()));
+    crate::db::db_op_status(&state.db, move |conn| {
+        if !crate::roles::role_exists(conn, &role_str) {
+            return Err((StatusCode::BAD_REQUEST, "Ese rol no existe".to_string()));
         }
-
-        conn.execute(
-            "UPDATE telegram_chats SET role = ?1, perm_terminal = ?2, perm_impresion = ?3, perm_archivos_escritura = ?4 WHERE chat_id = ?5",
-            params![role_str, perms_clone.terminal, perms_clone.impresion, perms_clone.archivos_escritura, chat_id],
-        )
-        .map_err(db_err)?;
-
-        // Get linked web user
         let linked: Option<String> = conn
             .query_row(
                 "SELECT linked_web_user FROM telegram_chats WHERE chat_id = ?1",
@@ -127,32 +106,33 @@ pub async fn set_chat_role(
             )
             .optional()
             .map_err(db_err)?
-            .flatten();
+            .ok_or((StatusCode::NOT_FOUND, "Chat no encontrado".to_string()))?;
 
-        // Sync role to linked web user
-        if let Some(ref username) = linked {
-            conn.execute(
-                "UPDATE web_users SET role = ?1, perm_terminal = ?2, perm_impresion = ?3, perm_archivos_escritura = ?4 WHERE username = ?5",
-                params![role_str, perms_clone.terminal, perms_clone.impresion, perms_clone.archivos_escritura, username],
-            )
-            .map_err(db_err)?;
+        // El rol se sincroniza con la cuenta web vinculada: nunca dejar el sistema sin admin
+        if let (Some(u), false) = (&linked, to_admin) {
+            let (was_admin, admins): (bool, i64) = conn
+                .query_row(
+                    "SELECT (SELECT role FROM web_users WHERE username = ?1) = 'admin', (SELECT COUNT(*) FROM web_users WHERE role = 'admin')",
+                    params![u],
+                    |r| Ok((r.get::<_, Option<bool>>(0)?.unwrap_or(false), r.get(1)?)),
+                )
+                .map_err(db_err)?;
+            if was_admin && admins <= 1 {
+                return Err((StatusCode::BAD_REQUEST, "Ese chat es del unico administrador: nombra a otro antes".to_string()));
+            }
         }
 
-        Ok(linked)
+        conn.execute("UPDATE telegram_chats SET role = ?1 WHERE chat_id = ?2", params![role_str, chat_id])
+            .map_err(db_err)?;
+        if let Some(ref username) = linked {
+            conn.execute("UPDATE web_users SET role = ?1 WHERE username = ?2", params![role_str, username])
+                .map_err(db_err)?;
+        }
+        Ok(())
     })
     .await?;
 
-    // Sync active web sessions
-    if let Some(username) = linked_user {
-        let mut sessions = state.sessions.lock().await;
-        for session in sessions.values_mut() {
-            if session.username == username {
-                session.role = role_clone.clone();
-                session.permissions = new_perms.clone();
-            }
-        }
-    }
-
+    crate::roles::refresh_sessions(&state).await;
     Ok(StatusCode::OK)
 }
 

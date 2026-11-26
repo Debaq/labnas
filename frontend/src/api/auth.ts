@@ -16,7 +16,7 @@ export async function changePassword(currentPassword: string, newPassword: strin
 
 // --- Rename ---
 
-export async function renameUser(newUsername: string): Promise<{ token: string; username: string; role: import('../types').UserRole; permissions: import('../types').UserPermissions }> {
+export async function renameUser(newUsername: string): Promise<{ token: string; username: string; role: import('../types').UserRole }> {
   const res = await api('/api/auth/rename', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -54,17 +54,33 @@ export async function fetchUsernames(): Promise<string[]> {
   return res.json()
 }
 
-export async function fetchWebUsers(): Promise<{ username: string; role: import('../types').UserRole; permissions: import('../types').UserPermissions; totp_enabled?: boolean }[]> {
+export interface WebUserRow {
+  username: string
+  role: import('../types').UserRole
+  totp_enabled?: boolean
+  linked_telegram: number | null
+  /** Fecha de termino (unix) */
+  expires_at: number | null
+  /** Excepciones de la persona sobre su rol */
+  overrides: Record<string, import('../types').ModuleLevel>
+}
+
+export async function fetchWebUsers(): Promise<WebUserRow[]> {
   const res = await api('/api/auth/users')
   if (!res.ok) throw new Error('Error al obtener usuarios')
   return res.json()
 }
 
-export async function setWebUserRole(username: string, role: string, permissions?: import('../types').UserPermissions): Promise<void> {
+/** Rol, vencimiento y excepciones (estas reemplazan las que tenia) */
+export async function setWebUserRole(
+  username: string,
+  role: string,
+  opts: { expires_at?: number | null; overrides?: Record<string, import('../types').ModuleLevel> } = {},
+): Promise<void> {
   const res = await api(`/api/auth/users/${encodeURIComponent(username)}/role`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ role, permissions }),
+    body: JSON.stringify({ role, expires_at: opts.expires_at ?? null, overrides: opts.overrides ?? {} }),
   })
   if (!res.ok) throw new Error((await res.text().catch(() => '')) || 'Error al cambiar rol')
 }

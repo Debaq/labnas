@@ -39,44 +39,8 @@ pub use reminders::{daily_notification_loop, task_reminder_loop};
 pub(crate) use reminders::collect_reminders;
 pub use telegram::{notify_active_chats, notify_admins, notify_admins_photo, notify_print_finished, notify_staff, notify_users, send_tg_public};
 
-/// Permisos por defecto segun el rol (cuando no se envian explicitamente)
-pub fn default_permissions_for_role(role: &UserRole) -> UserPermissions {
-    match role {
-        UserRole::Admin => UserPermissions {
-            terminal: true,
-            impresion: true,
-            archivos_escritura: true,
-        },
-        UserRole::Operador => UserPermissions {
-            terminal: true,
-            impresion: true,
-            archivos_escritura: true,
-        },
-        UserRole::Observador => UserPermissions {
-            terminal: false,
-            impresion: true,
-            archivos_escritura: false,
-        },
-        UserRole::Pendiente => UserPermissions::default(),
-    }
-}
-
 fn parse_role(s: &str) -> UserRole {
-    match s {
-        "admin" => UserRole::Admin,
-        "operador" => UserRole::Operador,
-        "observador" => UserRole::Observador,
-        _ => UserRole::Pendiente,
-    }
-}
-
-fn role_to_str(role: &UserRole) -> &'static str {
-    match role {
-        UserRole::Admin => "admin",
-        UserRole::Operador => "operador",
-        UserRole::Observador => "observador",
-        UserRole::Pendiente => "pendiente",
-    }
+    UserRole(s.to_string())
 }
 
 /// Respuesta sanitizada de NotificationConfig que nunca expone el bot_token

@@ -588,12 +588,7 @@ async fn target_dir(state: &AppState, cam: &CameraRow) -> Result<(PathBuf, u32),
     }
     let st = crate::storage::Storage::load(&state.db).await?;
     // Validacion con permisos de administrador: la carpeta la eligio el admin
-    let admin = SessionInfo {
-        username: "labnas".into(),
-        role: crate::models::notifications::UserRole::Admin,
-        permissions: crate::handlers::notifications::default_permissions_for_role(&crate::models::notifications::UserRole::Admin),
-        created_at: crate::state::now_unix(),
-    };
+    let admin = SessionInfo::new("labnas".into(), crate::models::notifications::UserRole::admin(), crate::roles::Grants::admin(), None);
     let base = st.resolve_for(&admin, &settings.folder, crate::storage::Op::Write)?;
     if !base.is_dir() {
         return Err((StatusCode::NOT_FOUND, "La carpeta de grabaciones no existe".into()));
@@ -851,7 +846,7 @@ pub async fn download_recording(
     let allowed = if detect::is_ai_record(&user) {
         detect::can_view(&state, &session).await
     } else {
-        matches!(session.role, crate::models::notifications::UserRole::Admin | crate::models::notifications::UserRole::Operador)
+        session.can("cameras", crate::roles::Level::Ver)
     };
     if !allowed {
         return Err((StatusCode::FORBIDDEN, "No tienes acceso a esta grabacion".into()));

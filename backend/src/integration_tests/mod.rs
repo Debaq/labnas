@@ -19,6 +19,7 @@ mod https;
 mod ipp;
 mod network;
 mod passkeys;
+mod roles;
 mod printers;
 mod secrets;
 mod security;

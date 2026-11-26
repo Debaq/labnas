@@ -69,8 +69,8 @@ function plusHour(t: string): string {
 
 export default function MachineDetailPage() {
   const { id = '' } = useParams()
-  const { user } = useAuth()
-  const staff = user?.role === 'admin' || user?.role === 'operador'
+  const { user, canModule } = useAuth()
+  const staff = canModule('machines', 'gestionar')
   const isAdmin = user?.role === 'admin'
   const { addToast } = useToast()
   const navigate = useNavigate()

@@ -13,7 +13,6 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 use crate::db::db_op;
-use crate::models::notifications::UserRole;
 use crate::models::tasks::*;
 use crate::state::AppState;
 
@@ -129,8 +128,8 @@ fn task_status_str(s: &TaskStatus) -> &'static str {
 
 // ---- Notificaciones Telegram para tareas ----
 
-/// (chat_id, name, username, role, linked_web_user)
-type TelegramChatRow = (i64, String, Option<String>, String, Option<String>);
+/// (chat_id, name, username, gestiona Tareas, linked_web_user)
+type TelegramChatRow = (i64, String, Option<String>, bool, Option<String>);
 
 async fn notify_task_assigned(state: &AppState, task: &Task) {
     let pool = state.db.clone();
@@ -145,8 +144,12 @@ async fn notify_task_assigned(state: &AppState, task: &Task) {
             .map_err(|e| format!("bot_token: {}", e))?
             .flatten();
 
+        let sql = format!(
+            "SELECT chat_id, name, username, role != 'pendiente' AND COALESCE({}, 0), linked_web_user FROM telegram_chats",
+            crate::roles::chats_with_level_sql("tasks", crate::roles::Level::Gestionar)
+        );
         let mut stmt = conn
-            .prepare("SELECT chat_id, name, username, role, linked_web_user FROM telegram_chats")
+            .prepare(&sql)
             .map_err(|e| format!("telegram_chats: {}", e))?;
         let chats: Vec<TelegramChatRow> = stmt
             .query_map([], |row| {
@@ -170,11 +173,11 @@ async fn notify_task_assigned(state: &AppState, task: &Task) {
         _ => return,
     };
 
-    // @all solo aplica a operadores y admins, no observadores
+    // @all llega a quienes gestionan Tareas (operadores, docentes...), no a todo el mundo
     let target_ids: Vec<i64> = if task.assigned_to.contains(&"all".to_string()) {
         chats
             .iter()
-            .filter(|c| c.3 == "admin" || c.3 == "operador")
+            .filter(|c| c.3)
             .map(|c| c.0)
             .collect()
     } else {
@@ -275,12 +278,12 @@ async fn notify_task_completed(state: &AppState, task: &Task, completed_by: &str
 }
 
 /// Extrae el username de la sesión a partir del header Authorization
-fn extract_username(_state: &AppState, sessions: &std::collections::HashMap<String, crate::state::SessionInfo>, headers: &HeaderMap) -> Option<(String, UserRole)> {
+fn extract_username(_state: &AppState, sessions: &std::collections::HashMap<String, crate::state::SessionInfo>, headers: &HeaderMap) -> Option<(String, crate::state::SessionInfo)> {
     let token = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(|s| s.to_string())?;
     let session = sessions.get(&token)?;
-    Some((session.username.clone(), session.role.clone()))
+    Some((session.username.clone(), session.clone()))
 }

@@ -21,7 +21,6 @@ use std::sync::{LazyLock, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
-use crate::models::notifications::UserRole;
 use crate::state::{AppState, SessionInfo};
 use crate::error::internal;
 
@@ -184,7 +183,7 @@ async fn poll(state: AppState, session: SessionInfo, since: u64, only: Option<&'
     };
 
     let collect = |since: u64| async move {
-        let pending = session.role == UserRole::Pendiente;
+        let pending = session.role.is_pending();
         let candidates: Vec<(u64, Event)> = RING
             .lock()
             .map(|r| r.iter().filter(|(s, _)| *s > since).cloned().collect())
@@ -195,7 +194,7 @@ async fn poll(state: AppState, session: SessionInfo, since: u64, only: Option<&'
             .filter(|(_, ev)| only.is_none_or(|k| ev.kind == k))
             .filter(|(_, ev)| visible_to(ev, &session))
             .filter(|(_, ev)| !pending || matches!(ev.audience, Audience::User(_)))
-            .filter(|(_, ev)| ev.module.is_none_or(|m| enabled.contains(m)))
+            .filter(|(_, ev)| ev.module.is_none_or(|m| enabled.contains(m) && session.can(m, crate::roles::Level::Ver)))
             .collect::<Vec<_>>()
     };
 
@@ -309,7 +308,7 @@ pub fn redeem_ticket(ticket: &str) -> Option<String> {
 fn visible_to(ev: &Event, session: &SessionInfo) -> bool {
     match &ev.audience {
         Audience::All => true,
-        Audience::Admins => session.role == UserRole::Admin,
+        Audience::Admins => session.is_admin(),
         Audience::User(u) => *u == session.username,
     }
 }
@@ -324,14 +323,12 @@ pub async fn events_ws(
     ws.on_upgrade(move |socket| handle_socket(socket, state, session, token.0))
 }
 
-async fn handle_socket(mut socket: WebSocket, state: AppState, session: SessionInfo, token: String) {
+async fn handle_socket(mut socket: WebSocket, state: AppState, mut session: SessionInfo, token: String) {
     let mut rx = state.events.subscribe();
     let mut interests = Interests(Default::default());
     let mut session_check = tokio::time::interval(SESSION_CHECK);
     session_check.tick().await;
 
-    // Los pendientes solo reciben sus propios eventos (p.ej. "auth.changed" al ser aprobados)
-    let pending = session.role == UserRole::Pendiente;
 
     loop {
         tokio::select! {
@@ -350,11 +347,12 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, session: SessionI
                 if !visible_to(&ev, &session) {
                     continue;
                 }
-                if pending && !matches!(ev.audience, Audience::User(_)) {
+                // Los pendientes solo reciben sus propios eventos (p.ej. "auth.changed" al ser aprobados)
+                if session.role.is_pending() && !matches!(ev.audience, Audience::User(_)) {
                     continue;
                 }
                 if let Some(m) = ev.module {
-                    if !state.enabled_modules.lock().await.contains(m) {
+                    if !session.can(m, crate::roles::Level::Ver) || !state.enabled_modules.lock().await.contains(m) {
                         continue;
                     }
                 }
@@ -376,17 +374,13 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, session: SessionI
                 }
             }
             _ = session_check.tick() => {
-                let valid = state
-                    .sessions
-                    .lock()
-                    .await
-                    .get(&token)
-                    .map(|s| !s.is_expired())
-                    .unwrap_or(false);
-                if !valid {
+                // Rol y permisos frescos (el admin pudo cambiarlos)
+                let fresh = state.sessions.lock().await.get(&token).filter(|s| !s.is_expired()).cloned();
+                let Some(fresh) = fresh else {
                     let _ = socket.send(Message::Close(None)).await;
                     break;
-                }
+                };
+                session = fresh;
             }
         }
     }
@@ -395,10 +389,11 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, session: SessionI
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::notifications::UserPermissions;
+    use crate::models::notifications::UserRole;
 
-    fn session(user: &str, role: UserRole) -> SessionInfo {
-        SessionInfo { username: user.into(), role, permissions: UserPermissions::default(), created_at: 0 }
+    fn session(user: &str, role: &str) -> SessionInfo {
+        let grants = if role == "admin" { crate::roles::Grants::admin() } else { Default::default() };
+        SessionInfo::new(user.into(), UserRole(role.into()), grants, None)
     }
 
     fn ev(audience: Audience) -> Event {
@@ -407,8 +402,8 @@ mod tests {
 
     #[test]
     fn audiencias() {
-        let admin = session("ana", UserRole::Admin);
-        let obs = session("bob", UserRole::Observador);
+        let admin = session("ana", "admin");
+        let obs = session("bob", "observador");
         assert!(visible_to(&ev(Audience::All), &obs));
         assert!(visible_to(&ev(Audience::Admins), &admin));
         assert!(!visible_to(&ev(Audience::Admins), &obs));

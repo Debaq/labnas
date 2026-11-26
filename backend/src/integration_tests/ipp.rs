@@ -67,7 +67,7 @@ async fn impresora_de_red_ipp() {
     let admin = s.admin().await;
     let op = s.user(&admin, "op", "operador").await;
     let obs = s.user(&admin, "obs", "observador").await;
-    let no_print = json!({ "role": "observador", "permissions": { "terminal": false, "impresion": false, "archivos_escritura": false } });
+    let no_print = json!({ "role": "observador", "overrides": { "printing": "ver" } });
     assert_eq!(s.post("/api/auth/users/obs/role", &admin, no_print.clone()).await.status, 200);
 
     // Sin permiso de impresion no hay token

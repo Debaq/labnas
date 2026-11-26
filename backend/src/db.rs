@@ -42,6 +42,7 @@ pub fn init_db() -> DbPool {
         create_schema(&conn);
         run_migrations(&conn);
         migrate_from_json(&conn);
+        crate::roles::seed_levels(&conn);
     }
 
     // La DB guarda hashes y secretos: solo legible por el dueño
@@ -388,6 +389,48 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(username);",
     // 23: piel de la interfaz por cuenta (la usa tambien labnas-tray)
     "ALTER TABLE web_users ADD COLUMN ui_theme TEXT;",
+    // 24: roles editables con nivel por modulo (ver roles.rs). Los permisos sueltos de
+    // antes (terminal, impresion, escribir archivos) pasan a excepciones por persona donde
+    // difieren de la plantilla de su rol. `expires_at`: la cuenta deja de entrar (auditor).
+    "CREATE TABLE IF NOT EXISTS roles (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        template TEXT,
+        expiry_days INTEGER,
+        display_order INTEGER NOT NULL DEFAULT 100
+    );
+    CREATE TABLE IF NOT EXISTS role_modules (
+        role_id TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+        module_id TEXT NOT NULL,
+        level INTEGER NOT NULL CHECK (level BETWEEN 0 AND 3),
+        PRIMARY KEY (role_id, module_id)
+    );
+    CREATE TABLE IF NOT EXISTS user_module_overrides (
+        username TEXT NOT NULL REFERENCES web_users(username) ON DELETE CASCADE ON UPDATE CASCADE,
+        module_id TEXT NOT NULL,
+        level INTEGER NOT NULL CHECK (level BETWEEN 0 AND 3),
+        PRIMARY KEY (username, module_id)
+    );
+    ALTER TABLE web_users ADD COLUMN expires_at INTEGER;
+    INSERT OR IGNORE INTO roles (id, name, description, template, expiry_days, display_order) VALUES
+        ('admin', 'Administrador', 'Acceso total, incluida la configuracion del sistema', 'admin', NULL, 0),
+        ('operador', 'Operador', 'Personal del laboratorio: opera equipos y aprueba reservas', 'operador', NULL, 10),
+        ('tecnico', 'Encargado tecnico', 'Mantiene maquinas, impresoras 3D, inventario y red', 'tecnico', NULL, 20),
+        ('investigador', 'Investigador responsable', 'Dirige proyectos: gestiona tareas, portafolio y plazos', 'investigador', NULL, 30),
+        ('administrativo', 'Administrativo', 'Compras, inventario y plazos; no opera equipos', 'administrativo', NULL, 40),
+        ('docente', 'Docente', 'Gestiona tareas, portafolio y plazos de sus cursos', 'docente', NULL, 50),
+        ('ayudante', 'Ayudante', 'Apoya a estudiantes: gestiona la cola de impresion 3D', 'ayudante', NULL, 60),
+        ('estudiante', 'Estudiante', 'Reserva maquinas, imprime y lleva sus tareas', 'estudiante', NULL, 70),
+        ('observador', 'Observador', 'Usuario general del laboratorio (rol de antes)', 'observador', NULL, 80),
+        ('externo', 'Usuario externo', 'Solo reserva maquinas y encola piezas', 'externo', NULL, 90),
+        ('auditor', 'Auditor', 'Ve todo sin modificar nada; su cuenta vence', 'auditor', 90, 100);
+    INSERT OR IGNORE INTO user_module_overrides (username, module_id, level)
+        SELECT username, 'terminal', 0 FROM web_users WHERE role = 'operador' AND perm_terminal = 0
+        UNION ALL SELECT username, 'terminal', 2 FROM web_users WHERE role = 'observador' AND perm_terminal = 1
+        UNION ALL SELECT username, 'printing', 1 FROM web_users WHERE role IN ('operador', 'observador') AND perm_impresion = 0
+        UNION ALL SELECT username, 'files', 1 FROM web_users WHERE role = 'operador' AND perm_archivos_escritura = 0
+        UNION ALL SELECT username, 'files', 2 FROM web_users WHERE role = 'observador' AND perm_archivos_escritura = 1;",
 ];
 
 /// Migracion 16. Publicada: no modificar (ver `MIGRATIONS`).
@@ -1038,6 +1081,11 @@ const DEFAULT_MODULES: &[(&str, i32, bool)] = &[
     ("machines", 14, true),
     ("deadlines", 15, true),
 ];
+
+/// Ids de todos los modulos conocidos
+pub fn module_ids() -> Vec<&'static str> {
+    DEFAULT_MODULES.iter().map(|(id, _, _)| *id).collect()
+}
 
 fn seed_modules(conn: &Connection) {
     for (id, order, enabled) in DEFAULT_MODULES {

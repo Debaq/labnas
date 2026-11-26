@@ -42,6 +42,14 @@ pub(crate) fn collect_reminders(conn: &rusqlite::Connection) -> Option<(String, 
         _ => return None,
     };
     let chats = read_all_chats(conn).unwrap_or_default();
+    // Tareas "para todos": a quienes gestionan Tareas (como el aviso al crearlas)
+    let task_users: std::collections::HashSet<i64> = conn
+        .prepare(&format!(
+            "SELECT chat_id FROM telegram_chats WHERE role != 'pendiente' AND {}",
+            crate::roles::chats_with_level_sql("tasks", crate::roles::Level::Gestionar)
+        ))
+        .and_then(|mut st| st.query_map([], |r| r.get(0)).map(|rows| rows.flatten().collect()))
+        .unwrap_or_default();
 
     let now = chrono::Utc::now();
     let local_now = chrono::Local::now();
@@ -114,8 +122,7 @@ pub(crate) fn collect_reminders(conn: &rusqlite::Connection) -> Option<(String, 
                 chats
                     .iter()
                     .filter(|c| {
-                        (c.role == UserRole::Admin || c.role == UserRole::Operador)
-                            && !confirmed.contains(&c.name)
+                        task_users.contains(&c.chat_id) && !confirmed.contains(&c.name)
                     })
                     .map(|c| c.chat_id)
                     .collect()
@@ -288,7 +295,7 @@ pub(crate) fn collect_reminders(conn: &rusqlite::Connection) -> Option<(String, 
 
             let invitees: Vec<String> = serde_json::from_str(invitees_json).unwrap_or_default();
             let targets: Vec<i64> = if invitees.contains(&"all".to_string()) {
-                chats.iter().filter(|c| c.role != UserRole::Pendiente).map(|c| c.chat_id).collect()
+                chats.iter().filter(|c| !c.role.is_pending()).map(|c| c.chat_id).collect()
             } else {
                 let mut ids: Vec<i64> = chats.iter()
                     .filter(|c| invitees.iter().any(|i| i.to_lowercase() == c.name.to_lowercase()) || c.name == *created_by)

@@ -1,14 +1,32 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-#[derive(Default)]
-pub enum UserRole {
-    #[default]
-    Pendiente,
-    Observador,
-    Operador,
-    Admin,
+/// Id del rol (`admin`, `pendiente` o uno de la tabla `roles`; ver roles.rs)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(transparent)]
+pub struct UserRole(pub String);
+
+impl Default for UserRole {
+    fn default() -> Self {
+        Self::pending()
+    }
+}
+
+impl UserRole {
+    pub fn admin() -> Self {
+        Self(crate::roles::ADMIN.to_string())
+    }
+    pub fn pending() -> Self {
+        Self(crate::roles::PENDING.to_string())
+    }
+    pub fn is_admin(&self) -> bool {
+        self.0 == crate::roles::ADMIN
+    }
+    pub fn is_pending(&self) -> bool {
+        self.0 == crate::roles::PENDING
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 
@@ -29,7 +47,8 @@ pub struct TelegramChat {
     pub username: Option<String>,
     #[serde(default)]
     pub role: UserRole,
-    #[serde(default)]
+    /// Permisos sueltos de antes (migracion 24): ya no deciden nada
+    #[serde(default, skip_serializing)]
     pub permissions: UserPermissions,
     #[serde(default)]
     pub linked_web_user: Option<String>,
@@ -89,8 +108,6 @@ pub struct ScheduleRequest {
 #[derive(Debug, Deserialize)]
 pub struct SetRoleRequest {
     pub role: UserRole,
-    #[serde(default)]
-    pub permissions: Option<UserPermissions>,
 }
 
 // --- Telegram API types ---

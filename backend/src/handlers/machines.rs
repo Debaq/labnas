@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::{db_op, db_op_status};
 use crate::events::{Audience, Level};
-use crate::models::notifications::UserRole;
 use crate::state::{AppState, SessionInfo};
 use crate::error::{ApiError, internal};
 
@@ -48,7 +47,7 @@ pub(crate) fn db_err(e: rusqlite::Error) -> ApiError {
 }
 
 pub(crate) fn is_staff(s: &SessionInfo) -> bool {
-    matches!(s.role, UserRole::Admin | UserRole::Operador)
+    s.can("machines", crate::roles::Level::Gestionar)
 }
 
 fn new_id() -> String {
@@ -260,10 +259,9 @@ fn future_booking_users(conn: &Connection, machine_id: &str, except: &str) -> ru
     rows.collect()
 }
 
+/// Quienes gestionan Maquinas (ademas de los admin, que ya reciben la foto)
 fn operator_usernames(conn: &Connection) -> rusqlite::Result<Vec<String>> {
-    let mut stmt = conn.prepare("SELECT username FROM web_users WHERE role = 'operador'")?;
-    let rows = stmt.query_map([], |r| r.get(0))?;
-    rows.collect()
+    crate::roles::users_with_level(conn, "machines", crate::roles::Level::Gestionar)
 }
 
 // ─── Fotos ───
@@ -744,7 +742,7 @@ pub async fn create_booking(
         );
         let st = state.clone();
         tokio::spawn(async move {
-            crate::handlers::notifications::notify_staff(&st, &text).await;
+            crate::handlers::notifications::notify_staff(&st, "machines", &text).await;
         });
         crate::events::notify(&state, Audience::Admins, MODULE, Level::Info, "Reserva por aprobar", &format!("{}: {}", booking.username, booking.machine_name));
     }
@@ -921,7 +919,7 @@ pub async fn report_fault(
             None => false,
         };
         if !photo_sent {
-            crate::handlers::notifications::notify_staff(&st, &staff_text).await;
+            crate::handlers::notifications::notify_staff(&st, "machines", &staff_text).await;
         }
         crate::handlers::notifications::notify_users(&st, &owners, &owner_text).await;
     });

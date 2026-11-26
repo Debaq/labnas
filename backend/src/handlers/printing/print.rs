@@ -88,7 +88,7 @@ pub async fn print_upload(
         .map_err(internal)?;
 
     let session = extract_session(&state, &headers).await;
-    let is_admin = matches!(&session, Some((_, r)) if *r == crate::models::notifications::UserRole::Admin);
+    let is_admin = matches!(&session, Some((_, r)) if r.is_admin());
     if let Err(e) = ensure_visible(&state, &printer_name, is_admin).await {
         let _ = tokio::fs::remove_dir_all(&tmp_path).await;
         return Err(e);
@@ -140,7 +140,7 @@ pub async fn print_file_path(
         ));
     }
 
-    ensure_visible(&state, &req.printer, session.role == crate::models::notifications::UserRole::Admin).await?;
+    ensure_visible(&state, &req.printer, session.role.is_admin()).await?;
 
     run_lp_command(
         &req.printer,

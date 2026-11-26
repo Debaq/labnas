@@ -87,7 +87,7 @@ pub async fn delete_project(
             .map_err(|_| "Proyecto no encontrado".to_string())?;
 
         // Solo el creador o admin puede eliminar
-        if created_by != uname && role != UserRole::Admin {
+        if created_by != uname && !role.can("tasks", crate::roles::Level::Gestionar) {
             return Err("Sin permisos para eliminar este proyecto".to_string());
         }
 
@@ -144,7 +144,7 @@ pub async fn update_project(
             )
             .map_err(|_| "Proyecto no encontrado".to_string())?;
 
-        if project.created_by != uname && role != UserRole::Admin {
+        if project.created_by != uname && !role.can("tasks", crate::roles::Level::Gestionar) {
             return Err("Sin permisos para modificar este proyecto".to_string());
         }
 

@@ -1,7 +1,7 @@
 use crate::db::DbPool;
 use crate::handlers::music::MusicState;
 use crate::models::network::NetworkHost;
-use crate::models::notifications::{UserPermissions, UserRole};
+use crate::models::notifications::UserRole;
 use crate::models::sensors::SensorLatest;
 use chrono::Utc;
 use serde::Serialize;
@@ -27,14 +27,29 @@ pub const SESSION_TTL_SECS: i64 = 24 * 60 * 60;
 pub struct SessionInfo {
     pub username: String,
     pub role: UserRole,
-    pub permissions: UserPermissions,
+    /// Nivel por modulo, con las excepciones de la persona ya aplicadas
+    pub grants: crate::roles::Grants,
+    /// Fecha de termino de la cuenta (unix), si tiene
+    pub account_expires: Option<i64>,
     /// Unix epoch (segundos); persistido en la tabla `sessions`
     pub created_at: i64,
 }
 
 impl SessionInfo {
+    pub fn new(username: String, role: UserRole, grants: crate::roles::Grants, account_expires: Option<i64>) -> Self {
+        Self { username, role, grants, account_expires, created_at: now_unix() }
+    }
+
     pub fn is_expired(&self) -> bool {
-        now_unix() - self.created_at > SESSION_TTL_SECS
+        now_unix() - self.created_at > SESSION_TTL_SECS || crate::roles::is_expired(self.account_expires)
+    }
+
+    pub fn is_admin(&self) -> bool {
+        self.grants.admin
+    }
+
+    pub fn can(&self, module: &str, level: crate::roles::Level) -> bool {
+        self.grants.can(module, level)
     }
 }
 

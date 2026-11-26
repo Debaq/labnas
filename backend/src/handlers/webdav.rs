@@ -20,7 +20,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::models::notifications::{UserPermissions, UserRole};
+use crate::models::notifications::UserRole;
 use crate::state::{AppState, SessionInfo};
 use crate::storage::{Op, Storage};
 
@@ -88,12 +88,16 @@ async fn authenticate(state: &AppState, user: &str, pass: &str) -> Result<Sessio
         // Con doble factor solo vale la contrasena de aplicacion (WebDAV no admite un segundo factor)
         conn.query_row(
             "SELECT CASE WHEN totp_secret IS NULL THEN password_hash ELSE app_password_hash END,
-                    role, perm_terminal, perm_impresion, perm_archivos_escritura
+                    role, expires_at
              FROM web_users WHERE username = ?1",
             [&u],
-            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?, r.get::<_, bool>(2)?, r.get::<_, bool>(3)?, r.get::<_, bool>(4)?)),
+            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<i64>>(2)?)),
         )
         .optional()
+        .map(|row| row.map(|(h, role, exp)| {
+            let grants = crate::roles::grants_for_user(conn, &u, &role);
+            (h, role, exp, grants)
+        }))
         .map_err(|e| e.to_string())
     })
     .await
@@ -106,7 +110,7 @@ async fn authenticate(state: &AppState, user: &str, pass: &str) -> Result<Sessio
         }
         _ => false,
     };
-    let Some((_, role, t, i, a)) = row.filter(|_| ok) else {
+    let Some((_, role, expires, grants)) = row.filter(|r| ok && !crate::roles::is_expired(r.2)) else {
         let mut failures = state.login_failures.lock().await;
         let f = failures.entry(user.to_string()).or_insert(crate::state::LoginFailures { count: 0, last: Instant::now() });
         f.count += 1;
@@ -115,12 +119,7 @@ async fn authenticate(state: &AppState, user: &str, pass: &str) -> Result<Sessio
     };
     state.login_failures.lock().await.remove(user);
 
-    let session = SessionInfo {
-        username: user.to_string(),
-        role: crate::handlers::auth::role_from_str(&role),
-        permissions: UserPermissions { terminal: t, impresion: i, archivos_escritura: a },
-        created_at: crate::state::now_unix(),
-    };
+    let session = SessionInfo::new(user.to_string(), UserRole(role), grants, expires);
     if let Ok(mut cache) = CREDENTIALS.lock() {
         cache.retain(|_, (_, at)| at.elapsed() < CRED_TTL);
         cache.insert(key, (session.clone(), Instant::now()));
@@ -234,8 +233,11 @@ pub async fn handle(State(state): State<AppState>, req: Request) -> Response {
         Ok(s) => s,
         Err(r) => return *r,
     };
-    if session.role == UserRole::Pendiente {
+    if session.role.is_pending() {
         return plain(StatusCode::FORBIDDEN, "Cuenta pendiente de aprobacion");
+    }
+    if !session.can("files", crate::roles::Level::Ver) {
+        return plain(StatusCode::FORBIDDEN, "Tu rol no tiene acceso a Archivos");
     }
 
     let st = match Storage::load(&state.db).await {

@@ -6,7 +6,7 @@ pub async fn list_printers(
     State(app): State<AppState>,
     axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
 ) -> Result<Json<Vec<CupsPrinter>>, (StatusCode, String)> {
-    let is_admin = session.role == crate::models::notifications::UserRole::Admin;
+    let is_admin = session.role.is_admin();
     let hidden = hidden_printers(&app).await;
 
     let names_output = Command::new("lpstat")
@@ -106,7 +106,7 @@ pub async fn printer_options(
     Path(name): Path<String>,
 ) -> Result<Json<Vec<PrinterOption>>, (StatusCode, String)> {
     validate_printer_name(&name)?;
-    ensure_visible(&state, &name, session.role == crate::models::notifications::UserRole::Admin).await?;
+    ensure_visible(&state, &name, session.role.is_admin()).await?;
 
     let output = Command::new("lpoptions")
         .args(["-p", &name, "-l"])
@@ -233,7 +233,7 @@ pub async fn wake_printer_endpoint(
     Path(name): Path<String>,
 ) -> Result<(StatusCode, String), (StatusCode, String)> {
     validate_printer_name(&name)?;
-    ensure_visible(&state, &name, session.role == crate::models::notifications::UserRole::Admin).await?;
+    ensure_visible(&state, &name, session.role.is_admin()).await?;
     ensure_printer_ready(&name).await;
     Ok((StatusCode::OK, "Impresora despertada y habilitada".to_string()))
 }
@@ -276,7 +276,7 @@ pub async fn list_jobs(
     State(state): State<AppState>,
     axum::Extension(session): axum::Extension<crate::state::SessionInfo>,
 ) -> Result<Json<Vec<CupsPrintJob>>, (StatusCode, String)> {
-    let is_admin = session.role == crate::models::notifications::UserRole::Admin;
+    let is_admin = session.role.is_admin();
     let hidden = if is_admin { Default::default() } else { hidden_printers(&state).await };
     let output = Command::new("lpstat")
         .arg("-o")
@@ -338,7 +338,7 @@ pub async fn cancel_job(
     }
     // Trabajo de una impresora oculta: como si no existiera (salvo admin)
     if let Some(i) = id.rfind('-') {
-        ensure_visible(&state, &id[..i], session.role == crate::models::notifications::UserRole::Admin).await?;
+        ensure_visible(&state, &id[..i], session.role.is_admin()).await?;
     }
 
     let output = Command::new("cancel")

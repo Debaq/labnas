@@ -181,7 +181,7 @@ pub fn valid_principal(p: &str) -> bool {
         EVERYONE | WRITE_PERM => true,
         _ => {
             if let Some(role) = p.strip_prefix("role:") {
-                matches!(role, "admin" | "operador" | "observador")
+                crate::handlers::roles::valid_role_id(role)
             } else if let Some(user) = p.strip_prefix("user:") {
                 !user.is_empty() && user.len() <= 32 && user.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.')
             } else {
@@ -192,19 +192,13 @@ pub fn valid_principal(p: &str) -> bool {
 }
 
 fn principal_matches(p: &str, s: &crate::state::SessionInfo) -> bool {
-    use crate::models::notifications::UserRole;
     match p {
         EVERYONE => true,
-        WRITE_PERM => s.permissions.archivos_escritura,
+        // "Con permiso de escritura": nivel Usar en Archivos
+        WRITE_PERM => s.can("files", crate::roles::Level::Usar),
         _ => {
             if let Some(role) = p.strip_prefix("role:") {
-                let r = match s.role {
-                    UserRole::Admin => "admin",
-                    UserRole::Operador => "operador",
-                    UserRole::Observador => "observador",
-                    UserRole::Pendiente => "pendiente",
-                };
-                role == r
+                role == s.role.as_str()
             } else {
                 p.strip_prefix("user:") == Some(s.username.as_str())
             }
@@ -271,7 +265,7 @@ impl Storage {
     }
 
     pub fn can(&self, s: &crate::state::SessionInfo, path: &Path, op: Op) -> bool {
-        if s.role == crate::models::notifications::UserRole::Admin {
+        if s.role.is_admin() {
             return self.access_for(path).is_some();
         }
         let Some(a) = self.access_for(path) else { return false };
@@ -382,18 +376,20 @@ mod tests {
         assert!(resolve(&roots, link.join("passwd").to_str().unwrap()).is_err());
     }
 
-    fn sess(user: &str, role: crate::models::notifications::UserRole, write: bool) -> crate::state::SessionInfo {
-        crate::state::SessionInfo {
-            username: user.into(),
-            role,
-            permissions: crate::models::notifications::UserPermissions { archivos_escritura: write, ..Default::default() },
-            created_at: 0,
-        }
+    fn sess(user: &str, role: &str, write: bool) -> crate::state::SessionInfo {
+        use crate::roles::{Grants, Level};
+        let grants = if role == "admin" {
+            Grants::admin()
+        } else {
+            let level = if write { Level::Usar } else { Level::Ver };
+            Grants { admin: false, levels: [("files".to_string(), level)].into_iter().collect() }
+        };
+        crate::state::SessionInfo::new(user.into(), crate::models::notifications::UserRole(role.into()), grants, None)
     }
 
     #[test]
     fn permisos_por_carpeta() {
-        use crate::models::notifications::UserRole::*;
+        let (observador, operador, admin_r) = ("observador", "operador", "admin");
         let a = tmp_root();
         let b = tmp_root();
         let st = Storage {
@@ -403,11 +399,11 @@ mod tests {
             ],
             ordered: vec![a.clone(), b.clone()],
         };
-        let obs = sess("ana", Observador, false);
-        let obs_w = sess("eva", Observador, true);
-        let op = sess("oscar", Operador, false);
-        let bob = sess("bob", Observador, false);
-        let admin = sess("root", Admin, false);
+        let obs = sess("ana", observador, false);
+        let obs_w = sess("eva", observador, true);
+        let op = sess("oscar", operador, false);
+        let bob = sess("bob", observador, false);
+        let admin = sess("root", admin_r, false);
 
         // por defecto: todos leen, escribe quien tiene el permiso
         assert!(st.can(&obs, &a.join("x"), Op::Read));
@@ -436,17 +432,17 @@ mod tests {
             ],
             ordered: vec![a.clone(), inner.clone()],
         };
-        let ana = sess("ana", crate::models::notifications::UserRole::Observador, false);
+        let ana = sess("ana", "observador", false);
         assert!(st.can(&ana, &a.join("otro"), Op::Read));
         assert!(!st.can(&ana, &inner.join("x"), Op::Read));
     }
 
     #[test]
     fn principales_validos() {
-        for p in ["*", "perm:write", "role:operador", "user:bob.lab"] {
+        for p in ["*", "perm:write", "role:operador", "role:jefe_taller", "user:bob.lab"] {
             assert!(valid_principal(p), "{}", p);
         }
-        for p in ["", "role:jefe", "user:", "user:a b", "grupo:x"] {
+        for p in ["", "role:", "role:Jefe Taller", "user:", "user:a b", "grupo:x"] {
             assert!(!valid_principal(p), "{}", p);
         }
     }

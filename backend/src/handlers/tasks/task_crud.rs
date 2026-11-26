@@ -174,7 +174,7 @@ pub async fn update_task(
         // Solo el creador, asignados o admin pueden actualizar
         let is_assigned = task.assigned_to.contains(&"all".to_string())
             || task.assigned_to.iter().any(|a| a.to_lowercase() == uname.to_lowercase());
-        if task.created_by != uname && !is_assigned && role != UserRole::Admin {
+        if task.created_by != uname && !is_assigned && !role.can("tasks", crate::roles::Level::Gestionar) {
             return Err("Sin permisos para modificar esta tarea".to_string());
         }
 
@@ -505,7 +505,7 @@ pub async fn delete_task(
             .map_err(|_| "Tarea no encontrada".to_string())?;
 
         // Solo el creador o admin puede eliminar
-        if created_by != uname && role != UserRole::Admin {
+        if created_by != uname && !role.can("tasks", crate::roles::Level::Gestionar) {
             return Err("Sin permisos para eliminar esta tarea".to_string());
         }
 

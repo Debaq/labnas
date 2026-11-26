@@ -148,7 +148,7 @@ fn remove_path(p: &Path) -> std::io::Result<()> {
 /// GET /api/trash — mas recientes primero
 /// Puede gestionar el elemento: escritura en la carpeta de origen (el admin siempre)
 fn can_manage(st: &crate::storage::Storage, s: &SessionInfo, item: &TrashItem) -> bool {
-    s.role == crate::models::notifications::UserRole::Admin
+    s.role.is_admin()
         || st.can(s, Path::new(&item.original_path), crate::storage::Op::Write)
 }
 

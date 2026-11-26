@@ -26,13 +26,13 @@ export async function deleteBotToken(): Promise<void> {
   if (!res.ok) throw new Error('Error al eliminar bot')
 }
 
-export async function setChatRole(chatId: number, role: string, permissions?: import('../types').UserPermissions): Promise<void> {
+export async function setChatRole(chatId: number, role: string): Promise<void> {
   const res = await api(`/api/notifications/telegram/chat/${chatId}/role`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ role, permissions }),
+    body: JSON.stringify({ role }),
   })
-  if (!res.ok) throw new Error('Error al cambiar rol')
+  if (!res.ok) throw new Error((await res.text().catch(() => '')) || 'Error al cambiar rol')
 }
 
 export async function deleteTelegramChat(chatId: number): Promise<void> {

@@ -11,7 +11,6 @@ use serde::Deserialize;
 use std::time::Instant;
 
 use crate::models::notes::Note;
-use crate::models::notifications::UserRole;
 use crate::state::AppState;
 use crate::error::internal;
 
@@ -153,7 +152,7 @@ pub async fn list_shares(
     State(state): State<AppState>,
     Extension(session): Extension<crate::state::SessionInfo>,
 ) -> Json<Vec<serde_json::Value>> {
-    let is_admin = session.role == UserRole::Admin;
+    let is_admin = session.role.is_admin();
     let shares = state.share_links.lock().await;
 
     let list: Vec<serde_json::Value> = shares
@@ -183,7 +182,7 @@ pub async fn delete_share(
 ) -> StatusCode {
     let mut shares = state.share_links.lock().await;
     match shares.get(&token) {
-        Some(s) if s.owner == session.username || session.role == UserRole::Admin => {
+        Some(s) if s.owner == session.username || session.role.is_admin() => {
             shares.remove(&token);
             StatusCode::NO_CONTENT
         }

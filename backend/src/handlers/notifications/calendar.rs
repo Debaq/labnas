@@ -66,7 +66,7 @@ pub(super) async fn handle_event_command(state: &AppState, creator: &str, text: 
         let alert = format!("📅 *Nuevo evento*\n\n*{}*\nFecha: {} {}\nDe: {}\nInvitados: {}\n\n`/aceptar {}` o `/declinar {}`",
             title, date, time, creator, inv_str, id, id);
         let targets: Vec<i64> = if invitees.contains(&"all".to_string()) {
-            chats.iter().filter(|c| c.role != UserRole::Pendiente && c.name != creator).map(|c| c.chat_id).collect()
+            chats.iter().filter(|c| !c.role.is_pending() && c.name != creator).map(|c| c.chat_id).collect()
         } else {
             chats.iter().filter(|c| invitees.iter().any(|i| i.to_lowercase() == c.name.to_lowercase())).map(|c| c.chat_id).collect()
         };

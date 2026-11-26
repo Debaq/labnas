@@ -29,8 +29,8 @@ function duration(seconds: number | null): string {
 
 /** Cola compartida: cualquiera pide; operadores y admins ordenan, asignan y marcan estados */
 export default function PrintQueueModal({ printers, onClose }: { printers: Printer3DConfig[]; onClose: () => void }) {
-  const { user } = useAuth()
-  const manager = user?.role === 'admin' || user?.role === 'operador'
+  const { user, canModule } = useAuth()
+  const manager = canModule('printers3d', 'gestionar')
   const [items, setItems] = useState<QueueItem[] | null>(null)
   const [form, setForm] = useState<QueueInput | null>(null)
   const [busy, setBusy] = useState(false)

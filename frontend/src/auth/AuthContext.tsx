@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import type { UserRole, UserPermissions, ModuleInfo } from '../types'
+import type { UserRole, ModuleInfo, ModuleLevel } from '../types'
 import { api, UNAUTHORIZED_EVENT } from '../api/client'
 import { loginWithPasskey } from '../api/passkeys'
 
@@ -7,9 +7,16 @@ import { loginWithPasskey } from '../api/passkeys'
 interface AuthUser {
   username: string
   role: UserRole
-  permissions: UserPermissions
+  /** Nombre visible del rol */
+  roleName?: string
+  /** Nivel en cada modulo (rol + excepciones de la persona) */
+  levels?: Record<string, ModuleLevel>
+  /** Fecha de termino de la cuenta (unix) */
+  expiresAt?: number | null
   enabledModules: ModuleInfo[]
 }
+
+const LEVEL_ORDER: Record<ModuleLevel, number> = { ninguno: 0, ver: 1, usar: 2, gestionar: 3 }
 
 interface AuthContextType {
   user: AuthUser | null
@@ -21,6 +28,8 @@ interface AuthContextType {
   register: (username: string, password: string) => Promise<void>
   logout: () => void
   can: (perm: 'terminal' | 'impresion' | 'archivos_escritura' | 'settings') => boolean
+  /** Tiene al menos `level` en el modulo `module` (el admin, siempre) */
+  canModule: (module: string, level: ModuleLevel) => boolean
   isAdmin: boolean
   enabledModules: ModuleInfo[]
   isModuleEnabled: (id: string) => boolean
@@ -62,10 +71,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return api('/api/auth/me').then(res => {
       if (res.ok) {
         return res.json().then(data => {
-          const updated = {
+          const updated: AuthUser = {
             ...parsed,
             role: data.role,
-            permissions: data.permissions,
+            roleName: data.role_name,
+            levels: data.levels,
+            expiresAt: data.expires_at ?? null,
             enabledModules: parseModules(data),
           }
           setUser(updated)
@@ -128,11 +139,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const authUser: AuthUser = {
       username: data.username,
       role: data.role,
-      permissions: data.permissions,
       enabledModules: parseModules(data),
     }
     setUser(authUser)
     localStorage.setItem('labnas_auth', JSON.stringify(authUser))
+    // Niveles por modulo y nombre del rol
+    await refreshFromServer(authUser).catch(() => {})
     return true
   }
 
@@ -141,11 +153,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const authUser: AuthUser = {
       username: data.username,
       role: data.role as UserRole,
-      permissions: data.permissions as UserPermissions,
       enabledModules: parseModules(data as { enabled_modules?: unknown }),
     }
     setUser(authUser)
     localStorage.setItem('labnas_auth', JSON.stringify(authUser))
+    await refreshFromServer(authUser).catch(() => {})
   }
 
   async function register(username: string, password: string) {
@@ -162,11 +174,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const authUser: AuthUser = {
       username: data.username,
       role: data.role,
-      permissions: data.permissions,
       enabledModules: parseModules(data),
     }
     setUser(authUser)
     localStorage.setItem('labnas_auth', JSON.stringify(authUser))
+    await refreshFromServer(authUser).catch(() => {})
   }
 
   function logout() {
@@ -177,13 +189,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('labnas_auth')
   }
 
-  function can(perm: 'terminal' | 'impresion' | 'archivos_escritura' | 'settings'): boolean {
+  function canModule(module: string, level: ModuleLevel): boolean {
     if (!user) return false
     if (user.role === 'admin') return true
-    if (perm === 'settings') return false
     if (user.role === 'pendiente') return false
-    if (user.role === 'observador') return perm === 'impresion' && user.permissions.impresion
-    return user.permissions[perm] ?? false
+    if (module === 'dashboard') return true
+    const have = user.levels?.[module] ?? 'ninguno'
+    return LEVEL_ORDER[have] >= LEVEL_ORDER[level]
+  }
+
+  /** Atajos de los permisos de antes, hoy niveles en su modulo */
+  function can(perm: 'terminal' | 'impresion' | 'archivos_escritura' | 'settings'): boolean {
+    if (!user) return false
+    if (perm === 'settings') return user.role === 'admin'
+    if (perm === 'terminal') return canModule('terminal', 'usar')
+    if (perm === 'impresion') return canModule('printing', 'usar')
+    return canModule('files', 'usar')
   }
 
   const isAdmin = user?.role === 'admin'
@@ -200,21 +221,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await refreshFromServer(user).catch(() => {})
   }
 
+  /** /api/auth/me ya trae los modulos filtrados por lo que el rol puede ver */
   async function refreshModules() {
     if (!user) return
-    try {
-      const res = await api('/api/modules')
-      if (res.ok) {
-        const modules: ModuleInfo[] = await res.json()
-        const updated = { ...user, enabledModules: modules }
-        setUser(updated)
-        localStorage.setItem('labnas_auth', JSON.stringify(updated))
-      }
-    } catch {}
+    await refreshFromServer(user).catch(() => {})
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, passkeyLogin, register, logout, can, isAdmin, enabledModules, isModuleEnabled, refreshModules, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, login, passkeyLogin, register, logout, can, canModule, isAdmin, enabledModules, isModuleEnabled, refreshModules, refreshUser }}>
       {children}
     </AuthContext.Provider>
   )

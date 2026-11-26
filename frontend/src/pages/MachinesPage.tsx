@@ -28,8 +28,8 @@ import MachineStatusChip from '../components/machines/MachineStatusChip'
 type Tab = 'machines' | 'mine' | 'pending'
 
 export default function MachinesPage() {
-  const { user } = useAuth()
-  const staff = user?.role === 'admin' || user?.role === 'operador'
+  const { canModule } = useAuth()
+  const staff = canModule('machines', 'gestionar')
   const { addToast } = useToast()
   const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('machines')
