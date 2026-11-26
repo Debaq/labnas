@@ -43,3 +43,4 @@ pub mod display;
 pub mod sensor_incidents;
 pub mod sensor_export;
 pub mod inventory_loans;
+pub mod presence;

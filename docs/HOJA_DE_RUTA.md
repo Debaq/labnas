@@ -305,8 +305,10 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       restante, cola del día, temperaturas, alertas y ocupación. *(hecho:
       `docs/PANTALLA.md`; enlace secreto de solo lectura por pantalla, con secciones a
       elegir. La ocupación de personas llega con el registro de entrada, idea 48)*
-- [ ] **48. Registro de entrada** con QR o tarjeta: cuántas personas vienen y de qué
-      carrera.
+- [x] **48. Registro de entrada** con QR o tarjeta: cuántas personas vienen y de qué
+      carrera. *(hecho con QR en el módulo Seguridad, `docs/SEGURIDAD.md`: entrada y
+      salida, visitas, quién está ahora y estadísticas por día y carrera; la tarjeta queda
+      para la llave electrónica, idea 18)*
 
 ## Etapa 4 · Materiales, costos y servicios
 

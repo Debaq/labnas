@@ -2,7 +2,7 @@ import { api, jsonOrThrow } from './client'
 
 // --- Pantalla del laboratorio (backend/src/handlers/display.rs) ---
 
-export type DisplaySection = 'maquinas' | 'impresoras' | 'agenda' | 'sensores' | 'plazos' | 'avisos'
+export type DisplaySection = 'maquinas' | 'impresoras' | 'agenda' | 'sensores' | 'plazos' | 'avisos' | 'presencia'
 
 export const DISPLAY_SECTIONS: { id: DisplaySection; label: string; module: string }[] = [
   { id: 'maquinas', label: 'Maquinas en uso', module: 'machines' },
@@ -11,6 +11,7 @@ export const DISPLAY_SECTIONS: { id: DisplaySection; label: string; module: stri
   { id: 'sensores', label: 'Sensores', module: 'sensors' },
   { id: 'plazos', label: 'Plazos cercanos', module: 'deadlines' },
   { id: 'avisos', label: 'Avisos (fallas, mantenciones, alarmas)', module: 'machines' },
+  { id: 'presencia', label: 'Quien esta en el laboratorio', module: 'seguridad' },
 ]
 
 export interface DisplayScreen {
@@ -34,6 +35,7 @@ export interface DisplayData {
   sensors: { name: string; online: boolean; readings: [string, number][]; alarm: string[] }[]
   deadlines: { title: string; due_date: string; days_left: number; level: string }[]
   notices: { kind: 'falla' | 'mantencion' | 'sensor'; text: string }[]
+  presence?: { who: string; visitor: boolean; since: string }[]
 }
 
 export async function fetchScreens(): Promise<DisplayScreen[]> {

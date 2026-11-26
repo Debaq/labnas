@@ -60,3 +60,18 @@ un ítem del Inventario. Todos con acceso al módulo las ven; solo *Gestionar* l
 Código: `backend/src/handlers/safety.rs`, tablas `safety_*` (migración al final de `db.rs`),
 página `frontend/src/pages/SafetyPage.tsx` y `components/safety/`. Tests:
 `backend/src/integration_tests/safety.rs`.
+
+## Registro de entrada (quién está en el laboratorio)
+
+Pestaña **Quién está** de Seguridad.
+
+- Cada persona marca **Entré** al llegar y **Salí** al irse; la carrera o afiliación se
+  recuerda de la vez anterior. Quien gestiona Seguridad imprime el **QR de la puerta**, que
+  abre directo esta pestaña.
+- Las **visitas** sin cuenta las registra cualquiera del laboratorio (nombre y de dónde
+  vienen); su salida la marca quien la registró o quien gestiona Seguridad.
+- Se ve quién está adentro ahora (útil en una emergencia), cuántas personas vinieron hoy, un
+  gráfico de los últimos 14 días y las visitas por carrera de los últimos 30.
+- Lo que nadie cerró se cierra solo al día siguiente (a las 23:59 del día de entrada).
+- El historial completo es solo para quien gestiona Seguridad.
+- La pantalla del laboratorio puede mostrar la sección **Quién está en el laboratorio**.

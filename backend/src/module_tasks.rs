@@ -65,6 +65,8 @@ fn spawn_for(state: &AppState, id: &str) -> Vec<JoinHandle<()>> {
         "deadlines" => vec![tokio::spawn(handlers::deadlines::alert_loop(s()))],
         // Inventario: aviso diario de prestamos atrasados
         "inventory" => vec![tokio::spawn(handlers::inventory_loans::overdue_loop(s()))],
+        // Registro de entrada: cierra lo que quedo abierto de dias anteriores
+        "seguridad" => vec![tokio::spawn(handlers::presence::close_loop(s()))],
         _ => Vec::new(),
     }
 }

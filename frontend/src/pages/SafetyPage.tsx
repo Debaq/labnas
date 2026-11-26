@@ -17,15 +17,17 @@ import { errorMessage } from '../lib/errors'
 import IncidentsTab from '../components/safety/IncidentsTab'
 import TrainingsTab from '../components/safety/TrainingsTab'
 import SheetsTab from '../components/safety/SheetsTab'
+import PresenceTab from '../components/safety/PresenceTab'
 
-type Tab = 'incidentes' | 'capacitaciones' | 'fichas'
+type Tab = 'incidentes' | 'capacitaciones' | 'fichas' | 'presencia'
 
 export default function SafetyPage() {
   const { canModule } = useAuth()
   const staff = canModule('seguridad', 'gestionar')
   const canReport = canModule('seguridad', 'usar')
   const { addToast } = useToast()
-  const [tab, setTab] = useState<Tab>('incidentes')
+  // El QR de la puerta abre /safety?entrada=1 directo en el registro de entrada
+  const [tab, setTab] = useState<Tab>(() => (new URLSearchParams(window.location.search).has('entrada') ? 'presencia' : 'incidentes'))
   const [loading, setLoading] = useState(true)
   const [incidents, setIncidents] = useState<SafetyIncident[]>([])
   const [trainings, setTrainings] = useState<SafetyTraining[]>([])
@@ -55,6 +57,7 @@ export default function SafetyPage() {
     { id: 'incidentes', label: 'Incidentes', badge: open },
     { id: 'capacitaciones', label: 'Capacitaciones', badge: missing },
     { id: 'fichas', label: 'Fichas', badge: 0 },
+    { id: 'presencia', label: 'Quien esta', badge: 0 },
   ]
 
   return (
@@ -77,6 +80,8 @@ export default function SafetyPage() {
         <IncidentsTab incidents={incidents} staff={staff} canReport={canReport} onChange={load} />
       ) : tab === 'capacitaciones' ? (
         <TrainingsTab trainings={trainings} mine={mine} staff={staff} onChange={load} />
+      ) : tab === 'presencia' ? (
+        <PresenceTab staff={staff} />
       ) : (
         <SheetsTab sheets={sheets} staff={staff} onChange={load} />
       )}

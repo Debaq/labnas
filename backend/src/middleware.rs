@@ -210,6 +210,10 @@ pub fn required_access(method: &Method, path: &str) -> Access {
 
         // --- Seguridad: ver fichas y capacitaciones propias y reportar incidentes (Usar);
         // el handler limita lo que ve cada quien; Gestionar revisa incidentes y administra ---
+        // Registro de entrada: marcar la propia entrada/salida y registrar visitas (Usar);
+        // el historial completo es de quien gestiona
+        ("GET", ["safety", "presence", "history"]) => Gestionar,
+        ("POST", ["safety", "presence", "in" | "out" | "visitor"]) | ("POST", ["safety", "presence", _, "out"]) => Usar,
         ("GET", ["safety", ..]) => Ver,
         ("POST", ["safety", "incidents"]) => Usar,
         (_, ["safety", ..]) => Gestionar,

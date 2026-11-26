@@ -154,3 +154,41 @@ async fn incidentes_se_cierran_con_nota() {
     assert_eq!(s.delete(&format!("/api/safety/incidents/{}", id), &admin).await.status, 405);
     assert_eq!(s.get("/api/safety/summary", &op).await.json()["open_incidents"], 0);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn registro_de_entrada() {
+    let s = super::harness::Server::start().await;
+    let admin = s.admin().await;
+    let ana = s.user(&admin, "ana", "estudiante").await;
+    let bob = s.user(&admin, "bob", "estudiante").await;
+
+    // Entrar dos veces no duplica
+    let e = s.post("/api/safety/presence/in", &ana, serde_json::json!({ "affiliation": "Ing. Civil Mecanica" })).await;
+    assert_eq!(e.status, 200);
+    let again = s.post("/api/safety/presence/in", &ana, serde_json::json!({})).await.json();
+    assert_eq!(again["id"], e.json()["id"]);
+
+    // Visita registrada por bob
+    let v = s.post("/api/safety/presence/visitor", &bob, serde_json::json!({ "name": "Profe visitante", "affiliation": "UdeC" })).await;
+    assert_eq!(v.status, 200);
+    let vid = v.json()["id"].as_str().unwrap().to_string();
+
+    let o = s.get("/api/safety/presence", &bob).await.json();
+    assert_eq!(o["inside"].as_array().unwrap().len(), 2);
+    assert_eq!(o["today"], 2);
+    let ov = s.get("/api/safety/presence", &ana).await.json();
+    assert_eq!(ov["my_affiliation"], "Ing. Civil Mecanica");
+    assert!(ov["me"].is_object());
+
+    // La salida de otro: solo staff o quien registro la visita
+    let ana_id = e.json()["id"].as_str().unwrap().to_string();
+    assert_eq!(s.post(&format!("/api/safety/presence/{}/out", ana_id), &bob, serde_json::json!({})).await.status, 403);
+    assert_eq!(s.post(&format!("/api/safety/presence/{}/out", vid), &bob, serde_json::json!({})).await.status, 200);
+    assert_eq!(s.post("/api/safety/presence/out", &ana, serde_json::json!({})).await.status, 200);
+    assert_eq!(s.post("/api/safety/presence/out", &ana, serde_json::json!({})).await.status, 409);
+    assert_eq!(s.get("/api/safety/presence", &bob).await.json()["inside"].as_array().unwrap().len(), 0);
+
+    // Historial: solo quien gestiona
+    assert_eq!(s.get("/api/safety/presence/history", &bob).await.status, 403);
+    assert_eq!(s.get("/api/safety/presence/history", &admin).await.json().as_array().unwrap().len(), 2);
+}

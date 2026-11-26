@@ -27,6 +27,7 @@ pub const SECTIONS: &[(&str, &str, &str)] = &[
     ("sensores", "sensors", "Sensores"),
     ("plazos", "deadlines", "Plazos cercanos"),
     ("avisos", "machines", "Avisos"),
+    ("presencia", "seguridad", "Quien esta en el laboratorio"),
 ];
 
 #[derive(Debug, Serialize)]
@@ -219,6 +220,13 @@ pub struct Notice {
     pub text: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PresenceRow {
+    pub who: String,
+    pub visitor: bool,
+    pub since: String,
+}
+
 #[derive(Debug, Default, Serialize)]
 pub struct DisplayData {
     pub name: String,
@@ -232,6 +240,7 @@ pub struct DisplayData {
     pub sensors: Vec<SensorRow>,
     pub deadlines: Vec<DeadlineRow>,
     pub notices: Vec<Notice>,
+    pub presence: Vec<PresenceRow>,
 }
 
 /// Nombre y logo del laboratorio (Configuracion > Laboratorio)
@@ -335,6 +344,13 @@ pub async fn display_data(State(state): State<AppState>, Path(token): Path<Strin
                 .into_iter()
                 .take(8)
                 .map(|d| DeadlineRow { title: d.title, due_date: d.due_date, days_left: d.days_left, level: d.level })
+                .collect();
+        }
+        if want("presencia") {
+            data.presence = crate::handlers::presence::inside(conn)
+                .map_err(internal)?
+                .into_iter()
+                .map(|e| PresenceRow { who: e.who, visitor: e.visitor, since: e.entered_at })
                 .collect();
         }
         data.sections = sections;

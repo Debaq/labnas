@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Box, CalendarClock, Hourglass, Thermometer, Wrench } from 'lucide-react'
+import { AlertTriangle, Box, CalendarClock, Hourglass, Thermometer, Users, Wrench } from 'lucide-react'
 import { fetchDisplay, type DisplayData } from '../api'
 import type { IconComponent } from '../lib/icons'
 import { READING_LABELS, READING_UNITS } from '../lib/sensors'
@@ -188,6 +188,19 @@ export default function DisplayPage({ token }: { token: string }) {
                 </span>
               </div>
             ))}
+          </Card>
+        )}
+        {has('presencia') && (
+          <Card title={`En el laboratorio (${data.presence?.length ?? 0})`} icon={Users}>
+            {(data.presence ?? []).length === 0 && empty('Nadie marcado adentro')}
+            <div className="flex flex-wrap gap-2">
+              {(data.presence ?? []).map((p, i) => (
+                <span key={i} className="px-3 py-1 rounded-full text-lg" style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>
+                  {p.who}{p.visitor && <span className="text-sm" style={{ color: 'var(--text-secondary)' }}> (visita)</span>}
+                  <span className="text-sm ml-1" style={{ color: 'var(--text-secondary)' }}>{hhmm(p.since)}</span>
+                </span>
+              ))}
+            </div>
           </Card>
         )}
       </main>

@@ -638,6 +638,20 @@ const MIGRATIONS: &[&str] = &[
         mime TEXT NOT NULL,
         data BLOB NOT NULL
     );",
+    // 33: registro de entrada al laboratorio (idea 48): personas con cuenta o visitas,
+    // carrera o afiliacion, entrada y salida
+    "CREATE TABLE IF NOT EXISTS safety_presence (
+        id TEXT PRIMARY KEY,
+        username TEXT,
+        visitor_name TEXT,
+        affiliation TEXT NOT NULL DEFAULT '',
+        registered_by TEXT NOT NULL,
+        entered_at TEXT NOT NULL,
+        left_at TEXT,
+        auto_closed INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_safety_presence_open ON safety_presence(left_at, username);
+    CREATE INDEX IF NOT EXISTS idx_safety_presence_day ON safety_presence(entered_at);",
 
 ];
 
