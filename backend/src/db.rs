@@ -519,6 +519,30 @@ const MIGRATIONS: &[&str] = &[
         resolved_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_sensor_incidents_open ON sensor_incidents(resolved_at, alert_id);",
+    // 29: inventario ampliado (ideas 1, 31, 33, 34): stock minimo con aviso, vencimiento,
+    // items prestables y prestamos con fecha de devolucion
+    "ALTER TABLE inventory_items ADD COLUMN min_quantity REAL;
+    ALTER TABLE inventory_items ADD COLUMN expires_on TEXT;
+    ALTER TABLE inventory_items ADD COLUMN loanable INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE IF NOT EXISTS inventory_stock_alerts (
+        item_id TEXT PRIMARY KEY,
+        alerted_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS inventory_loans (
+        id TEXT PRIMARY KEY,
+        item_id TEXT NOT NULL,
+        borrower TEXT NOT NULL,
+        quantity REAL NOT NULL DEFAULT 1,
+        lent_by TEXT NOT NULL,
+        lent_at TEXT NOT NULL,
+        due_on TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        returned_at TEXT,
+        returned_to TEXT,
+        reminded_on TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_inventory_loans_open ON inventory_loans(returned_at, due_on);
+    CREATE INDEX IF NOT EXISTS idx_inventory_loans_item ON inventory_loans(item_id);",
 ];
 
 /// Migracion 16. Publicada: no modificar (ver `MIGRATIONS`).

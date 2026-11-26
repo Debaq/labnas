@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Package, Plus, Trash2, Pencil, X, Loader2, Search,
   MapPin, ChevronDown, ChevronUp, ExternalLink,
@@ -9,6 +10,8 @@ import {
 } from '../api'
 import { useAuth } from '../auth/AuthContext'
 import AccessBadge from '../components/access/AccessBadge'
+import ItemLoans from '../components/inventory/ItemLoans'
+import LoansPanel from '../components/inventory/LoansPanel'
 import { useAccessLevels } from '../components/access/useAccessLevels'
 import type { InventoryCategory, InventoryItem, ItemStatus } from '../types'
 import { errorMessage } from '../lib/errors'
@@ -52,6 +55,15 @@ export default function InventoryPage() {
   }, [])
 
   useEffect(() => { loadData() }, [loadData])
+
+  // Etiqueta QR: /inventory?item=<id> abre ese item
+  const [searchParams] = useSearchParams()
+  const linked = searchParams.get('item')
+  useEffect(() => {
+    if (!linked || items.length === 0) return
+    setExpandedItem(linked)
+    setTimeout(() => document.getElementById(`item-${linked}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
+  }, [linked, items.length])
 
   const isFilamentCategory = (catId: string) => {
     const cat = categories.find(c => c.id === catId)
@@ -206,13 +218,14 @@ export default function InventoryPage() {
           </div>
         ) : (
           <div className="space-y-2">
+            <LoansPanel onChange={loadData} />
             {filteredItems.map(item => {
               const cat = categories.find(c => c.id === item.category_id)
               const st = STATUS_LABELS[item.status] || STATUS_LABELS.activo
               const isExpanded = expandedItem === item.id
               const isFilament = isFilamentCategory(item.category_id)
               return (
-                <div key={item.id} className="rounded-xl transition-all duration-200"
+                <div key={item.id} id={`item-${item.id}`} className="rounded-xl transition-all duration-200"
                   style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }}>
                   <div className="flex items-center gap-3 px-5 py-3 cursor-pointer" onClick={() => setExpandedItem(isExpanded ? null : item.id)}>
                     <span className="text-lg shrink-0">{cat?.icon || '📦'}</span>
@@ -225,6 +238,15 @@ export default function InventoryPage() {
                       <div className="flex items-center gap-3 text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>
                         {cat && <span>{cat.name}</span>}
                         {item.location && <span><MapPin size={9} className="inline" /> {item.location}</span>}
+                        {item.min_quantity != null && item.quantity <= item.min_quantity && (
+                          <span style={{ color: 'var(--danger)' }}>Stock bajo (min {item.min_quantity})</span>
+                        )}
+                        {item.expires_on && (() => {
+                          const d = Math.round((new Date(item.expires_on + 'T00:00').getTime() - new Date(new Date().toDateString()).getTime()) / 86400000)
+                          return d <= 30 ? <span style={{ color: d < 0 ? 'var(--danger)' : 'var(--warning, #d97706)' }}>{d < 0 ? 'Vencido' : d === 0 ? 'Vence hoy' : `Vence en ${d} d`}</span> : null
+                        })()}
+                        {(item.on_loan ?? 0) > 0 && <span style={{ color: 'var(--accent)' }}>Prestado: {item.on_loan}</span>}
+                        {item.loanable && !(item.on_loan) && <span>Prestable</span>}
                         {isFilament && item.filament_remaining != null && item.filament_weight && (
                           <span style={{ color: (item.filament_remaining / item.filament_weight) < 0.2 ? 'var(--danger)' : 'var(--success)' }}>
                             {item.filament_remaining.toFixed(0)}g / {item.filament_weight}g
@@ -273,6 +295,9 @@ export default function InventoryPage() {
                       {Object.entries(item.custom_fields || {}).map(([k, v]) => (
                         <div key={k}><span style={{ color: 'var(--text-secondary)' }}>{k}:</span> {v}</div>
                       ))}
+                      {item.expires_on && <div><span style={{ color: 'var(--text-secondary)' }}>Vence:</span> {item.expires_on}</div>}
+                      {item.min_quantity != null && <div><span style={{ color: 'var(--text-secondary)' }}>Stock minimo:</span> {item.min_quantity} {item.unit}</div>}
+                      <ItemLoans item={item} onChange={loadData} />
                     </div>
                   )}
                 </div>
@@ -387,6 +412,24 @@ export default function InventoryPage() {
                   <input type="date" value={form.purchase_date || ''} onChange={e => setForm(p => ({ ...p, purchase_date: e.target.value }))}
                     className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inputStyle} />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3 items-end">
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Stock minimo</label>
+                  <input type="number" min={0} step="any" value={form.min_quantity ?? ''} placeholder="Sin aviso"
+                    onChange={e => setForm(p => ({ ...p, min_quantity: e.target.value === '' ? null : parseFloat(e.target.value) }))}
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inputStyle} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Vence el</label>
+                  <input type="date" value={form.expires_on || ''} onChange={e => setForm(p => ({ ...p, expires_on: e.target.value || null }))}
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inputStyle} />
+                </div>
+                <label className="flex items-center gap-2 text-xs pb-2" style={{ color: 'var(--text-primary)' }} title="Cualquiera con acceso a Inventario puede llevarlo prestado, con fecha de devolucion">
+                  <input type="checkbox" checked={!!form.loanable} onChange={e => setForm(p => ({ ...p, loanable: e.target.checked }))} />
+                  Prestable
+                </label>
               </div>
 
               {/* Filament-specific fields */}

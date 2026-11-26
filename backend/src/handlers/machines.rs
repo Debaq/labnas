@@ -541,7 +541,7 @@ pub struct QrResp {
 }
 
 /// Origen `http(s)://host[:puerto]` tal como lo ve el navegador (sin ruta ni credenciales)
-fn clean_origin(base: &str) -> Result<String, ApiError> {
+pub(crate) fn clean_origin(base: &str) -> Result<String, ApiError> {
     let u = reqwest::Url::parse(base.trim()).map_err(|_| bad("Direccion invalida"))?;
     let ok = matches!(u.scheme(), "http" | "https")
         && u.host_str().is_some()

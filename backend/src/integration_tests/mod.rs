@@ -18,6 +18,7 @@ mod device_tokens;
 mod files;
 mod folders;
 mod https;
+mod inventory;
 mod ipp;
 mod network;
 mod passkeys;

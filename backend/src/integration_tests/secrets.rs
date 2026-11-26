@@ -68,6 +68,9 @@ async fn migracion_cifra_secretos_en_claro() {
              ALTER TABLE sensor_alerts DROP COLUMN critical;
              ALTER TABLE sensor_alerts DROP COLUMN escalation;
              ALTER TABLE sensor_alerts DROP COLUMN escalate_minutes;
+             ALTER TABLE inventory_items DROP COLUMN min_quantity;
+             ALTER TABLE inventory_items DROP COLUMN expires_on;
+             ALTER TABLE inventory_items DROP COLUMN loanable;
              ALTER TABLE camera_detections DROP COLUMN tg_sent;
              ALTER TABLE camera_detections DROP COLUMN tg_error;",
         )

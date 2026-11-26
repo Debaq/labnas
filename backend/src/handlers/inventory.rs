@@ -120,6 +120,7 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<InventoryItem> {
     let custom_fields: std::collections::HashMap<String, String> =
         serde_json::from_str(&custom_fields_str).unwrap_or_default();
     let created_at_str: String = row.get(23)?;
+    let expires_on: Option<String> = row.get(25)?;
     let created_at = chrono::DateTime::parse_from_rfc3339(&created_at_str)
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_else(|_| Utc::now());
@@ -148,11 +149,17 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<InventoryItem> {
         filament_color: row.get(20)?,
         filament_density: row.get(21)?,
         custom_fields,
+        min_quantity: row.get(24)?,
+        expires_on: expires_on.filter(|s| !s.is_empty()),
+        loanable: row.get::<_, i64>(26)? != 0,
+        on_loan: row.get(27)?,
         created_at,
     })
 }
 
-const ITEM_SELECT: &str = "SELECT id, category_id, name, description, quantity, unit, cost, supplier, supplier_url, location, serial_number, purchase_date, status, notes, brand, model_name, material_type, filament_diameter, filament_weight, filament_remaining, filament_color, filament_density, custom_fields, created_at FROM inventory_items";
+const ITEM_SELECT: &str = "SELECT id, category_id, name, description, quantity, unit, cost, supplier, supplier_url, location, serial_number, purchase_date, status, notes, brand, model_name, material_type, filament_diameter, filament_weight, filament_remaining, filament_color, filament_density, custom_fields, created_at, min_quantity, expires_on, loanable,
+    (SELECT COALESCE(SUM(l.quantity), 0) FROM inventory_loans l WHERE l.item_id = inventory_items.id AND l.returned_at IS NULL)
+    FROM inventory_items";
 
 pub async fn list_items(State(state): State<AppState>) -> Json<Vec<InventoryItem>> {
     let items = crate::db::db_op(&state.db, |conn| {
@@ -178,12 +185,27 @@ pub async fn create_item(
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Datos invalidos: {}", e)))?;
     item.id = uuid::Uuid::new_v4().to_string()[..8].to_string();
     item.created_at = Utc::now();
+    validate_extras(&item)?;
 
     let item_clone = item.clone();
     crate::db::db_op(&state.db, move |conn| {
         insert_item(conn, &item_clone)
     }).await?;
+    crate::handlers::inventory_loans::after_item_change(&state, &item.id).await;
     Ok(Json(item))
+}
+
+/// Stock minimo y vencimiento validos
+fn validate_extras(item: &InventoryItem) -> Result<(), (StatusCode, String)> {
+    if item.min_quantity.is_some_and(|m| !(0.0..=1e9).contains(&m)) {
+        return Err((StatusCode::BAD_REQUEST, "Stock minimo invalido".into()));
+    }
+    if let Some(e) = item.expires_on.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if chrono::NaiveDate::parse_from_str(e, "%Y-%m-%d").is_err() {
+            return Err((StatusCode::BAD_REQUEST, "Fecha de vencimiento invalida (AAAA-MM-DD)".into()));
+        }
+    }
+    Ok(())
 }
 
 fn insert_item(conn: &rusqlite::Connection, item: &InventoryItem) -> Result<(), String> {
@@ -193,8 +215,8 @@ fn insert_item(conn: &rusqlite::Connection, item: &InventoryItem) -> Result<(), 
         .unwrap_or_else(|| "activo".to_string());
     let custom_fields_str = serde_json::to_string(&item.custom_fields).unwrap_or_else(|_| "{}".to_string());
     conn.execute(
-        "INSERT INTO inventory_items (id, category_id, name, description, quantity, unit, cost, supplier, supplier_url, location, serial_number, purchase_date, status, notes, brand, model_name, material_type, filament_diameter, filament_weight, filament_remaining, filament_color, filament_density, custom_fields, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
+        "INSERT INTO inventory_items (id, category_id, name, description, quantity, unit, cost, supplier, supplier_url, location, serial_number, purchase_date, status, notes, brand, model_name, material_type, filament_diameter, filament_weight, filament_remaining, filament_color, filament_density, custom_fields, created_at, min_quantity, expires_on, loanable)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
         params![
             item.id, item.category_id, item.name, item.description,
             item.quantity, item.unit, item.cost, item.supplier, item.supplier_url,
@@ -204,6 +226,9 @@ fn insert_item(conn: &rusqlite::Connection, item: &InventoryItem) -> Result<(), 
             item.filament_remaining, item.filament_color, item.filament_density,
             custom_fields_str,
             item.created_at.to_rfc3339(),
+            item.min_quantity,
+            item.expires_on.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+            item.loanable,
         ],
     ).map_err(|e| e.to_string())?;
     Ok(())
@@ -237,6 +262,7 @@ pub async fn update_item(
 
     item.id = saved_id;
     item.created_at = created_at;
+    validate_extras(&item)?;
 
     let item_clone = item.clone();
     let id_for_delete = id.clone();
@@ -246,6 +272,7 @@ pub async fn update_item(
             .map_err(|e| e.to_string())?;
         insert_item(conn, &item_clone)
     }).await?;
+    crate::handlers::inventory_loans::after_item_change(&state, &item.id).await;
 
     Ok(Json(item))
 }
@@ -263,6 +290,7 @@ pub async fn delete_item(
             return Err((StatusCode::NOT_FOUND, "Item no encontrado".to_string()));
         }
         crate::handlers::access::forget(conn, "bien", &id);
+        conn.execute("DELETE FROM inventory_stock_alerts WHERE item_id = ?1", params![id]).map_err(internal)?;
         Ok(())
     }).await?;
     Ok(StatusCode::NO_CONTENT)

@@ -64,3 +64,37 @@ export async function deletePrintHistory(id: string): Promise<void> {
   const res = await api(`/api/inventory/print-history/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Error al eliminar entrada')
 }
+
+// --- Prestamos, stock minimo y QR (backend/src/handlers/inventory_loans.rs) ---
+
+export async function fetchLoans(q: { open?: boolean; mine?: boolean; item?: string } = {}): Promise<import('../types').InventoryLoan[]> {
+  const p = new URLSearchParams()
+  if (q.open) p.set('open', 'true')
+  if (q.mine) p.set('mine', 'true')
+  if (q.item) p.set('item', q.item)
+  const res = await api(`/api/inventory/loans?${p}`)
+  if (!res.ok) throw new Error('Error al leer los prestamos')
+  return res.json()
+}
+
+export async function createLoan(itemId: string, data: { borrower?: string; quantity: number; due_on: string; note?: string }): Promise<import('../types').InventoryLoan> {
+  const res = await api(`/api/inventory/items/${encodeURIComponent(itemId)}/loans`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al prestar')
+  return res.json()
+}
+
+export async function returnLoan(id: string, note = ''): Promise<import('../types').InventoryLoan> {
+  const res = await api(`/api/inventory/loans/${encodeURIComponent(id)}/return`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note }),
+  })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al devolver')
+  return res.json()
+}
+
+export async function fetchInventoryQr(id: string): Promise<{ url: string; svg: string }> {
+  const res = await api(`/api/inventory/items/${encodeURIComponent(id)}/qr?base=${encodeURIComponent(window.location.origin)}`)
+  if (!res.ok) throw new Error((await res.text()) || 'Error al generar el QR')
+  return res.json()
+}

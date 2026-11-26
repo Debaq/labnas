@@ -372,7 +372,31 @@ export interface InventoryItem {
   filament_color: string | null
   filament_density: number | null
   custom_fields: Record<string, string>
+  /** Stock minimo: al bajar de aqui se avisa a quien gestiona Inventario */
+  min_quantity?: number | null
+  /** Vencimiento `YYYY-MM-DD` (sale en Plazos) */
+  expires_on?: string | null
+  /** Se puede llevar prestado sin pedirlo al staff */
+  loanable?: boolean
+  /** Cantidad prestada sin devolver */
+  on_loan?: number
   created_at: string
+}
+
+export interface InventoryLoan {
+  id: string
+  item_id: string
+  item_name: string
+  borrower: string
+  quantity: number
+  lent_by: string
+  lent_at: string
+  due_on: string
+  note: string
+  returned_at: string | null
+  returned_to: string | null
+  /** Dias que faltan (negativo = atrasado) */
+  days_left: number
 }
 
 export interface PrintHistoryEntry {

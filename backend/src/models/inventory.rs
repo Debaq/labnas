@@ -71,6 +71,18 @@ pub struct InventoryItem {
     // Custom fields
     #[serde(default)]
     pub custom_fields: HashMap<String, String>,
+    /// Stock minimo: al bajar de aqui se avisa a quien gestiona Inventario
+    #[serde(default)]
+    pub min_quantity: Option<f64>,
+    /// Fecha de vencimiento `YYYY-MM-DD` (resinas, reactivos, baterias): sale en Plazos
+    #[serde(default)]
+    pub expires_on: Option<String>,
+    /// Se puede llevar prestado sin pedirlo al staff
+    #[serde(default)]
+    pub loanable: bool,
+    /// Calculado: cantidad prestada sin devolver (no se guarda)
+    #[serde(default)]
+    pub on_loan: f64,
     #[serde(default = "chrono::Utc::now")]
     pub created_at: DateTime<Utc>,
 }
