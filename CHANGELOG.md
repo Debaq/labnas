@@ -1,5 +1,48 @@
 # Changelog
 
+## [3.8.0] — 2026-11-26
+
+Desde v3.7.0.
+
+### Finanzas: presupuesto
+
+- Presupuesto por proyecto e ítem (categorías de fondos concursables); cambiar un monto exige motivo y queda en la bitácora
+- **Ejecución en vivo**: aprobado, comprometido y gastado por ítem, con aviso al cruzar el % de alerta y el 100%
+- Bienes de Inventario ligados a proyecto, con número de inventario y responsable
+- **Caja chica** con arqueos (quien custodia no hace su propio arqueo) e ingresos por servicios; el arqueo pendiente aparece en Plazos
+
+### Finanzas: compras
+
+- Flujo solicitud → cotización → aprobada → orden → recibida → facturada → pagada → rendida, sin saltarse pasos
+- Separación de funciones: quien pide, aprueba y recibe deben ser personas distintas
+- Mínimo de cotizaciones configurable (3 desde $1.000.000 por defecto)
+- Factura electrónica del SII leída desde el XML; PDF con extracción asistida
+- Recepción con foto y alta directa en Inventario
+- Aprobación con passkey (opcional) y declaración de conflicto de interés, que bloquea a quien aprueba
+- Acta de compra imprimible
+
+### Finanzas: rendición
+
+- Rendición en Excel, CSV o ZIP con respaldos
+- **Expediente** ZIP con índice, huellas SHA-256 y bitácora verificable
+- Manual de procedimientos con versiones inalterables y firmas
+- **Detector de anomalías**: duplicados, fraccionamiento, proveedores nuevos y funciones cruzadas
+- Horas y honorarios por proyecto
+
+### Finanzas: viajes
+
+- Solicitud, aprobación por otra persona, comprobantes e informe de comisión obligatorio para cerrar
+
+### Transparencia
+
+- **Portal público** armado desde los datos reales, con secciones a elegir y vista previa. Viene apagado y solo publica proyectos con presupuesto en Finanzas
+- **Solicitudes de información** con folio, código de seguimiento y plazo en días hábiles
+
+### Otros
+
+- Sin sesión, un módulo apagado responde «No encontrado» sin delatar que existe
+- Roles: Finanzas y Transparencia agregados a las plantillas
+
 ## [3.7.0] — 2026-11-26
 
 Desde v3.6.2.
