@@ -82,6 +82,8 @@ export default function UsagePanel({ machine, me, staff, onChange }: Props) {
             </>
           )}
         </div>
+      ) : machine.status === 'fuera_servicio' ? (
+        <p className="text-sm" style={{ color: 'var(--danger)' }}>Fuera de servicio: no se puede usar hasta que la reparen.</p>
       ) : !retired && (
         <div className="space-y-2">
           <input value={project} onChange={(e) => setProject(e.target.value)} maxLength={120} placeholder="Proyecto (opcional)"
