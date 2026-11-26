@@ -38,3 +38,13 @@ Botón **Reciclaje** en Inventario: se anota cada movimiento de plástico con fe
 y kilos, en tres tipos: **triturado**, **filamento recuperado** y **desecho** (lo que no se
 pudo reciclar). Arriba se ven los totales del último año y el porcentaje reaprovechado, un
 gráfico por mes y la lista de movimientos. Sirve para informes de sostenibilidad.
+
+## Lista de materiales de KiCad
+
+Botón **BOM KiCad** en Inventario: se sube el CSV de la lista de materiales que exporta KiCad
+(Esquema → Herramientas → Generar lista de materiales) y se indica cuántas placas se van a
+armar. LabNAS agrupa las líneas por valor y huella y las cruza con el Inventario buscando el
+valor y el tamaño de la huella (0805, 0603…) en el nombre, modelo o descripción de cada ítem,
+por ejemplo «Resistencia 10k 0805». Muestra cuántas hay disponibles (sin contar lo prestado)
+y arma la **lista de compra** en CSV con lo que falta. Todo ocurre en el navegador: el CSV no
+se guarda en el servidor.

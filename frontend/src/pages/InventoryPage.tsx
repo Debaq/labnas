@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Scissors, Recycle,
+import { Scissors, Recycle, CircuitBoard,
   Package, Plus, Trash2, Pencil, X, Loader2, Search,
   MapPin, ChevronDown, ChevronUp, ExternalLink,
 } from 'lucide-react'
@@ -14,6 +14,7 @@ import ItemLoans from '../components/inventory/ItemLoans'
 import LoansPanel from '../components/inventory/LoansPanel'
 import OffcutsPanel from '../components/inventory/OffcutsPanel'
 import RecyclingPanel from '../components/inventory/RecyclingPanel'
+import BomPanel from '../components/inventory/BomPanel'
 import { useAccessLevels } from '../components/access/useAccessLevels'
 import type { InventoryCategory, InventoryItem, ItemStatus } from '../types'
 import { errorMessage } from '../lib/errors'
@@ -42,7 +43,7 @@ export default function InventoryPage() {
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
   const [editingCat, setEditingCat] = useState<InventoryCategory | null>(null)
   const [expandedItem, setExpandedItem] = useState<string | null>(null)
-  const [view, setView] = useState<'items' | 'retazos' | 'reciclaje'>('items')
+  const [view, setView] = useState<'items' | 'retazos' | 'reciclaje' | 'bom'>('items')
 
   // Form state
   const [form, setForm] = useState<Partial<InventoryItem>>({})
@@ -212,6 +213,10 @@ export default function InventoryPage() {
             style={{ backgroundColor: view === 'reciclaje' ? 'var(--accent)' : 'var(--bg-tertiary)', color: view === 'reciclaje' ? '#fff' : 'var(--text-primary)' }}>
             <Recycle size={16} /> Reciclaje
           </button>
+          <button onClick={() => setView(v => (v === 'bom' ? 'items' : 'bom'))} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium shrink-0"
+            style={{ backgroundColor: view === 'bom' ? 'var(--accent)' : 'var(--bg-tertiary)', color: view === 'bom' ? '#fff' : 'var(--text-primary)' }}>
+            <CircuitBoard size={16} /> BOM KiCad
+          </button>
           <button onClick={() => openNewItem()} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium shrink-0"
             style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
             <Plus size={16} /> Nuevo Item
@@ -222,6 +227,8 @@ export default function InventoryPage() {
           <OffcutsPanel />
         ) : view === 'reciclaje' ? (
           <RecyclingPanel />
+        ) : view === 'bom' ? (
+          <BomPanel items={items} />
         ) : loading ? (
           <div className="flex justify-center py-16"><Loader2 size={24} className="animate-spin" style={{ color: 'var(--accent)' }} /></div>
         ) : filteredItems.length === 0 ? (

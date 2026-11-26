@@ -322,8 +322,8 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       *(hecho en Inventario: búsqueda por material, espesor y tamaño de la pieza)*
 - [x] **33. Préstamo de herramientas** con QR y aviso de devolución vencida. *(hecho:
       ítems prestables, préstamo con fecha de devolución y aviso diario si se atrasa)*
-- [ ] **35. Lista de materiales desde KiCad:** revisa el stock y arma el pedido de lo
-      que falta.
+- [x] **35. Lista de materiales desde KiCad:** revisa el stock y arma el pedido de lo
+      que falta. *(hecho en Inventario: CSV de KiCad, placas a armar y lista de compra)*
 - [x] **36. Reciclaje:** kilos triturados y filamento recuperado, para métricas de
       sostenibilidad. *(hecho en Inventario: movimientos por material, totales del año,
       porcentaje reaprovechado y gráfico por mes)*
