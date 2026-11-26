@@ -187,6 +187,8 @@ pub fn required_access(method: &Method, path: &str) -> Access {
 
         // --- Sensores ---
         ("GET", ["sensors", ..]) => Ver,
+        // «Lo vi» de una alarma critica: cualquiera que vea Sensores
+        ("POST", ["sensors", "incidents", _, "ack"]) => Ver,
 
         // --- Maquinas: ver, reservar y reportar fallas (el handler limita cancelar a lo
         // propio y bloquear horarios a quien gestiona); Gestionar edita, aprueba y repara ---

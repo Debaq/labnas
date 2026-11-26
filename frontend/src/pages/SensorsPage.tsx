@@ -9,11 +9,12 @@ import {
 import {
   fetchSensorLatest, fetchSensorAlerts, fetchReceiverStatus,
   updateSensorDeviceStatus, updateSensorDeviceName, deleteSensorDevice,
-  registerSensorDevice, createSensorAlert, updateSensorAlert, deleteSensorAlert,
+  registerSensorDevice, createSensorAlert, fetchUsernames, updateSensorAlert, deleteSensorAlert,
   fetchSensorReadings,
 } from '../api'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import SensorIncidentsPanel from '../components/SensorIncidentsPanel'
 import type { SensorLatest, SensorAlert, ReceiverStatus, SensorReading } from '../types'
 import { errorMessage } from '../lib/errors'
 import { READING_LABELS, READING_UNITS } from '../lib/sensors'
@@ -85,7 +86,9 @@ export default function SensorsPage() {
   const [showAddDevice, setShowAddDevice] = useState(false)
   const [addForm, setAddForm] = useState({ name: '', mac: '', device_type: '', connection: 'wifi' })
   const [showAddAlert, setShowAddAlert] = useState(false)
-  const [alertForm, setAlertForm] = useState({ device_id: '', key: '', condition: 'above', threshold: 0, cooldown_minutes: 30 })
+  const [alertForm, setAlertForm] = useState({ device_id: '', key: '', condition: 'above', threshold: 0, cooldown_minutes: 30, critical: false, escalation: [] as string[], escalate_minutes: 10 })
+  const [users, setUsers] = useState<string[]>([])
+  useEffect(() => { if (isAdmin) fetchUsernames().then(setUsers).catch(() => {}) }, [isAdmin])
   const [chartData, setChartData] = useState<Record<string, SensorReading[]>>({})
   const [chartKey, setChartKey] = useState<Record<string, string>>({})
   const [chartRange, setChartRange] = useState<Record<string, string>>({})
@@ -189,6 +192,8 @@ export default function SensorsPage() {
 
   return (
     <div className="space-y-6">
+      <SensorIncidentsPanel />
+
       {/* Receptor status + acciones */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
@@ -448,6 +453,11 @@ export default function SensorsPage() {
                           <div key={a.id} className="flex items-center justify-between text-xs py-1 px-2 rounded" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
                             <span style={{ color: 'var(--text-primary)' }}>
                               {READING_LABELS[a.key] || a.key} {a.condition === 'above' ? '>' : '<'} {a.threshold}
+                              {a.critical && (
+                                <span className="ml-2 px-1.5 rounded" title={`Avisa en orden: ${(a.escalation ?? []).join(' → ') || 'quienes gestionan Sensores'}; cada ${a.escalate_minutes} min sin respuesta pasa al siguiente`} style={{ color: 'var(--danger)', border: '1px solid var(--danger)' }}>
+                                  critica{a.escalation?.length ? `: ${a.escalation.join(' → ')}` : ''}
+                                </span>
+                              )}
                             </span>
                             <div className="flex items-center gap-1">
                               <button onClick={() => handleToggleAlert(a.id, !a.enabled)} className="p-0.5" title={a.enabled ? 'Desactivar' : 'Activar'}>
@@ -557,7 +567,35 @@ export default function SensorsPage() {
                 </select>
                 <input type="number" step="any" value={alertForm.threshold} onChange={e => setAlertForm(f => ({ ...f, threshold: parseFloat(e.target.value) || 0 }))} placeholder="Umbral" className="px-3 py-2 rounded-lg text-sm" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border)' }} />
               </div>
-              <div className="flex items-center gap-2">
+              <label className="flex items-start gap-2 text-sm" style={{ color: 'var(--text-primary)' }}>
+                <input type="checkbox" className="mt-1" checked={alertForm.critical} onChange={e => setAlertForm(f => ({ ...f, critical: e.target.checked }))} />
+                <span>
+                  Alarma critica (freezer, incubadora, sala)
+                  <span className="block text-xs" style={{ color: 'var(--text-secondary)' }}>
+                    Avisa por Telegram a la primera persona de la lista; si nadie responde /visto, a la siguiente, y al final a quienes gestionan Sensores.
+                  </span>
+                </span>
+              </label>
+              {alertForm.critical && (
+                <div className="space-y-2 pl-6">
+                  {alertForm.escalation.map((u, i) => (
+                    <div key={u} className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-primary)' }}>
+                      <span className="w-5 text-right" style={{ color: 'var(--text-secondary)' }}>{i + 1}.</span> {u}
+                      <button onClick={() => setAlertForm(f => ({ ...f, escalation: f.escalation.filter(x => x !== u) }))} className="ml-auto text-xs" style={{ color: 'var(--danger)' }}>quitar</button>
+                    </div>
+                  ))}
+                  <select value="" onChange={e => e.target.value && setAlertForm(f => ({ ...f, escalation: [...f.escalation, e.target.value] }))} className="w-full px-3 py-2 rounded-lg text-sm" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
+                    <option value="">Agregar persona a la lista…</option>
+                    {users.filter(u => !alertForm.escalation.includes(u)).map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                  <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                    Pasar al siguiente tras
+                    <input type="number" min={1} max={240} value={alertForm.escalate_minutes} onChange={e => setAlertForm(f => ({ ...f, escalate_minutes: parseInt(e.target.value) || 10 }))} className="w-16 px-2 py-1 rounded-lg text-sm" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border)' }} />
+                    min sin respuesta
+                  </div>
+                </div>
+              )}
+              <div className="flex items-center gap-2" style={{ display: alertForm.critical ? 'none' : undefined }}>
                 <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Cooldown (min):</span>
                 <input type="number" value={alertForm.cooldown_minutes} onChange={e => setAlertForm(f => ({ ...f, cooldown_minutes: parseInt(e.target.value) || 30 }))} className="w-20 px-2 py-1 rounded-lg text-sm" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border)' }} />
               </div>

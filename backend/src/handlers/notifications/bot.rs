@@ -196,6 +196,8 @@ pub(super) async fn handle_message(state: &AppState, token: &str, msg: &TgMessag
             crate::handlers::email::get_email_detail(state, &chat_name, uid_str).await
         }
         "/propuestas" => crate::handlers::email::telegram_list_proposals(state, &chat_name).await,
+        // Alarma critica de un sensor: "lo vi, lo atiendo" (ver sensor_incidents)
+        "/visto" => crate::handlers::sensor_incidents::telegram_ack(state, chat.linked_web_user.as_deref()).await,
         s if s.starts_with("/aprobar ") => {
             let id = s.strip_prefix("/aprobar ").unwrap_or("").trim();
             crate::handlers::email::telegram_approve_proposal(state, &chat_name, id).await
@@ -487,6 +489,7 @@ const COMMAND_MODULES: &[(&str, &[&str])] = &[
     ("/cancelar3d", &["printers3d"]),
     ("/impresoras", &["printers3d"]),
     ("/red", &["network"]),
+    ("/visto", &["sensors"]),
 ];
 
 /// Modulos que necesita un comando (vacio = siempre disponible)
@@ -504,6 +507,8 @@ fn command_level(text: &str) -> Level {
     const READ_ONLY: &[&str] = &[
         "/eventos", "/proyectos", "/tareas", "/avance", "/leer ", "/propuestas", "/correos",
         "/musica", "/music", "/temp", "/camara", "/foto", "/impresoras", "/red",
+        // confirmar una alarma critica: basta con ver Sensores
+        "/visto",
     ];
     if READ_ONLY.iter().any(|p| text.starts_with(p)) { Level::Ver } else { Level::Usar }
 }
@@ -530,6 +535,9 @@ pub(super) fn build_help_message(
     msg.push_str("/estado /discos /ram /cpu /uptime\n");
     if on("network") {
         msg.push_str("/red\n");
+    }
+    if on("sensors") {
+        msg.push_str("/visto - Confirmar que atiendes una alarma critica\n");
     }
     msg.push_str("/actividad /horario /mirol\n");
     msg.push_str("/vincular CODIGO - Vincular con web\n");

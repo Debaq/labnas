@@ -42,6 +42,8 @@ fn spawn_for(state: &AppState, id: &str) -> Vec<JoinHandle<()>> {
         "sensors" => vec![
             tokio::spawn(handlers::sensors::serial_listener_loop(s())),
             tokio::spawn(handlers::sensors::sensor_monitor_loop(s())),
+            // Alarmas criticas: aviso al siguiente de la lista si nadie confirma
+            tokio::spawn(handlers::sensor_incidents::escalation_loop(s())),
         ],
         "network" => vec![tokio::spawn(handlers::network::network_scan_loop(s()))],
         // Impresoras de red (IPP): el puerto se abre y cierra con el modulo

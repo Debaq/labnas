@@ -257,10 +257,12 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       energía, enciende la alarma y avisa por Telegram. El extractor se prende solo
       cuando la láser trabaja. Los sensores hoy solo envían lecturas: falta que LabNAS
       pueda **mandar órdenes** a un relé (también lo necesita la idea 18).
-- [ ] **6. Alarmas críticas con escalamiento:** si un freezer, incubadora o sala se
+- [x] **6. Alarmas críticas con escalamiento:** si un freezer, incubadora o sala se
       sale de rango, avisa por Telegram; si nadie responde en 10 minutos, avisa al
       siguiente de la lista. Los sensores ya tienen reglas de alerta con umbral; falta
-      el escalamiento y la confirmación «lo vi».
+      el escalamiento y la confirmación «lo vi». *(hecho: `docs/ALARMAS.md`; alerta
+      crítica con lista en orden, `/visto` por Telegram o «Lo vi» en la web, aviso al
+      cerrar e historial de incidentes)*
 - [ ] **7. Historial de temperaturas exportable** para auditorías y certificaciones.
 - [ ] **19. Medidor de corriente en cada máquina** (ESP32 + sensor de pinza): sabe
       si la máquina trabaja de verdad, cuenta horas de uso y consumo eléctrico.

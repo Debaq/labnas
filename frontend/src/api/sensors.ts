@@ -65,13 +65,30 @@ export async function fetchSensorAlerts(): Promise<import('../types').SensorAler
   return res.json()
 }
 
-export async function createSensorAlert(data: { device_id: string; key: string; condition?: string; threshold: number; cooldown_minutes?: number }): Promise<import('../types').SensorAlert> {
+export async function createSensorAlert(data: {
+  device_id: string; key: string; condition?: string; threshold: number; cooldown_minutes?: number
+  critical?: boolean; escalation?: string[]; escalate_minutes?: number
+}): Promise<import('../types').SensorAlert> {
   const res = await api('/api/sensors/alerts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   })
-  if (!res.ok) throw new Error('Error al crear alerta')
+  if (!res.ok) throw new Error((await res.text()) || 'Error al crear alerta')
+  return res.json()
+}
+
+/** Alarmas criticas: incidentes (abiertos o los ultimos 100) */
+export async function fetchSensorIncidents(open = false): Promise<import('../types').SensorIncident[]> {
+  const res = await api(`/api/sensors/incidents${open ? '?open=true' : ''}`)
+  if (!res.ok) throw new Error('Error al leer las alarmas')
+  return res.json()
+}
+
+/** «Lo vi, lo atiendo» */
+export async function ackSensorIncident(id: string): Promise<import('../types').SensorIncident> {
+  const res = await api(`/api/sensors/incidents/${encodeURIComponent(id)}/ack`, { method: 'POST' })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al confirmar')
   return res.json()
 }
 

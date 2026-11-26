@@ -71,3 +71,51 @@ async fn exigir_token_bloquea_sin_token_y_desconocidos() {
     assert_eq!(send(&s, reading(json!({})), None).await, 401);
     assert_eq!(s.get("/api/sensors/devices", &admin).await.json().as_array().unwrap().len(), 0);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn alarma_critica_con_incidente() {
+    let s = Server::start().await;
+    let admin = s.admin().await;
+    let ana = s.user(&admin, "ana", "operador").await;
+    let obs = s.user(&admin, "obs", "observador").await;
+
+    // Freezer aceptado
+    assert_eq!(send(&s, reading(json!({})), None).await, 200);
+    let id = s.get("/api/sensors/devices", &admin).await.json()[0]["id"].as_str().unwrap().to_string();
+    s.put(&format!("/api/sensors/devices/{}/status", id), &admin, json!({ "status": "accepted" })).await;
+
+    // Alerta critica: lista con una cuenta inexistente no se acepta
+    let bad = json!({ "device_id": id, "key": "temp", "condition": "above", "threshold": -15.0, "critical": true, "escalation": ["nadie"] });
+    assert_eq!(s.post("/api/sensors/alerts", &admin, bad).await.status, 400);
+    let alert = json!({ "device_id": id, "key": "temp", "condition": "above", "threshold": -15.0, "critical": true, "escalation": ["ana", "obs"], "escalate_minutes": 5 });
+    let a = s.post("/api/sensors/alerts", &admin, alert).await;
+    assert_eq!(a.status, 200);
+    assert_eq!(a.json()["escalation"], json!(["ana", "obs"]));
+
+    // Sube a -10: incidente abierto, avisada solo la primera
+    let hot = json!({ "mac": MAC, "readings": [{ "key": "temp", "val": -10.0 }] });
+    assert_eq!(send(&s, hot.clone(), None).await, 200);
+    let open = s.get("/api/sensors/incidents?open=true", &obs).await.json();
+    assert_eq!(open.as_array().unwrap().len(), 1);
+    assert_eq!(open[0]["notified"], json!(["ana"]));
+    let inc = open[0]["id"].as_str().unwrap().to_string();
+    // Otra lectura alta no abre otro incidente, anota el peor valor
+    send(&s, json!({ "mac": MAC, "readings": [{ "key": "temp", "val": -5.0 }] }), None).await;
+    let open = s.get("/api/sensors/incidents?open=true", &obs).await.json();
+    assert_eq!(open.as_array().unwrap().len(), 1);
+    assert_eq!(open[0]["worst_value"], -5.0);
+
+    // «Lo vi» desde la web
+    let ack = s.post(&format!("/api/sensors/incidents/{}/ack", inc), &ana, json!({})).await;
+    assert_eq!(ack.status, 200);
+    assert_eq!(ack.json()["acked_by"], "ana");
+    assert_eq!(s.post(&format!("/api/sensors/incidents/{}/ack", inc), &obs, json!({})).await.status, 404, "ya confirmada");
+
+    // Vuelve a rango: se cierra
+    send(&s, json!({ "mac": MAC, "readings": [{ "key": "temp", "val": -20.0 }] }), None).await;
+    assert_eq!(s.get("/api/sensors/incidents?open=true", &obs).await.json().as_array().unwrap().len(), 0);
+    let all = s.get("/api/sensors/incidents", &obs).await.json();
+    assert!(all[0]["resolved_at"].is_string());
+    let log = s.get("/api/audit?limit=100", &admin).await.text;
+    assert!(log.contains("Alarma critica abierta") && log.contains("Confirmo la alarma critica") && log.contains("Alarma critica cerrada"));
+}

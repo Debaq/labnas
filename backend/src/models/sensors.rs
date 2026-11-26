@@ -42,6 +42,39 @@ pub struct SensorAlert {
     pub cooldown_minutes: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_triggered: Option<String>,
+    /// Critica: abre un incidente y escala por la lista en vez de avisar a todos
+    #[serde(default)]
+    pub critical: bool,
+    /// Personas a avisar, en orden (cuentas web)
+    #[serde(default)]
+    pub escalation: Vec<String>,
+    /// Minutos sin confirmar antes de avisar al siguiente
+    #[serde(default = "default_escalate")]
+    pub escalate_minutes: i32,
+}
+
+fn default_escalate() -> i32 {
+    10
+}
+
+/// Columnas de `sensor_alerts` en el orden de `row_to_alert`
+pub const ALERT_COLS: &str = "id, device_id, key, condition, threshold, enabled, cooldown_minutes, last_triggered, critical, escalation, escalate_minutes";
+
+pub fn row_to_alert(row: &rusqlite::Row) -> rusqlite::Result<SensorAlert> {
+    let escalation: String = row.get(9)?;
+    Ok(SensorAlert {
+        id: row.get(0)?,
+        device_id: row.get(1)?,
+        key: row.get(2)?,
+        condition: row.get(3)?,
+        threshold: row.get(4)?,
+        enabled: row.get(5)?,
+        cooldown_minutes: row.get(6)?,
+        last_triggered: row.get(7)?,
+        critical: row.get::<_, i64>(8)? != 0,
+        escalation: serde_json::from_str(&escalation).unwrap_or_default(),
+        escalate_minutes: row.get(10)?,
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -105,6 +138,12 @@ pub struct CreateAlertReq {
     pub threshold: f64,
     #[serde(default = "default_cooldown")]
     pub cooldown_minutes: i32,
+    #[serde(default)]
+    pub critical: bool,
+    #[serde(default)]
+    pub escalation: Vec<String>,
+    #[serde(default = "default_escalate")]
+    pub escalate_minutes: i32,
 }
 
 fn default_condition() -> String {
@@ -125,6 +164,12 @@ pub struct UpdateAlertReq {
     pub enabled: Option<bool>,
     #[serde(default)]
     pub cooldown_minutes: Option<i32>,
+    #[serde(default)]
+    pub critical: Option<bool>,
+    #[serde(default)]
+    pub escalation: Option<Vec<String>>,
+    #[serde(default)]
+    pub escalate_minutes: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]

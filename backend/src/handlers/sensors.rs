@@ -375,21 +375,9 @@ async fn check_alerts(state: &AppState, device_id: &str, readings: &[SensorReadi
     let dev_id = device_id.to_string();
     let alerts: Vec<SensorAlert> = crate::db::db_op(&state.db, move |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, device_id, key, condition, threshold, enabled, cooldown_minutes, last_triggered
-             FROM sensor_alerts WHERE device_id = ?1 AND enabled = 1"
+            &format!("SELECT {} FROM sensor_alerts WHERE device_id = ?1 AND enabled = 1", ALERT_COLS)
         ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map(params![dev_id], |row| {
-            Ok(SensorAlert {
-                id: row.get(0)?,
-                device_id: row.get(1)?,
-                key: row.get(2)?,
-                condition: row.get(3)?,
-                threshold: row.get(4)?,
-                enabled: row.get(5)?,
-                cooldown_minutes: row.get(6)?,
-                last_triggered: row.get(7)?,
-            })
-        }).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![dev_id], row_to_alert).map_err(|e| e.to_string())?;
         let mut result = Vec::new();
         for row in rows {
             result.push(row.map_err(|e| e.to_string())?);
@@ -411,6 +399,22 @@ async fn check_alerts(state: &AppState, device_id: &str, readings: &[SensorReadi
         };
 
         if !triggered {
+            // Alarma critica que vuelve a rango: se cierra su incidente
+            if alert.critical {
+                crate::handlers::sensor_incidents::on_normal(state, &alert.id, reading.val).await;
+            }
+            continue;
+        }
+
+        // Critica: incidente con escalamiento en vez de aviso a todos (ver sensor_incidents)
+        if alert.critical {
+            let dev = device_id.to_string();
+            let name: String = crate::db::db_op(&state.db, move |conn| {
+                conn.query_row("SELECT name FROM sensor_devices WHERE id = ?1", params![dev], |row| row.get::<_, String>(0))
+                    .map_err(|e| e.to_string())
+            }).await.unwrap_or_default();
+            let name = if name.is_empty() { device_id.to_string() } else { name };
+            crate::handlers::sensor_incidents::on_trigger(state, alert, &name, reading.val).await;
             continue;
         }
 
@@ -587,21 +591,9 @@ pub async fn list_alerts(
 ) -> Json<Vec<SensorAlert>> {
     let alerts = crate::db::db_op(&state.db, |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, device_id, key, condition, threshold, enabled, cooldown_minutes, last_triggered
-             FROM sensor_alerts ORDER BY device_id"
+            &format!("SELECT {} FROM sensor_alerts ORDER BY device_id", ALERT_COLS)
         ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            Ok(SensorAlert {
-                id: row.get(0)?,
-                device_id: row.get(1)?,
-                key: row.get(2)?,
-                condition: row.get(3)?,
-                threshold: row.get(4)?,
-                enabled: row.get(5)?,
-                cooldown_minutes: row.get(6)?,
-                last_triggered: row.get(7)?,
-            })
-        }).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], row_to_alert).map_err(|e| e.to_string())?;
         let mut result = Vec::new();
         for row in rows {
             result.push(row.map_err(|e| e.to_string())?);
@@ -625,13 +617,18 @@ pub async fn create_alert(
         enabled: true,
         cooldown_minutes: req.cooldown_minutes,
         last_triggered: None,
+        critical: req.critical,
+        escalation: req.escalation,
+        escalate_minutes: req.escalate_minutes.clamp(1, 240),
     };
     let a = alert.clone();
     crate::db::db_op_status(&state.db, move |conn| {
+        crate::handlers::sensor_incidents::valid_escalation(conn, &a.escalation).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
         conn.execute(
-            "INSERT INTO sensor_alerts (id, device_id, key, condition, threshold, enabled, cooldown_minutes)
-             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)",
-            params![a.id, a.device_id, a.key, a.condition, a.threshold, a.cooldown_minutes],
+            "INSERT INTO sensor_alerts (id, device_id, key, condition, threshold, enabled, cooldown_minutes, critical, escalation, escalate_minutes)
+             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9)",
+            params![a.id, a.device_id, a.key, a.condition, a.threshold, a.cooldown_minutes, a.critical,
+                serde_json::to_string(&a.escalation).unwrap_or_default(), a.escalate_minutes],
         ).map_err(internal)?;
         Ok(())
     }).await?;
@@ -663,6 +660,19 @@ pub async fn update_alert(
         if let Some(cooldown) = req.cooldown_minutes {
             sets.push("cooldown_minutes = ?");
             values.push(Box::new(cooldown));
+        }
+        if let Some(critical) = req.critical {
+            sets.push("critical = ?");
+            values.push(Box::new(critical as i32));
+        }
+        if let Some(ref list) = req.escalation {
+            crate::handlers::sensor_incidents::valid_escalation(conn, list).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+            sets.push("escalation = ?");
+            values.push(Box::new(serde_json::to_string(list).unwrap_or_default()));
+        }
+        if let Some(m) = req.escalate_minutes {
+            sets.push("escalate_minutes = ?");
+            values.push(Box::new(m.clamp(1, 240)));
         }
 
         if sets.is_empty() {

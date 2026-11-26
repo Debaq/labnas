@@ -37,3 +37,4 @@ pub mod sensors;
 pub mod roles;
 pub mod access;
 pub mod display;
+pub mod sensor_incidents;

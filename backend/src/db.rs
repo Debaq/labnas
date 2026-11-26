@@ -495,6 +495,30 @@ const MIGRATIONS: &[&str] = &[
         created_at TEXT NOT NULL,
         last_seen_at TEXT
     );",
+    // 28: alarmas criticas con escalamiento (idea 6): alerta critica con lista de personas
+    // en orden e incidentes con quien fue avisado, quien confirmo y cuando volvio a rango
+    "ALTER TABLE sensor_alerts ADD COLUMN critical INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE sensor_alerts ADD COLUMN escalation TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE sensor_alerts ADD COLUMN escalate_minutes INTEGER NOT NULL DEFAULT 10;
+    CREATE TABLE IF NOT EXISTS sensor_incidents (
+        id TEXT PRIMARY KEY,
+        alert_id TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        device_name TEXT NOT NULL,
+        key TEXT NOT NULL,
+        condition TEXT NOT NULL,
+        threshold REAL NOT NULL,
+        first_value REAL NOT NULL,
+        worst_value REAL NOT NULL,
+        started_at TEXT NOT NULL,
+        step INTEGER NOT NULL DEFAULT 0,
+        last_notified_at TEXT NOT NULL,
+        notified TEXT NOT NULL DEFAULT '[]',
+        acked_by TEXT,
+        acked_at TEXT,
+        resolved_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_sensor_incidents_open ON sensor_incidents(resolved_at, alert_id);",
 ];
 
 /// Migracion 16. Publicada: no modificar (ver `MIGRATIONS`).

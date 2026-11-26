@@ -534,6 +534,29 @@ export interface SensorAlert {
   enabled: boolean
   cooldown_minutes: number
   last_triggered: string | null
+  /** Critica: abre un incidente y avisa por turnos a la lista hasta que alguien confirme */
+  critical?: boolean
+  escalation?: string[]
+  escalate_minutes?: number
+}
+
+export interface SensorIncident {
+  id: string
+  alert_id: string
+  device_id: string
+  device_name: string
+  key: string
+  condition: AlertCondition
+  threshold: number
+  first_value: number
+  worst_value: number
+  started_at: string
+  step: number
+  last_notified_at: string
+  notified: string[]
+  acked_by: string | null
+  acked_at: string | null
+  resolved_at: string | null
 }
 
 export interface SensorLatest {
