@@ -195,6 +195,7 @@ pub async fn download_file(
         .replace('"', "");
     let file = tokio::fs::File::open(&file_path).await.map_err(internal)?;
     let len = file.metadata().await.map(|m| m.len()).unwrap_or(0);
+    state.log_access(&format!("Descargo {}", file_path.display()), &session.username).await;
 
     let headers = [
         (header::CONTENT_TYPE, "application/octet-stream".to_string()),
@@ -303,6 +304,7 @@ pub async fn create_preview_token(
         return Err((StatusCode::BAD_REQUEST, "No es un archivo".to_string()));
     }
 
+    state.log_access(&format!("Abrio {}", path.display()), &session.username).await;
     let token = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
     let name = path
         .file_name()

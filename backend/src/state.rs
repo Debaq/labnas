@@ -20,6 +20,27 @@ pub struct ActivityEvent {
     pub details: String,
 }
 
+/// Accion de la auditoria para las lecturas y descargas
+pub const ACCESS_ACTION: &str = "Acceso";
+const ACCESS_DEDUP: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+fn access_is_new(user: &str, details: &str) -> bool {
+    static SEEN: std::sync::LazyLock<std::sync::Mutex<HashMap<(String, String), Instant>>> =
+        std::sync::LazyLock::new(Default::default);
+    let Ok(mut seen) = SEEN.lock() else { return true };
+    if seen.len() > 5000 {
+        seen.retain(|_, t| t.elapsed() < ACCESS_DEDUP);
+    }
+    let key = (user.to_string(), details.to_string());
+    match seen.get(&key) {
+        Some(t) if t.elapsed() < ACCESS_DEDUP => false,
+        _ => {
+            seen.insert(key, Instant::now());
+            true
+        }
+    }
+}
+
 /// Duracion de una sesion web
 pub const SESSION_TTL_SECS: i64 = 24 * 60 * 60;
 
@@ -138,6 +159,15 @@ pub struct LinkCode {
 
 impl AppState {
     /// Registra un evento en la auditoria (tabla `audit_log`). Nunca falla hacia el caller.
+    /// Registro de accesos (idea 72): quien vio o descargo que. El mismo acceso de la misma
+    /// persona se anota una vez cada 10 minutos (un cliente WebDAV lee muchas veces).
+    pub async fn log_access(&self, details: &str, user: &str) {
+        if !access_is_new(user, details) {
+            return;
+        }
+        self.log_activity(ACCESS_ACTION, details, user).await;
+    }
+
     pub async fn log_activity(&self, action: &str, details: &str, user: &str) {
         let (action, details, user) = (action.to_string(), details.to_string(), user.to_string());
         let res = crate::db::db_op(&self.db, move |conn| {

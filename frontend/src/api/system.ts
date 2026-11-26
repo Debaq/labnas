@@ -198,8 +198,9 @@ export interface AuditEvent {
   details: string
 }
 
-export async function fetchAudit(params: { user?: string; q?: string; before_id?: number; limit?: number }): Promise<AuditEvent[]> {
+export async function fetchAudit(params: { user?: string; q?: string; before_id?: number; limit?: number; kind?: '' | 'accesos' | 'acciones' }): Promise<AuditEvent[]> {
   const qs = new URLSearchParams()
+  if (params.kind) qs.set('kind', params.kind)
   if (params.user) qs.set('user', params.user)
   if (params.q) qs.set('q', params.q)
   if (params.before_id) qs.set('before_id', String(params.before_id))

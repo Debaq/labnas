@@ -141,3 +141,26 @@ async fn subida_por_partes() {
     let r = s.post("/api/files/upload/chunked", &admin, json!({ "path": s.path("Docs"), "name": "b", "size": 10_u64 << 40 })).await;
     assert_eq!(r.status, 413);
 }
+
+/// Idea 72: las descargas quedan en la auditoria como "Acceso" (una vez cada 10 min)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn descargas_quedan_en_el_registro_de_accesos() {
+    let s = Server::start().await;
+    let admin = s.admin().await;
+    let bob = s.user(&admin, "bob", "observador").await;
+    std::fs::create_dir_all(s.home.join("Docs")).unwrap();
+    std::fs::write(s.home.join("Docs/informe.txt"), "secreto").unwrap();
+    let url = format!("/api/files/download?path={}", enc(&s.path("Docs/informe.txt")));
+
+    assert_eq!(s.get(&url, &bob).await.status, 200);
+    assert_eq!(s.get(&url, &bob).await.status, 200);
+    let accesos = s.get("/api/audit?kind=accesos&user=bob", &admin).await.json();
+    let accesos = accesos.as_array().unwrap();
+    assert_eq!(accesos.len(), 1, "la segunda descarga seguida no se repite");
+    assert!(accesos[0]["details"].as_str().unwrap().contains("informe.txt"));
+    assert_eq!(accesos[0]["action"], "Acceso");
+
+    // y no aparece entre las acciones
+    let acciones = s.get("/api/audit?kind=acciones&user=bob", &admin).await.json();
+    assert!(acciones.as_array().unwrap().iter().all(|e| e["action"] != "Acceso"));
+}

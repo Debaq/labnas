@@ -4,7 +4,7 @@ import { useAuth } from '../../auth/AuthContext'
 import SetupWizard from '../SetupWizard'
 import LedgerSection from '../LedgerSection'
 import AuditLogSection from '../AuditLogSection'
-import { fetchModules, toggleModule, reorderModules, fetchSetup, type SetupStatus } from '../../api'
+import { fetchModules, toggleModule, reorderModules, fetchSetup, ModuleInUseError, type SetupStatus } from '../../api'
 import type { ModuleInfo } from '../../types'
 import type { IconComponent } from '../../lib/icons'
 
@@ -45,10 +45,20 @@ export default function AdminTab() {
     if (mod.locked) return
     setToggling(mod.id)
     try {
-      await toggleModule(mod.id, !mod.enabled)
+      let missing: string[]
+      try {
+        missing = await toggleModule(mod.id, !mod.enabled)
+      } catch (e) {
+        // Otro modulo encendido lo usa: confirmar antes de apagar
+        if (!(e instanceof ModuleInUseError) || !confirm(`${e.message}.\n\n¿Apagar ${MODULE_META[mod.id]?.label ?? mod.id} igual?`)) throw e
+        missing = await toggleModule(mod.id, false, true)
+      }
       setModules(prev => prev.map(m => m.id === mod.id ? { ...m, enabled: !m.enabled } : m))
       await refreshModules()
       setNeedsRestart(true)
+      if (missing.length > 0) {
+        alert(`${MODULE_META[mod.id]?.label ?? mod.id} quedo encendido. Usa ${missing.map(m => MODULE_META[m]?.label ?? m).join(', ')}, que esta apagado: enciendelo para tener todo.`)
+      }
     } catch {}
     setToggling(null)
   }
@@ -169,6 +179,18 @@ export default function AdminTab() {
                     <p className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>
                       {meta.description}
                     </p>
+                    {mod.uses && mod.uses.length > 0 && (
+                      <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+                        Usa: {mod.uses.map(u => {
+                          const off = !modules.find(m => m.id === u)?.enabled
+                          return (
+                            <span key={u} style={{ color: off ? 'var(--warning)' : undefined }} title={off ? 'Apagado: esta parte no funciona' : undefined}>
+                              {MODULE_META[u]?.label ?? u}{off ? ' (apagado)' : ''}
+                            </span>
+                          )
+                        }).reduce<React.ReactNode[]>((acc, el, i) => (i ? [...acc, ', ', el] : [el]), [])}
+                      </p>
+                    )}
                   </div>
                   <div className="flex flex-col gap-0.5">
                     <button

@@ -14,6 +14,7 @@ export default function AuditLogSection() {
   const [events, setEvents] = useState<AuditEvent[]>([])
   const [user, setUser] = useState('')
   const [q, setQ] = useState('')
+  const [kind, setKind] = useState<'' | 'accesos' | 'acciones'>('')
   const [loading, setLoading] = useState(false)
   const [hasMore, setHasMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -22,7 +23,7 @@ export default function AuditLogSection() {
     setLoading(true)
     setError(null)
     try {
-      const page = await fetchAudit({ user: user.trim(), q: q.trim(), before_id: beforeId, limit: PAGE })
+      const page = await fetchAudit({ user: user.trim(), q: q.trim(), kind, before_id: beforeId, limit: PAGE })
       setEvents((prev) => (append ? [...prev, ...page] : page))
       setHasMore(page.length === PAGE)
     } catch (e) {
@@ -30,7 +31,7 @@ export default function AuditLogSection() {
     } finally {
       setLoading(false)
     }
-  }, [user, q])
+  }, [user, q, kind])
 
   useEffect(() => {
     load(false)
@@ -69,6 +70,13 @@ export default function AuditLogSection() {
             className="flex-1 min-w-48 px-3 py-2 rounded-lg text-sm outline-none"
             style={inputStyle}
           />
+          <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}
+            title="Accesos: quien vio o descargo que (archivos, enlaces publicos, WebDAV, camaras)"
+            className="px-3 py-2 rounded-lg text-sm outline-none cursor-pointer" style={inputStyle}>
+            <option value="">Todo</option>
+            <option value="acciones">Acciones</option>
+            <option value="accesos">Accesos</option>
+          </select>
           <button
             onClick={() => load(false)}
             disabled={loading}

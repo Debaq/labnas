@@ -495,7 +495,7 @@ async fn log_view(state: &AppState, user: &str, cam: &CameraRow) {
         })
         .unwrap_or(true);
     if fresh {
-        state.log_activity("Camara", &format!("Vio la camara {}", cam.name), user).await;
+        state.log_access(&format!("Vio la camara {}", cam.name), user).await;
     }
 }
 
@@ -877,7 +877,7 @@ pub async fn download_recording(
     let len = file.metadata().await.map(|m| m.len()).unwrap_or(0);
     let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let inline = view == "inline";
-    state.log_activity("Camara", &format!("{} {}", if inline { "Vio" } else { "Descargo" }, path), &session.username).await;
+    state.log_access(&format!("{} la grabacion {}", if inline { "Vio" } else { "Descargo" }, path), &session.username).await;
     let ctype = if kind == "foto" { "image/jpeg" } else { "video/mp4" };
     let disposition = if inline { "inline" } else { "attachment" };
     Ok((

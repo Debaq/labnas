@@ -1102,6 +1102,44 @@ pub struct ModuleInfo {
     pub enabled: bool,
     pub display_order: i32,
     pub locked: bool,
+    /// Modulos que este usa (ver `MODULE_USES`)
+    pub uses: Vec<&'static str>,
+}
+
+/// Modulo -> (modulo que usa, para que). Sin el otro sigue funcionando, pero pierde esa parte;
+/// apagar uno que otro usa pide confirmacion.
+pub const MODULE_USES: &[(&str, &str, &str)] = &[
+    ("email", "tasks", "agendar las propuestas de la IA"),
+    ("deadlines", "portfolio", "mostrar los plazos de los proyectos del Portafolio"),
+    ("cameras", "printers3d", "ver y grabar las camaras de las impresoras 3D"),
+];
+
+/// Nombre visible de un modulo
+pub fn module_name(id: &str) -> &str {
+    match id {
+        "dashboard" => "Dashboard",
+        "files" => "Archivos",
+        "network" => "Red",
+        "printing" => "Impresion",
+        "printers3d" => "Impresoras 3D",
+        "tasks" => "Tareas",
+        "notes" => "Notas",
+        "email" => "Correo",
+        "inventory" => "Inventario",
+        "portfolio" => "Portafolio",
+        "sensors" => "Sensores",
+        "terminal" => "Terminal",
+        "music" => "Musica",
+        "cameras" => "Camaras",
+        "machines" => "Maquinas",
+        "deadlines" => "Plazos",
+        other => other,
+    }
+}
+
+/// Modulos que usa `id`
+pub fn module_uses(id: &str) -> Vec<&'static str> {
+    MODULE_USES.iter().filter(|(m, _, _)| *m == id).map(|(_, u, _)| *u).collect()
 }
 
 pub fn get_modules(conn: &Connection) -> Vec<ModuleInfo> {
@@ -1113,7 +1151,8 @@ pub fn get_modules(conn: &Connection) -> Vec<ModuleInfo> {
         let enabled: bool = row.get(1)?;
         let display_order: i32 = row.get(2)?;
         let locked = id == "dashboard";
-        Ok(ModuleInfo { id, enabled, display_order, locked })
+        let uses = module_uses(&id);
+        Ok(ModuleInfo { id, enabled, display_order, locked, uses })
     })
     .unwrap()
     .filter_map(|r| r.ok())

@@ -4,6 +4,8 @@ import { HardDrive, Wifi, Activity, Database, Box, ExternalLink, ClipboardList, 
 import { fetchDisks, fetchHosts, fetchHealth, fetchSystemInfo, fetchPrinters3D, fetchPrinter3DStatus, getServices, fetchTasks, fetchEvents, fetchProjects, type LabService } from '../api'
 import { useAuth } from '../auth/AuthContext'
 import DeadlinesWidget from '../components/deadlines/DeadlinesWidget'
+import MachinesWidget from '../components/dashboard/MachinesWidget'
+import SensorsWidget from '../components/dashboard/SensorsWidget'
 import type { DiskInfo, SystemInfo, NetworkHost, Printer3DConfig, Printer3DStatus, Task, CalendarEvent, Project } from '../types'
 
 function formatBytes(bytes: number): string {
@@ -174,6 +176,14 @@ export default function DashboardPage() {
 
       {/* Plazos con cuenta regresiva */}
       {isModuleEnabled('deadlines') && <DeadlinesWidget />}
+
+      {/* Maquinas y sensores (cada tarjeta se oculta sola si no hay nada que mostrar) */}
+      {(isModuleEnabled('machines') || isModuleEnabled('sensors')) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 empty:hidden">
+          {isModuleEnabled('machines') && <MachinesWidget />}
+          {isModuleEnabled('sensors') && <SensorsWidget />}
+        </div>
+      )}
 
       {/* Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

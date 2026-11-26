@@ -262,6 +262,9 @@ pub async fn handle(State(state): State<AppState>, req: Request) -> Response {
     if !st.can(&session, &target, op) {
         return plain(StatusCode::FORBIDDEN, "Sin permiso en esta carpeta");
     }
+    if req.method() == Method::GET && target.is_file() {
+        state.log_access(&format!("Descargo por WebDAV {}", target.display()), &session.username).await;
+    }
 
     // MOVE/COPY: el destino debe estar en la misma carpeta y ser escribible
     if matches!(req.method().as_str(), "MOVE" | "COPY") {

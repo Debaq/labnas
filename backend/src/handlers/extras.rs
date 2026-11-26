@@ -122,6 +122,10 @@ pub async fn download_share(
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "Archivo no disponible".to_string()))?;
     let len = file.metadata().await.map(|m| m.len()).ok();
+    // Quien baja por un enlace publico no tiene cuenta: queda a nombre del enlace
+    state
+        .log_access(&format!("Descarga por enlace publico de {}: {}", share.owner, share.file_path), "enlace publico")
+        .await;
     // En streaming: antes se leia el archivo completo a memoria
     let body = axum::body::Body::from_stream(tokio_util::io::ReaderStream::new(file));
 

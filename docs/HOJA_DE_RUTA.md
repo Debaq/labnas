@@ -118,15 +118,19 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       fondo. El menú del frontend se arma desde `/api/modules` en vez de una lista fija.
       Agregar un módulo pasa de cuatro lugares a uno.
 - [x] **Encendido por defecto configurable** (`cameras` ya viene apagado; `transparencia` también lo hará).
-- [ ] **Dependencias entre módulos:** `transparencia` necesita `finanzas`, y
+- [x] **Dependencias entre módulos:** `transparencia` necesita `finanzas`, y
       `finanzas` usa `inventory` y `portfolio`. No se puede apagar uno del que otro
-      depende sin avisar.
+      depende sin avisar. *(hecho: `db::MODULE_USES`; hoy Correo usa Tareas, Plazos usa
+      Portafolio y Cámaras usa Impresoras 3D. Apagar uno que otro usa pide confirmación y
+      la lista de módulos muestra qué usa cada uno)*
 - [x] **Tareas de fondo que se encienden y apagan en vivo** junto con su módulo.
 - [x] **Comandos de Telegram ligados a su módulo** (arregla la falla de arriba).
 - [ ] **Ajustes propios de cada módulo:** cada módulo trae su sección de
       configuración, que solo aparece si está encendido. De paso se parte
       `SettingsPage.tsx`.
-- [ ] **Tarjetas del dashboard por módulo**, que aparecen solo si está encendido.
+- [x] **Tarjetas del dashboard por módulo**, que aparecen solo si está encendido.
+      *(hecho: Plazos, Impresoras 3D, Red, Tareas, Máquinas y Sensores; también se ocultan
+      si el rol no ve el módulo)*
 
 ### Personas y acceso
 - [x] **Permisos por módulo y por rol:** cada rol tiene, en cada módulo, «sin
@@ -150,9 +154,11 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       la cadena lo delataría. *(hecho: `ledger.rs`, notas con huella de archivos,
       anulaciones, exportación verificable con Python y ancla diaria por Telegram.
       Detalle en `docs/BITACORA.md`)*
-- [ ] **72. Registro de cada acceso:** quién vio o descargó qué y cuándo. Amplía
+- [x] **72. Registro de cada acceso:** quién vio o descargó qué y cuándo. Amplía
       la auditoría que ya existe (`audit.rs`), que hoy registra acciones pero no
-      lecturas.
+      lecturas. *(hecho: `state.log_access`, acción «Acceso» en la auditoría con filtro
+      propio; descargas del explorador, vistas previas, enlaces públicos, WebDAV, cámaras y
+      grabaciones. El mismo acceso se anota una vez cada 10 minutos)*
 
 ## Etapa 1 · Administración y transparencia ⭐ urgente
 

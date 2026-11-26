@@ -24,6 +24,8 @@ pub struct AuditQuery {
     /// Paginacion: solo eventos con id menor
     pub before_id: Option<i64>,
     pub limit: Option<u32>,
+    /// `accesos`: solo lecturas y descargas; `acciones`: el resto
+    pub kind: Option<String>,
 }
 
 fn row_to_event(row: &rusqlite::Row) -> rusqlite::Result<ActivityEvent> {
@@ -56,6 +58,17 @@ pub async fn list_audit(
             let pattern = format!("%{}%", q.trim());
             args.push(pattern.clone());
             args.push(pattern);
+        }
+        match query.kind.as_deref() {
+            Some("accesos") => {
+                sql.push_str(" AND action = ?");
+                args.push(crate::state::ACCESS_ACTION.to_string());
+            }
+            Some("acciones") => {
+                sql.push_str(" AND action != ?");
+                args.push(crate::state::ACCESS_ACTION.to_string());
+            }
+            _ => {}
         }
         if let Some(before) = query.before_id {
             sql.push_str(" AND id < ?");

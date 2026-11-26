@@ -70,6 +70,8 @@ export interface ModuleInfo {
   enabled: boolean
   display_order: number
   locked?: boolean
+  /** Modulos que este usa (sin ellos pierde una parte) */
+  uses?: string[]
 }
 
 // --- Notifications (Telegram) ---
