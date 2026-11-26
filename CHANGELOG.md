@@ -1,5 +1,64 @@
 # Changelog
 
+## [3.7.0] — 2026-11-26
+
+Desde v3.6.2.
+
+### Roles y permisos por módulo
+
+- Cada rol tiene, en cada módulo, un nivel: **sin acceso, ver, usar o gestionar**. Reemplaza los permisos sueltos (terminal, impresión, escribir archivos)
+- Plantillas: operador, encargado técnico, investigador responsable, administrativo, docente, ayudante, estudiante, observador, usuario externo y auditor (vence a los 90 días). Se pueden crear roles copiando otro, editarlos y restaurar la plantilla
+- Por persona: **fecha de término** y **excepciones** por módulo. Una cuenta vencida no entra por web, WebDAV, bandeja, IPP ni Telegram, y sus sesiones abiertas se cortan
+- Telegram, eventos en vivo y el menú respetan el nivel de cada persona
+- Renombrar una cuenta ya no borra su 2FA, passkeys ni tokens
+
+### Módulos
+
+- **Registro único de módulos**: menú, rutas, títulos y nombres salen de un solo lugar
+- Apagar un módulo que otro usa pide confirmación; la lista muestra qué usa cada uno
+- **Configuración > Módulos** con los ajustes de cada módulo encendido (Correo, Sensores, Música, Cámaras). Reemplaza la pestaña Multimedia
+- Las rutas públicas de un módulo apagado responden «no encontrado»
+
+### Acceso a registros
+
+- Proyectos, bienes, notas, plazos y archivos pueden ser **privados**, **con autorización** (personas con fecha de término, aunque su rol no tenga el módulo) o **públicos** (enlace sin cuenta)
+- Página **Compartido conmigo** y aviso por Telegram a la persona autorizada
+- **Registro de accesos** en la auditoría: descargas, vistas previas, enlaces públicos, WebDAV y cámaras
+
+### Pantalla del laboratorio
+
+- Enlace de solo lectura para una TV o tablet: máquinas en uso, impresoras 3D, reservas del día, sensores, plazos, avisos y quién está en el laboratorio. Se actualiza sola
+
+### Máquinas
+
+- **Mantenimiento y calibración**: tareas cada N días u horas de uso, en Plazos y con aviso; una tarea vencida puede bloquear reservas. Bitácora con foto que no se edita
+- **Uso real**: «Empezar» y «Terminar» desde la ficha o el QR; informe de horas por máquina, persona y proyecto
+- **Parámetros de corte colaborativos**: material, espesor, potencia, velocidad, pasadas y foto; «me funcionó» para votar
+- Una máquina fuera de servicio muestra el aviso en vez de «Empezar a usar»
+
+### Sensores
+
+- **Alarmas críticas con escalamiento**: avisan por Telegram a una lista de personas en orden; `/visto` o «Lo vi, lo atiendo» confirma y avisa al resto
+- **Historial exportable** en CSV y resumen imprimible para auditorías
+
+### Inventario
+
+- **Stock mínimo** con aviso, **vencimientos** en Plazos y **etiqueta QR** por ítem
+- **Préstamos** de herramientas con fecha de devolución y aviso si se atrasa
+- **Retazos**: sobrantes de plancha con foto; se busca uno que sirva para la pieza
+- **Reciclaje**: kilos triturados, recuperados y desechados, con gráfico por mes
+- **Lista de materiales de KiCad** contra el inventario, con lista de compra en CSV
+
+### Talleres
+
+- Inscripción con cupo y lista de espera, enlace público sin cuenta, asistencia y **certificado** con código de verificación
+
+### Seguridad (módulo nuevo)
+
+- Incidentes y casi-accidentes, capacitaciones con vencimiento y fichas de seguridad
+- **Registro de entrada** con el QR de la puerta: quién está adentro, visitas y estadísticas por carrera
+
+
 ## [3.6.2] — 2026-11-25
 
 Desde v3.6.1.
