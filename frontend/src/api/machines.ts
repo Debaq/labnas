@@ -434,3 +434,50 @@ export async function fetchUsageReport(from: string, to: string): Promise<UsageR
   const q = new URLSearchParams({ from, to })
   return jsonOrThrow(await api(`/api/machines/usage/report?${q}`), 'Error al leer el informe')
 }
+
+// --- Parametros de corte colaborativos (idea 29) ---
+
+export interface CutParam {
+  id: string
+  machine_id: string
+  machine_name: string
+  material: string
+  thickness_mm: number | null
+  operation: 'corte' | 'grabado' | 'marcado' | 'fresado' | 'otro'
+  power: number | null
+  speed: number | null
+  passes: number | null
+  notes: string
+  result: 'bueno' | 'regular' | 'malo'
+  photo_id: string | null
+  created_by: string
+  created_at: string
+  votes: number
+  voted: boolean
+}
+
+export type CutParamInput = Omit<CutParam, 'id' | 'machine_id' | 'machine_name' | 'photo_id' | 'created_by' | 'created_at' | 'votes' | 'voted'> & { photo?: string }
+
+export async function fetchCutParams(q: { machine?: string; q?: string } = {}): Promise<CutParam[]> {
+  const p = new URLSearchParams()
+  if (q.machine) p.set('machine', q.machine)
+  if (q.q) p.set('q', q.q)
+  return jsonOrThrow(await api(`/api/machines/cut-params?${p}`), 'Error al leer los parametros')
+}
+
+export async function createCutParam(machineId: string, data: CutParamInput): Promise<CutParam> {
+  return jsonOrThrow(await api(`/api/machines/${encodeURIComponent(machineId)}/cut-params`, post(data)), 'Error al guardar')
+}
+
+export async function updateCutParam(id: string, data: CutParamInput): Promise<CutParam> {
+  return jsonOrThrow(await api(`/api/machines/cut-params/${encodeURIComponent(id)}`, { ...post(data), method: 'PUT' }), 'Error al guardar')
+}
+
+export async function deleteCutParam(id: string): Promise<void> {
+  const res = await api(`/api/machines/cut-params/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al borrar')
+}
+
+export async function voteCutParam(id: string): Promise<CutParam> {
+  return jsonOrThrow(await api(`/api/machines/cut-params/${encodeURIComponent(id)}/vote`, post({})), 'Error al votar')
+}

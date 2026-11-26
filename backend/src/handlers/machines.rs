@@ -467,7 +467,7 @@ pub async fn delete_machine(
             .optional()
             .map_err(db_err)?
             .ok_or_else(not_found)?;
-        for table in ["machine_bookings", "machine_faults", "machine_photos", "machine_certifications", "machine_maintenance_tasks", "machine_maintenance_log", "machine_usage"] {
+        for table in ["machine_bookings", "machine_faults", "machine_photos", "machine_certifications", "machine_maintenance_tasks", "machine_maintenance_log", "cut_params", "machine_usage"] {
             conn.execute(&format!("DELETE FROM {} WHERE machine_id = ?1", table), [&id]).map_err(db_err)?;
         }
         conn.execute("DELETE FROM machines WHERE id = ?1", [&id]).map_err(db_err)?;

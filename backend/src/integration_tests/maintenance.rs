@@ -88,3 +88,37 @@ async fn plan_bitacora_y_bloqueo() {
     assert_eq!(ov["tasks"].as_array().unwrap().len(), 1);
     assert_eq!(ov["log"].as_array().unwrap().len(), 3);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn parametros_de_corte() {
+    let s = Server::start().await;
+    let admin = s.admin().await;
+    let op = s.user(&admin, "op", "operador").await;
+    let ana = s.user(&admin, "ana", "observador").await;
+    let bob = s.user(&admin, "bob", "observador").await;
+    let m = s.post("/api/machines", &op, json!({ "name": "Laser", "kind": "laser" })).await.json()["id"].as_str().unwrap().to_string();
+    let url = format!("/api/machines/{}/cut-params", m);
+
+    assert_eq!(s.post(&url, &ana, json!({ "material": "" })).await.status, 400);
+    assert_eq!(s.post(&url, &ana, json!({ "material": "MDF" })).await.status, 400, "sin potencia, velocidad ni nota");
+    let p = s.post(&url, &ana, json!({ "material": "MDF", "thickness_mm": 3, "power": 70, "speed": 12, "passes": 1 })).await;
+    assert_eq!(p.status, 201);
+    let pid = p.json()["id"].as_str().unwrap().to_string();
+    s.post(&url, &bob, json!({ "material": "Acrilico", "thickness_mm": 5, "power": 90, "speed": 4, "result": "regular" })).await;
+
+    // Busqueda y votos
+    let found = s.get("/api/machines/cut-params?q=mdf", &bob).await.json();
+    assert_eq!(found.as_array().unwrap().len(), 1);
+    let v = s.post(&format!("/api/machines/cut-params/{}/vote", pid), &bob, json!({})).await.json();
+    assert_eq!(v["votes"], 1);
+    assert_eq!(v["voted"], true);
+    let v = s.post(&format!("/api/machines/cut-params/{}/vote", pid), &bob, json!({})).await.json();
+    assert_eq!(v["votes"], 0, "votar otra vez lo quita");
+
+    // Editar/borrar: autora o staff
+    let edit = json!({ "material": "MDF", "thickness_mm": 3, "power": 65, "speed": 12 });
+    assert_eq!(s.put(&format!("/api/machines/cut-params/{}", pid), &bob, edit.clone()).await.status, 403);
+    assert_eq!(s.put(&format!("/api/machines/cut-params/{}", pid), &ana, edit).await.json()["power"], 65.0);
+    assert_eq!(s.delete(&format!("/api/machines/cut-params/{}", pid), &op).await.status, 204);
+    assert_eq!(s.get(&format!("/api/machines/cut-params?machine={}", m), &ana).await.json().as_array().unwrap().len(), 1);
+}

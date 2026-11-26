@@ -342,8 +342,9 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       PrusaSlicer u OrcaSlicer usando los perfiles del laboratorio.
 - [ ] **26. Visor en el navegador** para STL, STEP, DXF, SVG y vista previa de gcode.
 - [x] **30. Aviso al terminar** por Telegram con foto del resultado. *(foto al personal y a quien encargó la pieza; texto al resto)*
-- [ ] **29. Base colaborativa de parámetros de corte** (potencia y velocidad por
-      material y espesor, con fotos).
+- [x] **29. Base colaborativa de parámetros de corte** (potencia y velocidad por
+      material y espesor, con fotos). *(hecho en Máquinas: por máquina, con foto del
+      resultado, «me funcionó» y búsqueda por material)*
 - [ ] **27. Acomodo automático de piezas** en la plancha de la láser.
 - [ ] **28. Generadores paramétricos:** cajas con encastre, engranajes, bisagras
       flexibles → SVG.

@@ -113,6 +113,17 @@ Endpoints: `GET /api/machines/{id}/usage` (sesión abierta y recientes),
 Usar) y `GET /api/machines/usage/report?from=&to=` (staff). `PUT /api/machines/{id}/usage`
 sigue siendo el horómetro.
 
+## Parámetros de corte
+
+En la ficha de cada máquina, **Parámetros de corte** guarda lo que funcionó: material,
+espesor, operación (corte, grabado, marcado, fresado), potencia, velocidad, pasadas, notas
+(foco, aire, orden) y una foto del resultado. Así nadie tiene que probar de cero.
+
+- Lo agrega cualquiera que use Máquinas; lo edita o borra quien lo subió o quien gestiona.
+- Los demás marcan **me funcionó** (👍); los buenos y más votados salen primero, y los de
+  resultado «malo» quedan como advertencia.
+- La pestaña **Parámetros de corte** de Máquinas busca por material en todas las máquinas.
+
 ## Etiqueta QR
 
 En la ficha, **Etiqueta QR → Imprimir etiqueta**. El QR lleva la dirección con que se

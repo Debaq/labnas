@@ -24,6 +24,7 @@ import {
   maintenanceEvery,
   MAINTENANCE_LEVEL,
 } from '../api'
+import CutParamsPanel from '../components/machines/CutParamsPanel'
 import { useAuth } from '../auth/AuthContext'
 import { useEvent } from '../events/useEvents'
 import { useToast } from '../components/ToastContext'
@@ -31,7 +32,7 @@ import MachineFormModal from '../components/machines/MachineFormModal'
 import MachineStatusChip from '../components/machines/MachineStatusChip'
 import UsageReportView from '../components/machines/UsageReportView'
 
-type Tab = 'machines' | 'mine' | 'pending' | 'maintenance' | 'usage'
+type Tab = 'machines' | 'mine' | 'pending' | 'maintenance' | 'usage' | 'params'
 
 export default function MachinesPage() {
   const { canModule } = useAuth()
@@ -102,6 +103,7 @@ export default function MachinesPage() {
     { id: 'mine', label: 'Mis reservas', count: mine.length },
     ...(staff ? [{ id: 'pending' as Tab, label: 'Por aprobar', count: pending.length + certReqs.length }] : []),
     ...(staff ? [{ id: 'maintenance' as Tab, label: 'Mantencion', count: maint.filter(t => t.level !== 'ok').length }] : []),
+    { id: 'params' as Tab, label: 'Parametros de corte' },
     ...(staff ? [{ id: 'usage' as Tab, label: 'Horas de uso' }] : []),
   ]
 
@@ -156,6 +158,8 @@ export default function MachinesPage() {
         </>
       ) : tab === 'usage' ? (
         <UsageReportView />
+      ) : tab === 'params' ? (
+        <CutParamsPanel />
       ) : tab === 'maintenance' ? (
         <MaintenanceList tasks={maint} />
       ) : tab === 'mine' ? (

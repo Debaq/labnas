@@ -652,6 +652,28 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX IF NOT EXISTS idx_safety_presence_open ON safety_presence(left_at, username);
     CREATE INDEX IF NOT EXISTS idx_safety_presence_day ON safety_presence(entered_at);",
+    // 34: parametros de corte colaborativos (idea 29) y votos «me funciono»
+    "CREATE TABLE IF NOT EXISTS cut_params (
+        id TEXT PRIMARY KEY,
+        machine_id TEXT NOT NULL,
+        material TEXT NOT NULL,
+        thickness_mm REAL,
+        operation TEXT NOT NULL DEFAULT 'corte',
+        power REAL,
+        speed REAL,
+        passes INTEGER,
+        notes TEXT NOT NULL DEFAULT '',
+        result TEXT NOT NULL DEFAULT 'bueno',
+        photo_id TEXT,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_cut_params_machine ON cut_params(machine_id, material);
+    CREATE TABLE IF NOT EXISTS cut_param_votes (
+        param_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        PRIMARY KEY (param_id, username)
+    );",
 
 ];
 

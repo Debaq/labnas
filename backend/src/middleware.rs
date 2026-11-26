@@ -202,6 +202,10 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         // Bitacora de mantencion: el staff o el responsable de la maquina (lo revisa el handler)
         ("POST", ["machines", _, "maintenance", "log"]) => Usar,
         ("POST", ["machines", _, "usage", "start"]) | ("POST", ["machines", "usage", _, "stop"]) => Usar,
+        // Parametros de corte: cualquiera que use Maquinas aporta; editar/borrar lo propio lo
+        // revisa el handler (o quien gestiona)
+        ("POST", ["machines", _, "cut-params"]) | ("POST", ["machines", "cut-params", _, "vote"]) => Usar,
+        ("PUT", ["machines", "cut-params", _]) | ("DELETE", ["machines", "cut-params", _]) => Usar,
         // Induccion: pedirla (y retirar la propia solicitud, el handler lo limita)
         ("POST", ["machines", _, "certifications", "request"]) => Usar,
         ("DELETE", ["machines", _, "certifications", _]) => Usar,
