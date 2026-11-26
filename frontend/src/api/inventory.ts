@@ -98,3 +98,52 @@ export async function fetchInventoryQr(id: string): Promise<{ url: string; svg: 
   if (!res.ok) throw new Error((await res.text()) || 'Error al generar el QR')
   return res.json()
 }
+
+// --- Retazos (backend/src/handlers/offcuts.rs) ---
+
+export interface Offcut {
+  id: string
+  material: string
+  thickness_mm: number | null
+  width_mm: number
+  height_mm: number
+  location: string
+  notes: string
+  has_photo: boolean
+  added_by: string
+  added_at: string
+  taken_by: string | null
+  taken_at: string | null
+}
+
+export async function fetchOffcuts(q: { material?: string; thickness?: number | null; min_w?: number | null; min_h?: number | null } = {}): Promise<Offcut[]> {
+  const p = new URLSearchParams()
+  if (q.material) p.set('material', q.material)
+  if (q.thickness) p.set('thickness', String(q.thickness))
+  if (q.min_w) p.set('min_w', String(q.min_w))
+  if (q.min_h) p.set('min_h', String(q.min_h))
+  const res = await api(`/api/inventory/offcuts?${p}`)
+  if (!res.ok) throw new Error('Error al leer los retazos')
+  return res.json()
+}
+
+export async function createOffcut(data: { material: string; thickness_mm: number | null; width_mm: number; height_mm: number; location: string; notes: string; photo?: string }): Promise<Offcut> {
+  const res = await api('/api/inventory/offcuts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al guardar el retazo')
+  return res.json()
+}
+
+export async function takeOffcut(id: string): Promise<Offcut> {
+  const res = await api(`/api/inventory/offcuts/${encodeURIComponent(id)}/take`, { method: 'POST' })
+  if (!res.ok) throw new Error((await res.text()) || 'Error')
+  return res.json()
+}
+
+export async function deleteOffcut(id: string): Promise<void> {
+  const res = await api(`/api/inventory/offcuts/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al borrar')
+}
+
+export function offcutPhotoUrl(id: string): string {
+  return `/api/inventory/offcuts/${encodeURIComponent(id)}/photo`
+}

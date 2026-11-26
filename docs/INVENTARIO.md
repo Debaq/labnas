@@ -21,3 +21,13 @@ puede tener:
 - Arriba de la lista se ven los préstamos abiertos (los propios, o todos para el staff), con
   los atrasados en rojo.
 - Cada préstamo y devolución queda en la auditoría.
+
+## Retazos
+
+Botón **Retazos** en Inventario: cada sobrante de plancha (MDF, acrílico, terciado…) con
+material, espesor, medidas, dónde está y foto.
+
+- Antes de cortar una plancha nueva, se indica la pieza que se necesita (ancho y alto) y se
+  muestran los retazos que alcanzan, los más chicos primero (se pueden girar).
+- Quien lo usa toca **Lo tomé** y sale de la lista.
+- Lo agrega cualquiera con acceso a Inventario; lo borra quien lo subió o quien gestiona.

@@ -318,7 +318,8 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       y etiquetas QR por la impresora de LabNAS. *(hecho en parte, `docs/INVENTARIO.md`:
       stock mínimo con aviso, vencimientos en Plazos y etiqueta QR por ítem; faltan fichas
       de seguridad y la lista de componentes electrónicos)*
-- [ ] **32. Registro de retazos:** foto y medidas de cada sobrante para reutilizarlo.
+- [x] **32. Registro de retazos:** foto y medidas de cada sobrante para reutilizarlo.
+      *(hecho en Inventario: búsqueda por material, espesor y tamaño de la pieza)*
 - [x] **33. Préstamo de herramientas** con QR y aviso de devolución vencida. *(hecho:
       ítems prestables, préstamo con fecha de devolución y aviso diario si se atrasa)*
 - [ ] **35. Lista de materiales desde KiCad:** revisa el stock y arma el pedido de lo

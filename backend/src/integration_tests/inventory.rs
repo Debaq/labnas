@@ -83,3 +83,35 @@ async fn stock_vencimientos_y_prestamos() {
     assert_eq!(qr["url"], format!("http://lab.local:3000/inventory?item={}", tid));
     assert!(qr["svg"].as_str().unwrap().contains("<svg"));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retazos() {
+    let s = Server::start().await;
+    let admin = s.admin().await;
+    let ana = s.user(&admin, "ana", "observador").await;
+    let bob = s.user(&admin, "bob", "observador").await;
+
+    assert_eq!(s.post("/api/inventory/offcuts", &ana, json!({ "material": "MDF", "width_mm": 0, "height_mm": 10 })).await.status, 400);
+    let grande = s.post("/api/inventory/offcuts", &ana, json!({ "material": "MDF", "thickness_mm": 3, "width_mm": 600, "height_mm": 400 })).await;
+    assert_eq!(grande.status, 201);
+    let chico = s.post("/api/inventory/offcuts", &ana, json!({ "material": "MDF", "thickness_mm": 3, "width_mm": 300, "height_mm": 120 })).await.json();
+    s.post("/api/inventory/offcuts", &bob, json!({ "material": "Acrilico", "thickness_mm": 3, "width_mm": 500, "height_mm": 500 })).await;
+
+    // Pieza de 100x250 mm en MDF 3 mm: sirven los dos (el chico girado), el chico primero
+    let r = s.get("/api/inventory/offcuts?material=mdf&thickness=3&min_w=100&min_h=250", &bob).await.json();
+    assert_eq!(r.as_array().unwrap().len(), 2);
+    assert_eq!(r[0]["id"], chico["id"]);
+    // 450x450: ninguno de MDF
+    assert_eq!(s.get("/api/inventory/offcuts?material=mdf&min_w=450&min_h=450", &bob).await.json().as_array().unwrap().len(), 0);
+
+    // Tomarlo lo saca de la lista
+    let id = chico["id"].as_str().unwrap();
+    assert_eq!(s.post(&format!("/api/inventory/offcuts/{}/take", id), &bob, json!({})).await.status, 200);
+    assert_eq!(s.post(&format!("/api/inventory/offcuts/{}/take", id), &bob, json!({})).await.status, 409);
+    assert_eq!(s.get("/api/inventory/offcuts?material=mdf", &bob).await.json().as_array().unwrap().len(), 1);
+
+    // Borrar: quien lo subio o el staff
+    let g = grande.json()["id"].as_str().unwrap().to_string();
+    assert_eq!(s.delete(&format!("/api/inventory/offcuts/{}", g), &bob).await.status, 403);
+    assert_eq!(s.delete(&format!("/api/inventory/offcuts/{}", g), &ana).await.status, 204);
+}

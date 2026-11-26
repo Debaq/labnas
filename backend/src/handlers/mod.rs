@@ -45,3 +45,4 @@ pub mod sensor_export;
 pub mod inventory_loans;
 pub mod presence;
 pub mod cut_params;
+pub mod offcuts;

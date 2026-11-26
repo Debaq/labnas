@@ -674,6 +674,23 @@ const MIGRATIONS: &[&str] = &[
         username TEXT NOT NULL,
         PRIMARY KEY (param_id, username)
     );",
+    // 35: retazos de plancha para reutilizar (idea 32)
+    "CREATE TABLE IF NOT EXISTS offcuts (
+        id TEXT PRIMARY KEY,
+        material TEXT NOT NULL,
+        thickness_mm REAL,
+        width_mm REAL NOT NULL,
+        height_mm REAL NOT NULL,
+        location TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        photo BLOB,
+        photo_mime TEXT,
+        added_by TEXT NOT NULL,
+        added_at TEXT NOT NULL,
+        taken_by TEXT,
+        taken_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_offcuts_open ON offcuts(taken_at, material);",
 
 ];
 
