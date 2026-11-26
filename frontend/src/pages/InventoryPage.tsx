@@ -6,7 +6,7 @@ import { Scissors, Recycle, CircuitBoard,
 } from 'lucide-react'
 import {
   fetchInventoryCategories, createInventoryCategory, updateInventoryCategory, deleteInventoryCategory,
-  fetchInventoryItems, createInventoryItem, updateInventoryItem, deleteInventoryItem,
+  fetchInventoryItems, createInventoryItem, updateInventoryItem, deleteInventoryItem, fetchPortfolio,
 } from '../api'
 import { useAuth } from '../auth/AuthContext'
 import AccessBadge from '../components/access/AccessBadge'
@@ -16,7 +16,7 @@ import OffcutsPanel from '../components/inventory/OffcutsPanel'
 import RecyclingPanel from '../components/inventory/RecyclingPanel'
 import BomPanel from '../components/inventory/BomPanel'
 import { useAccessLevels } from '../components/access/useAccessLevels'
-import type { InventoryCategory, InventoryItem, ItemStatus } from '../types'
+import type { InventoryCategory, InventoryItem, ItemStatus, PortfolioEntry } from '../types'
 import { errorMessage } from '../lib/errors'
 
 const STATUS_LABELS: Record<ItemStatus, { label: string; color: string }> = {
@@ -44,6 +44,12 @@ export default function InventoryPage() {
   const [editingCat, setEditingCat] = useState<InventoryCategory | null>(null)
   const [expandedItem, setExpandedItem] = useState<string | null>(null)
   const [view, setView] = useState<'items' | 'retazos' | 'reciclaje' | 'bom'>('items')
+  // Proyectos del Portafolio para asignar un bien a un proyecto (si la persona puede verlos)
+  const [projects, setProjects] = useState<PortfolioEntry[]>([])
+  const canSeePortfolio = canModule('portfolio', 'ver')
+  useEffect(() => {
+    if (canSeePortfolio) fetchPortfolio().then(setProjects).catch(() => setProjects([]))
+  }, [canSeePortfolio])
 
   // Form state
   const [form, setForm] = useState<Partial<InventoryItem>>({})
@@ -296,6 +302,9 @@ export default function InventoryPage() {
                       {item.brand && <div><span style={{ color: 'var(--text-secondary)' }}>Marca:</span> {item.brand}</div>}
                       {item.model_name && <div><span style={{ color: 'var(--text-secondary)' }}>Modelo:</span> {item.model_name}</div>}
                       {item.serial_number && <div><span style={{ color: 'var(--text-secondary)' }}>Serie:</span> <span className="font-mono">{item.serial_number}</span></div>}
+                      {item.inventory_number && <div><span style={{ color: 'var(--text-secondary)' }}>N° inventario:</span> <span className="font-mono">{item.inventory_number}</span></div>}
+                      {item.project_id && <div><span style={{ color: 'var(--text-secondary)' }}>Proyecto:</span> {projects.find(p => p.id === item.project_id)?.title ?? item.project_id}</div>}
+                      {item.responsible && <div><span style={{ color: 'var(--text-secondary)' }}>Responsable:</span> {item.responsible}</div>}
                       {item.cost > 0 && <div><span style={{ color: 'var(--text-secondary)' }}>Costo unit.:</span> <span className="font-mono">${item.cost}</span></div>}
                       {item.supplier && (
                         <div>
@@ -452,6 +461,29 @@ export default function InventoryPage() {
                   <input type="checkbox" checked={!!form.loanable} onChange={e => setForm(p => ({ ...p, loanable: e.target.checked }))} />
                   Prestable
                 </label>
+              </div>
+
+              {/* Bien de un proyecto (Finanzas) */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Proyecto</label>
+                  <select value={form.project_id || ''} onChange={e => setForm(p => ({ ...p, project_id: e.target.value || null }))}
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none cursor-pointer" style={inputStyle}>
+                    <option value="">Ninguno</option>
+                    {form.project_id && !projects.some(p => p.id === form.project_id) && <option value={form.project_id}>{form.project_id}</option>}
+                    {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>N° de inventario</label>
+                  <input value={form.inventory_number || ''} maxLength={60} onChange={e => setForm(p => ({ ...p, inventory_number: e.target.value }))}
+                    placeholder="Ej: UACH-0123" className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inputStyle} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Responsable</label>
+                  <input value={form.responsible || ''} maxLength={80} onChange={e => setForm(p => ({ ...p, responsible: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inputStyle} />
+                </div>
               </div>
 
               {/* Filament-specific fields */}

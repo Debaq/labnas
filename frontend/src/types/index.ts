@@ -380,6 +380,12 @@ export interface InventoryItem {
   loanable?: boolean
   /** Cantidad prestada sin devolver */
   on_loan?: number
+  /** Proyecto del Portafolio al que pertenece el bien (Finanzas) */
+  project_id?: string | null
+  /** Numero de inventario institucional (unico) */
+  inventory_number?: string
+  /** Persona a cargo del bien */
+  responsible?: string
   created_at: string
 }
 

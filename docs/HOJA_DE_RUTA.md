@@ -178,37 +178,38 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
 ## Etapa 1 · Administración y transparencia ⭐ urgente
 
 ### Proyectos y compras
-- [ ] **52. Proyecto con presupuesto aprobado por ítem** (personal, operación,
+- [x] **52. Proyecto con presupuesto aprobado por ítem** (personal, operación,
       equipos, viajes), fuente de financiamiento, fechas y responsable. *(absorbe la
       idea 15, «proyectos y presupuesto»)* Se apoya en el **módulo Portafolio** que ya
-      existe (proyectos con institución, requisitos e hitos).
-- [ ] **53. Flujo de compra con funciones separadas:** solicitud → justificación →
+      existe (proyectos con institución, requisitos e hitos). *(hecho: presupuesto por ítem, configuración por proyecto, cambios de monto con motivo y bitácora; ver FINANZAS.md)*
+- [x] **53. Flujo de compra con funciones separadas:** solicitud → justificación →
       cotizaciones → aprobación → orden de compra → recepción → factura → pago →
-      rendición. El sistema no deja saltarse pasos.
-- [ ] **54. Cotizaciones adjuntas** con cuadro comparativo y la razón de la elección.
-- [ ] **55. Respaldos con lectura automática.** Se sube la factura y la IA extrae
+      rendición. El sistema no deja saltarse pasos. *(hecho: flujo con estados que no se saltan, folio, separación de funciones y compromisos; ver FINANZAS.md)*
+- [x] **54. Cotizaciones adjuntas** con cuadro comparativo y la razón de la elección. *(hecho: cuadro comparativo, razón si no es la más barata y mínimo de cotizaciones configurable)*
+- [x] **55. Respaldos con lectura automática.** Se sube la factura y la IA extrae
       RUT, folio, monto y fecha, que una persona confirma. Las facturas electrónicas
-      del SII vienen en XML, así que se pueden leer exactas.
-- [ ] **56. Recepción conforme:** acta con foto del bien recibido, quién lo recibió
-      y cuándo.
-- [ ] **58. Aprobaciones firmadas con passkey** (ya existen en LabNAS): nadie puede
-      decir «yo no aprobé eso».
+      del SII vienen en XML, así que se pueden leer exactas. *(hecho: XML del SII exacto, PDF con propuesta de la IA si está configurada, confirma una persona, duplicadas 409)*
+- [x] **56. Recepción conforme:** acta con foto del bien recibido, quién lo recibió
+      y cuándo. *(hecho: acta de recepción con foto y opción de crear el bien en Inventario)*
+- [x] **58. Aprobaciones firmadas con passkey** (ya existen en LabNAS): nadie puede
+      decir «yo no aprobé eso». *(hecho: aprobación firmada con passkey, desafío ligado a compra, paso y monto; ajuste para exigirla)*
 
 ### Inventario y presupuesto
-- [ ] **59. Inventario de bienes por proyecto:** número de inventario, proyecto que
+- [x] **59. Inventario de bienes por proyecto:** número de inventario, proyecto que
       lo pagó, ubicación, responsable y fotos. Amplía el **módulo Inventario** que ya
       existe (ya guarda costo, proveedor, ubicación, número de serie y fecha de compra). Unido a las horas de uso (idea 19)
       permite mostrar, por ejemplo, que la CNC comprada con el proyecto X se usó 340
-      horas en ese proyecto.
-- [ ] **60. Ejecución presupuestaria en vivo:** aprobado contra gastado por ítem,
-      con alertas antes de pasarse.
+      horas en ese proyecto. *(hecho: proyecto, número de inventario y responsable en Inventario, sección «Bienes del proyecto» y horas de uso por nombre de proyecto; faltan las fotos)*
+- [x] **60. Ejecución presupuestaria en vivo:** aprobado contra gastado por ítem,
+      con alertas antes de pasarse. *(hecho: tabla con barras, resumen por proyecto y avisos por Telegram una vez por umbral)*
 
 ### Rendición y auditoría
-- [ ] **61. Rendiciones en el formato del financiador** (Excel o PDF) con todos los
+- [x] **61. Rendiciones en el formato del financiador** (Excel o PDF) con todos los
       respaldos anexos.
-- [ ] **65. Calendario de hitos:** informes técnicos y financieros, garantías y
+      *(hecho: Finanzas > Rendición y auditoría > Rendición; Excel, CSV, ZIP con respaldos y versión imprimible; docs/FINANZAS.md)*
+- [x] **65. Calendario de hitos:** informes técnicos y financieros, garantías y
       cierre de cada proyecto. Los hitos del Portafolio ya existen; falta llevarlos
-      al calendario. *(Los avisos ya están: módulo Plazos, idea 73.)*
+      al calendario. *(Los avisos ya están: módulo Plazos, idea 73.)* *(hecho: el cierre sale del Portafolio y el arqueo pendiente de caja chica se agrega a Plazos)*
 - [x] **73. Contadores de tiempo** (cuenta regresiva) para el cierre de cada proyecto
       y otros plazos: informes técnicos y financieros, rendiciones, garantías,
       convocatorias a fondos, entregas de tesis, vencimiento de licencias o
@@ -217,14 +218,16 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       Telegram en hitos fijos (30, 7 y 1 día). Se alimenta de los hitos de la idea 65
       y del Portafolio, y también permite crear contadores sueltos.
       *Hecho: módulo Plazos (`docs/PLAZOS.md`), con aviso también el mismo día.*
-- [ ] **66. Expediente por proyecto exportable** (ZIP con índice y huellas) y acceso
+- [x] **66. Expediente por proyecto exportable** (ZIP con índice y huellas) y acceso
       de solo lectura con fecha de término para un auditor.
-- [ ] **67. Manual de procedimientos con historial de versiones:** cómo se mueve el
+      *(hecho: ZIP con índice, huellas, bitácora relacionada y cuenta de auditor con vencimiento; docs/FINANZAS.md)*
+- [x] **67. Manual de procedimientos con historial de versiones:** cómo se mueve el
       dinero, escrito, y confirmado con firma por cada integrante. El software hace
       cumplir ese manual.
+      *(hecho: versiones inmutables, firma por integrante, aviso por Telegram y bitácora; docs/FINANZAS.md)*
 
 ### Transparencia
-- [ ] **70. Portal público de transparencia,** generado desde los datos reales (no
+- [x] **70. Portal público de transparencia,** generado desde los datos reales (no
       a mano): proyectos, montos, bienes, uso, informes.
       - Es el módulo `transparencia`, que se activa y desactiva en Configuración >
         Módulos. A diferencia del resto, viene **apagado por defecto**, porque publica
@@ -234,22 +237,27 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       - Al activarlo, el administrador elige qué secciones se publican (proyectos,
         montos, bienes, horas de uso, informes) y ve una vista previa antes.
       - Cada activación, desactivación o cambio de secciones queda en la bitácora.
-- [ ] **71. Solicitudes de información con seguimiento:** folio, plazo,
+      *(hecho: `docs/TRANSPARENCIA.md`; vista previa idéntica a lo público, informes con huella.)*
+- [x] **71. Solicitudes de información con seguimiento:** folio, plazo,
       responsable, respuesta y aviso cuando el plazo se acerca. Parte de los reportes
       que ya existen (tipo, estado y respuesta del administrador), abiertos al público
       y con plazo.
+      *(hecho: folio + código secreto, plazo en días hábiles, avisos por Telegram;
+      `docs/TRANSPARENCIA.md`.)*
 
 ### Más adelante en la etapa
-- [ ] **62. Horas dedicadas por persona y proyecto,** con boletas de honorarios y
+- [x] **62. Horas dedicadas por persona y proyecto,** con boletas de honorarios y
       contratos: demuestra que quien recibió pago trabajó en ese proyecto.
-- [ ] **63. Viajes y viáticos:** solicitud, aprobación, comprobantes e informe de
-      comisión.
-- [ ] **64. Caja chica e ingresos por servicios:** arqueos y destino del dinero que
-      entra por el cotizador (idea 37).
-- [ ] **68. Detector de anomalías:** facturas duplicadas, proveedores nuevos,
+      *(hecho: Finanzas > Rendición y auditoría > Horas; aprobación separada y gasto en el ítem; docs/FINANZAS.md)*
+- [x] **63. Viajes y viáticos:** solicitud, aprobación, comprobantes e informe de
+      comisión. *(hecho: pestaña Viajes de Finanzas, ver `docs/FINANZAS.md`.)*
+- [x] **64. Caja chica e ingresos por servicios:** arqueos y destino del dinero que
+      entra por el cotizador (idea 37). *(hecho: fondo por proyecto, gastos con respaldo, arqueo y anulaciones con motivo, ingresos por servicios)*
+- [x] **68. Detector de anomalías:** facturas duplicadas, proveedores nuevos,
       compras divididas para no licitar (fraccionamiento).
-- [ ] **69. Declaración de conflicto de interés** en cada compra y actas con las
-      decisiones de gasto.
+      *(hecho: Finanzas > Rendición y auditoría > Anomalías, solo lectura; docs/FINANZAS.md)*
+- [x] **69. Declaración de conflicto de interés** en cada compra y actas con las
+      decisiones de gasto. *(hecho: declaración antes de aprobar, bloqueo con conflicto y acta imprimible de la decisión de gasto)*
 
 ## Etapa 2 · Seguridad y monitoreo
 

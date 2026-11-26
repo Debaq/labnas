@@ -85,7 +85,7 @@ fn publish(state: &AppState) {
 pub struct Deadline {
     /// Unico entre todas las fuentes: `d:<id>`, `p:<proyecto>` o `m:<proyecto>:<hito>`
     pub key: String,
-    /// manual | proyecto | hito | induccion | mantencion | vencimiento | capacitacion
+    /// manual | proyecto | hito | induccion | mantencion | vencimiento | capacitacion | arqueo
     pub source: &'static str,
     /// Id del contador suelto (solo `manual`)
     pub id: Option<String>,
@@ -334,6 +334,38 @@ fn safety_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Result<Vec
     Ok(out)
 }
 
+/// Arqueos de caja chica pendientes (Finanzas): fecha del ultimo arqueo mas su frecuencia. Los
+/// vencidos siguen apareciendo hasta que se haga el arqueo o se cierre el proyecto. El cierre
+/// del proyecto ya sale por el Portafolio (fecha de termino).
+fn petty_cash_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Result<Vec<Deadline>> {
+    if !module_on(conn, "finanzas") {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for a in crate::handlers::finance::budget::pending_arqueos(conn)? {
+        let d = Deadline {
+            key: format!("ar:{}", a.fund_id),
+            source: "arqueo",
+            id: None,
+            title: format!("Arqueo de caja chica: {}", a.title),
+            project: Some(a.title),
+            portfolio_id: None,
+            category: "rendicion".into(),
+            due_date: a.due,
+            days_left: 0,
+            level: "ok",
+            notes: String::new(),
+            notify: "staff".into(),
+            created_by: None,
+            done_at: None,
+            done_by: None,
+            participants: vec![a.responsible],
+        };
+        out.extend(finish(d, today));
+    }
+    Ok(out)
+}
+
 /// Todos los plazos activos (sin los cumplidos), ordenados por fecha
 fn active_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Result<Vec<Deadline>> {
     let mut stmt = conn.prepare(&format!("{} WHERE d.done_at IS NULL", SELECT))?;
@@ -348,6 +380,7 @@ fn active_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Result<Vec
     list.extend(maintenance_deadlines(conn, today)?);
     list.extend(inventory_deadlines(conn, today)?);
     list.extend(safety_deadlines(conn, today)?);
+    list.extend(petty_cash_deadlines(conn, today)?);
     list.sort_by(|a, b| a.due_date.cmp(&b.due_date).then_with(|| a.title.cmp(&b.title)));
     Ok(list)
 }
@@ -586,6 +619,7 @@ fn recipients(conn: &Connection, d: &Deadline) -> rusqlite::Result<Option<Vec<St
         "mantencion" => "machines",
         "vencimiento" => "inventory",
         "capacitacion" => "seguridad",
+        "arqueo" => "finanzas",
         _ => "deadlines",
     };
     let staff = || -> rusqlite::Result<Vec<String>> {

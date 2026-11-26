@@ -821,11 +821,264 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE inventory_items ADD COLUMN project_id TEXT;
     ALTER TABLE inventory_items ADD COLUMN inventory_number TEXT NOT NULL DEFAULT '';
     ALTER TABLE inventory_items ADD COLUMN responsible TEXT NOT NULL DEFAULT '';",
-    // 38: (reservada) presupuesto, ejecucion, caja chica e ingresos — agente A
-    // 39: (reservada) flujo de compras — agente B
-    // 40: (reservada) rendicion, expediente, manual y anomalias — agente C
-    // 41: (reservada) transparencia, solicitudes de informacion y viajes — agente D
+    // 38: presupuesto con historial de cambios, marcas de alerta, caja chica con arqueos e
+    // ingresos por servicios (docs/FINANZAS.md)
+    MIGRATION_PRESUPUESTO,
+    // 39: ajustes del flujo de compras, declaraciones de conflicto de interes y desafios de passkey
+    "CREATE TABLE IF NOT EXISTS fin_purchase_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS fin_conflict_declarations (
+        id TEXT PRIMARY KEY,
+        purchase_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        supplier TEXT NOT NULL DEFAULT '',
+        has_conflict INTEGER NOT NULL,
+        detail TEXT NOT NULL DEFAULT '',
+        at TEXT NOT NULL,
+        ledger_seq INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_fin_conflict_purchase ON fin_conflict_declarations(purchase_id);
+    CREATE TABLE IF NOT EXISTS fin_passkey_challenges (
+        challenge TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        purchase_id TEXT NOT NULL,
+        step TEXT NOT NULL,
+        amount REAL NOT NULL,
+        rp_id TEXT NOT NULL,
+        origin TEXT NOT NULL,
+        expires_at INTEGER NOT NULL
+    );",
+    // 40: manual de procedimientos con versiones inmutables y firmas, y horas por persona y
+    // proyecto (honorarios) de la rendicion (ideas 62 y 67, ver docs/FINANZAS.md)
+    "CREATE TABLE IF NOT EXISTS fin_manual_versions (
+        id TEXT PRIMARY KEY,
+        version INTEGER NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '',
+        sha256 TEXT NOT NULL,
+        published_by TEXT NOT NULL,
+        published_at TEXT NOT NULL,
+        ledger_seq INTEGER
+    );
+    CREATE TRIGGER IF NOT EXISTS fin_manual_no_update BEFORE UPDATE ON fin_manual_versions
+    WHEN NOT (OLD.ledger_seq IS NULL AND NEW.ledger_seq IS NOT NULL AND NEW.id = OLD.id
+        AND NEW.version = OLD.version AND NEW.title = OLD.title AND NEW.body = OLD.body
+        AND NEW.summary = OLD.summary AND NEW.sha256 = OLD.sha256
+        AND NEW.published_by = OLD.published_by AND NEW.published_at = OLD.published_at)
+    BEGIN SELECT RAISE(ABORT, 'Las versiones del manual no se modifican'); END;
+    CREATE TRIGGER IF NOT EXISTS fin_manual_no_delete BEFORE DELETE ON fin_manual_versions
+    BEGIN SELECT RAISE(ABORT, 'Las versiones del manual no se borran'); END;
+    CREATE TABLE IF NOT EXISTS fin_manual_signatures (
+        version_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        signed_at TEXT NOT NULL,
+        ledger_seq INTEGER,
+        PRIMARY KEY (version_id, username)
+    );
+    CREATE TABLE IF NOT EXISTS fin_hours (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        month TEXT NOT NULL,
+        hours REAL NOT NULL,
+        amount REAL NOT NULL DEFAULT 0,
+        budget_item_id TEXT,
+        notes TEXT NOT NULL DEFAULT '',
+        file_id TEXT,
+        status TEXT NOT NULL DEFAULT 'pendiente',
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        decided_by TEXT,
+        decided_at TEXT,
+        decision_note TEXT NOT NULL DEFAULT '',
+        ledger_seq INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_fin_hours_project ON fin_hours(project_id, month);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_fin_hours_unique ON fin_hours(project_id, username, month)
+        WHERE status IN ('pendiente', 'aprobada');",
+    // 41: transparencia (portal publico, informes, solicitudes de informacion con plazo) y
+    // viajes y viaticos (ideas 70, 71 y 63; ver docs/TRANSPARENCIA.md y docs/FINANZAS.md)
+    "CREATE TABLE IF NOT EXISTS transp_config (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        sections TEXT NOT NULL DEFAULT '{}',
+        deadline_days INTEGER NOT NULL DEFAULT 20,
+        intro TEXT NOT NULL DEFAULT '',
+        updated_by TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS transp_reports (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        report_date TEXT NOT NULL,
+        project_id TEXT,
+        file_id TEXT NOT NULL,
+        published INTEGER NOT NULL DEFAULT 1,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        changed_by TEXT NOT NULL DEFAULT '',
+        changed_at TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS transp_requests (
+        id TEXT PRIMARY KEY,
+        seq INTEGER NOT NULL,
+        folio TEXT NOT NULL UNIQUE,
+        code_hash TEXT NOT NULL,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL DEFAULT '',
+        body TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'recibida',
+        assigned_to TEXT,
+        due_date TEXT NOT NULL,
+        response TEXT NOT NULL DEFAULT '',
+        reason TEXT NOT NULL DEFAULT '',
+        derived_to TEXT NOT NULL DEFAULT '',
+        responded_at TEXT,
+        alerted_soon INTEGER NOT NULL DEFAULT 0,
+        alerted_due INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_transp_requests_status ON transp_requests(status, due_date);
+    CREATE TABLE IF NOT EXISTS transp_request_events (
+        id TEXT PRIMARY KEY,
+        request_id TEXT NOT NULL,
+        at TEXT NOT NULL,
+        username TEXT NOT NULL,
+        status TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        ledger_seq INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_transp_events_req ON transp_request_events(request_id, at);
+    CREATE TABLE IF NOT EXISTS fin_trips (
+        id TEXT PRIMARY KEY,
+        folio INTEGER NOT NULL UNIQUE,
+        project_id TEXT NOT NULL,
+        budget_item_id TEXT,
+        traveler TEXT NOT NULL,
+        traveler_user TEXT,
+        destination TEXT NOT NULL,
+        start_date TEXT NOT NULL,
+        end_date TEXT NOT NULL,
+        purpose TEXT NOT NULL,
+        est_transport REAL NOT NULL DEFAULT 0,
+        est_lodging REAL NOT NULL DEFAULT 0,
+        est_per_diem REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'solicitud',
+        requested_by TEXT NOT NULL,
+        decided_by TEXT,
+        decided_at TEXT,
+        decision_note TEXT NOT NULL DEFAULT '',
+        report_text TEXT NOT NULL DEFAULT '',
+        closed_by TEXT,
+        closed_at TEXT,
+        total_spent REAL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_fin_trips_project ON fin_trips(project_id, status);
+    CREATE TABLE IF NOT EXISTS fin_trip_receipts (
+        id TEXT PRIMARY KEY,
+        trip_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        amount REAL NOT NULL DEFAULT 0,
+        file_id TEXT,
+        added_by TEXT NOT NULL,
+        added_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_fin_trip_receipts ON fin_trip_receipts(trip_id);
+    CREATE TABLE IF NOT EXISTS fin_trip_steps (
+        id TEXT PRIMARY KEY,
+        trip_id TEXT NOT NULL,
+        step TEXT NOT NULL,
+        username TEXT NOT NULL,
+        at TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        ledger_seq INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_fin_trip_steps ON fin_trip_steps(trip_id, at);",
 ];
+
+/// Migracion 38 (Finanzas: presupuesto, caja chica e ingresos). Es constante para que las
+/// pruebas unitarias puedan crear sus tablas.
+pub(crate) const MIGRATION_PRESUPUESTO: &str = "CREATE TABLE IF NOT EXISTS fin_budget_changes (
+        id TEXT PRIMARY KEY,
+        item_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        old_amount REAL NOT NULL,
+        new_amount REAL NOT NULL,
+        reason TEXT NOT NULL,
+        changed_by TEXT NOT NULL,
+        changed_at TEXT NOT NULL,
+        ledger_seq INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_fin_changes_item ON fin_budget_changes(item_id, changed_at);
+    CREATE TABLE IF NOT EXISTS fin_budget_alerts (
+        item_id TEXT NOT NULL,
+        level TEXT NOT NULL,
+        sent_at TEXT NOT NULL,
+        PRIMARY KEY (item_id, level)
+    );
+    CREATE TABLE IF NOT EXISTS fin_petty_funds (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL DEFAULT '',
+        responsible TEXT NOT NULL,
+        arqueo_days INTEGER NOT NULL DEFAULT 30,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS fin_petty_moves (
+        id TEXT PRIMARY KEY,
+        fund_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        amount REAL NOT NULL,
+        concept TEXT NOT NULL,
+        moved_on TEXT NOT NULL,
+        budget_item_id TEXT,
+        file_id TEXT,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        ledger_seq INTEGER,
+        annulled_at TEXT,
+        annulled_by TEXT,
+        annul_reason TEXT,
+        annul_seq INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_fin_petty_moves_fund ON fin_petty_moves(fund_id, moved_on);
+    CREATE TABLE IF NOT EXISTS fin_petty_counts (
+        id TEXT PRIMARY KEY,
+        fund_id TEXT NOT NULL,
+        counted REAL NOT NULL,
+        expected REAL NOT NULL,
+        difference REAL NOT NULL,
+        notes TEXT NOT NULL DEFAULT '',
+        counted_by TEXT NOT NULL,
+        counted_at TEXT NOT NULL,
+        ledger_seq INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_fin_petty_counts_fund ON fin_petty_counts(fund_id, counted_at);
+    CREATE TABLE IF NOT EXISTS fin_incomes (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        amount REAL NOT NULL,
+        origin TEXT NOT NULL,
+        destination TEXT NOT NULL DEFAULT '',
+        received_on TEXT NOT NULL,
+        notes TEXT NOT NULL DEFAULT '',
+        file_id TEXT,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        ledger_seq INTEGER,
+        annulled_at TEXT,
+        annulled_by TEXT,
+        annul_reason TEXT,
+        annul_seq INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_fin_incomes_project ON fin_incomes(project_id, received_on);";
 
 /// Migracion 16. Publicada: no modificar (ver `MIGRATIONS`).
 /// `prev_hash` UNIQUE impide bifurcar la cadena; los triggers, editar o borrar.

@@ -229,14 +229,29 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         // --- Finanzas (docs/FINANZAS.md). Reglas mas especificas de cada parte arriba del
         // comodin; el handler revisa la separacion de funciones ---
         // [presupuesto]
-        // [compras]
-        // [rendicion]
-        // [viajes]
+        // Caja chica: quien la custodia registra gastos (Usar); el handler exige ser el responsable o gestionar
+        ("POST", ["finance", "petty", "funds", _, "moves"]) => Usar,
+        // [compras] pedir, cotizar, recibir, subir la factura y anular son de quien usa; el handler
+        // revisa dueño y separacion de funciones. Aprobar, ordenar, confirmar y pagar: Gestionar.
+        ("POST", ["finance", "purchases"]) => Usar,
+        ("POST", ["finance", "purchases", _, "quotes" | "quoting" | "receive" | "invoice" | "cancel"]) => Usar,
+        // [rendicion] Firmar el manual es de quien ve Finanzas (publicarlo, Gestionar por el
+        // comodin). Horas: registrar es Usar; aprobar o rechazar lo decide el handler (quien
+        // gestiona o el responsable del proyecto, nunca la misma persona)
+        ("POST", ["finance", "manual", "sign"]) => Ver,
+        ("POST", ["finance", "hours"]) => Usar,
+        ("POST", ["finance", "hours", _, "approve" | "reject"]) => Ver,
+        // [viajes] pedir, editar la propia solicitud, subir comprobantes, informe, cerrar y anular
+        // son Usar (el handler revisa quien es quien); aprobar y rechazar caen en Gestionar
+        ("POST", ["finance", "trips"]) | ("PUT", ["finance", "trips", _]) => Usar,
+        ("POST", ["finance", "trips", _, "receipts" | "close" | "cancel"]) | ("PUT", ["finance", "trips", _, "report"]) => Usar,
+        ("DELETE", ["finance", "trips", _, "receipts", _]) => Usar,
         ("GET", ["finance", ..]) => Ver,
         (_, ["finance", ..]) => Gestionar,
 
         // --- Transparencia: lo publico va por /api/transparency/public/ sin sesion ---
-        // [transparencia]
+        // [transparencia] solicitudes (con nombre y correo de quien pregunta) e informes sin publicar
+        ("GET", ["transparency", "requests", ..]) | ("GET", ["transparency", "reports", ..]) => Gestionar,
         ("GET", ["transparency", ..]) => Ver,
         (_, ["transparency", ..]) => Gestionar,
 

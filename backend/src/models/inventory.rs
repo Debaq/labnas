@@ -80,6 +80,15 @@ pub struct InventoryItem {
     /// Se puede llevar prestado sin pedirlo al staff
     #[serde(default)]
     pub loanable: bool,
+    /// Proyecto del Portafolio al que pertenece el bien (Finanzas: bienes por proyecto)
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// Numero de inventario institucional (unico cuando se indica)
+    #[serde(default)]
+    pub inventory_number: String,
+    /// Persona a cargo del bien
+    #[serde(default)]
+    pub responsible: String,
     /// Calculado: cantidad prestada sin devolver (no se guarda)
     #[serde(default)]
     pub on_loan: f64,

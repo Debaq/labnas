@@ -44,7 +44,7 @@ fn b64(data: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(data)
 }
 
-fn unb64(s: &str) -> Result<Vec<u8>, ApiError> {
+pub(crate) fn unb64(s: &str) -> Result<Vec<u8>, ApiError> {
     base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(s.trim_end_matches('='))
         .map_err(|_| bad("Dato base64 invalido"))
@@ -86,7 +86,7 @@ fn take_challenge(c: &str) -> Option<Pending> {
 }
 
 /// Dominio y origen de la pagina que pide la passkey (cabecera Origin)
-fn rp_from_headers(headers: &HeaderMap) -> Result<(String, String), ApiError> {
+pub(crate) fn rp_from_headers(headers: &HeaderMap) -> Result<(String, String), ApiError> {
     let origin = headers
         .get("origin")
         .and_then(|v| v.to_str().ok())

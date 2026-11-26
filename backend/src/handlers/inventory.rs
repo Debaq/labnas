@@ -153,12 +153,16 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<InventoryItem> {
         expires_on: expires_on.filter(|s| !s.is_empty()),
         loanable: row.get::<_, i64>(26)? != 0,
         on_loan: row.get(27)?,
+        project_id: row.get::<_, Option<String>>(28)?.filter(|s| !s.is_empty()),
+        inventory_number: row.get(29)?,
+        responsible: row.get(30)?,
         created_at,
     })
 }
 
 const ITEM_SELECT: &str = "SELECT id, category_id, name, description, quantity, unit, cost, supplier, supplier_url, location, serial_number, purchase_date, status, notes, brand, model_name, material_type, filament_diameter, filament_weight, filament_remaining, filament_color, filament_density, custom_fields, created_at, min_quantity, expires_on, loanable,
-    (SELECT COALESCE(SUM(l.quantity), 0) FROM inventory_loans l WHERE l.item_id = inventory_items.id AND l.returned_at IS NULL)
+    (SELECT COALESCE(SUM(l.quantity), 0) FROM inventory_loans l WHERE l.item_id = inventory_items.id AND l.returned_at IS NULL),
+    project_id, inventory_number, responsible
     FROM inventory_items";
 
 pub async fn list_items(State(state): State<AppState>) -> Json<Vec<InventoryItem>> {
@@ -188,8 +192,9 @@ pub async fn create_item(
     validate_extras(&item)?;
 
     let item_clone = item.clone();
-    crate::db::db_op(&state.db, move |conn| {
-        insert_item(conn, &item_clone)
+    crate::db::db_op_status(&state.db, move |conn| {
+        validate_assets(conn, &item_clone)?;
+        insert_item(conn, &item_clone).map_err(internal)
     }).await?;
     crate::handlers::inventory_loans::after_item_change(&state, &item.id).await;
     Ok(Json(item))
@@ -208,6 +213,37 @@ fn validate_extras(item: &InventoryItem) -> Result<(), (StatusCode, String)> {
     Ok(())
 }
 
+/// Proyecto, numero de inventario y responsable (bienes por proyecto, Finanzas): el proyecto
+/// debe existir en el Portafolio y el numero de inventario no puede repetirse
+fn validate_assets(conn: &rusqlite::Connection, item: &InventoryItem) -> Result<(), (StatusCode, String)> {
+    let bad = |m: &str| (StatusCode::BAD_REQUEST, m.to_string());
+    if item.inventory_number.trim().chars().count() > 60 {
+        return Err(bad("El numero de inventario admite hasta 60 caracteres"));
+    }
+    if item.responsible.trim().chars().count() > 80 {
+        return Err(bad("El responsable admite hasta 80 caracteres"));
+    }
+    if let Some(p) = item.project_id.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        if crate::finance::project_title(conn, p).map_err(internal)?.is_none() {
+            return Err(bad("El proyecto no existe en el Portafolio"));
+        }
+    }
+    let number = item.inventory_number.trim();
+    if !number.is_empty() {
+        let dup: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM inventory_items WHERE inventory_number = ?1 AND id != ?2)",
+                params![number, item.id],
+                |r| r.get(0),
+            )
+            .map_err(internal)?;
+        if dup {
+            return Err((StatusCode::CONFLICT, "Ya hay un bien con ese numero de inventario".to_string()));
+        }
+    }
+    Ok(())
+}
+
 fn insert_item(conn: &rusqlite::Connection, item: &InventoryItem) -> Result<(), String> {
     let status_str = serde_json::to_value(&item.status)
         .ok()
@@ -215,8 +251,8 @@ fn insert_item(conn: &rusqlite::Connection, item: &InventoryItem) -> Result<(), 
         .unwrap_or_else(|| "activo".to_string());
     let custom_fields_str = serde_json::to_string(&item.custom_fields).unwrap_or_else(|_| "{}".to_string());
     conn.execute(
-        "INSERT INTO inventory_items (id, category_id, name, description, quantity, unit, cost, supplier, supplier_url, location, serial_number, purchase_date, status, notes, brand, model_name, material_type, filament_diameter, filament_weight, filament_remaining, filament_color, filament_density, custom_fields, created_at, min_quantity, expires_on, loanable)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
+        "INSERT INTO inventory_items (id, category_id, name, description, quantity, unit, cost, supplier, supplier_url, location, serial_number, purchase_date, status, notes, brand, model_name, material_type, filament_diameter, filament_weight, filament_remaining, filament_color, filament_density, custom_fields, created_at, min_quantity, expires_on, loanable, project_id, inventory_number, responsible)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
         params![
             item.id, item.category_id, item.name, item.description,
             item.quantity, item.unit, item.cost, item.supplier, item.supplier_url,
@@ -229,6 +265,9 @@ fn insert_item(conn: &rusqlite::Connection, item: &InventoryItem) -> Result<(), 
             item.min_quantity,
             item.expires_on.as_deref().map(str::trim).filter(|s| !s.is_empty()),
             item.loanable,
+            item.project_id.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+            item.inventory_number.trim(),
+            item.responsible.trim(),
         ],
     ).map_err(|e| e.to_string())?;
     Ok(())
@@ -266,11 +305,12 @@ pub async fn update_item(
 
     let item_clone = item.clone();
     let id_for_delete = id.clone();
-    crate::db::db_op(&state.db, move |conn| {
+    crate::db::db_op_status(&state.db, move |conn| {
+        validate_assets(conn, &item_clone)?;
         // Delete and re-insert to handle all fields cleanly
         conn.execute("DELETE FROM inventory_items WHERE id = ?1", params![id_for_delete])
-            .map_err(|e| e.to_string())?;
-        insert_item(conn, &item_clone)
+            .map_err(internal)?;
+        insert_item(conn, &item_clone).map_err(internal)
     }).await?;
     crate::handlers::inventory_loans::after_item_change(&state, &item.id).await;
 

@@ -1,12 +1,12 @@
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    Json,
+    Extension, Json,
 };
 use serde::Deserialize;
 
 use crate::db;
-use crate::state::AppState;
+use crate::state::{AppState, SessionInfo};
 
 pub async fn list_modules(
     State(state): State<AppState>,
@@ -24,6 +24,7 @@ pub struct ToggleBody {
 
 pub async fn toggle_module(
     State(state): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
     Path(id): Path<String>,
     Json(body): Json<ToggleBody>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
@@ -59,6 +60,12 @@ pub async fn toggle_module(
         crate::module_tasks::start(&state, &id);
     } else {
         crate::module_tasks::stop(&state, &id).await;
+    }
+
+    // Publicar o dejar de publicar datos hacia afuera queda en la bitacora inalterable
+    if id == "transparencia" {
+        crate::finance::ledger(&state, &session.username, "transparencia", "modulo", serde_json::json!({ "activado": enabled })).await?;
+        state.log_activity("Transparencia", if enabled { "Modulo activado" } else { "Modulo desactivado" }, &session.username).await;
     }
 
     // Apagar la terminal corta tambien las sesiones abiertas desde Telegram
