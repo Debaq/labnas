@@ -300,7 +300,9 @@ pub async fn permission_check(
     if let Some(module_id) = crate::modules::for_path(&path) {
         let enabled = state.enabled_modules.lock().await.contains(module_id);
         if !enabled {
-            return (StatusCode::NOT_FOUND, "Modulo no disponible").into_response();
+            // Sin sesion no se dice que el modulo existe (portal de transparencia apagado)
+            let msg = if is_public(&path) { "No encontrado" } else { "Modulo no disponible" };
+            return (StatusCode::NOT_FOUND, msg).into_response();
         }
     }
 
