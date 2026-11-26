@@ -31,6 +31,7 @@ import MachineFormModal from '../components/machines/MachineFormModal'
 import MachineStatusChip from '../components/machines/MachineStatusChip'
 import InductionPanel from '../components/machines/InductionPanel'
 import MaintenancePanel from '../components/machines/MaintenancePanel'
+import UsagePanel from '../components/machines/UsagePanel'
 
 const inputStyle = { backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }
 const card = { backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }
@@ -245,6 +246,8 @@ export default function MachineDetailPage() {
           <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--text-primary)' }}>{m.instructions}</p>
         </div>
       )}
+
+      <UsagePanel machine={m} me={user?.username ?? ''} staff={staff} onChange={load} />
 
       <InductionPanel machine={m} certs={certs} me={user?.username ?? ''} staff={staff} onChange={load} />
 

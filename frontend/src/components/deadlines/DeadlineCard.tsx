@@ -45,6 +45,7 @@ export default function DeadlineCard({ d, editable, compact, onEdit, onDone, onD
               {d.project && <> · {d.portfolio_id ? <Link to="/portfolio" className="hover:underline">{d.project}</Link> : d.project}</>}
               {!compact && (d.source === 'proyecto' || d.source === 'hito') && ' · desde el Portafolio'}
               {!compact && (d.source === 'induccion' || d.source === 'mantencion') && ' · desde Máquinas'}
+              {!compact && d.source === 'capacitacion' && ' · desde Seguridad'}
             </div>
             {!compact && d.notes && (
               <div className="text-xs mt-1 line-clamp-2" style={{ color: 'var(--text-secondary)' }}>{d.notes}</div>

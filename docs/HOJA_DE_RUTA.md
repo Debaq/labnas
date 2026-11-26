@@ -263,15 +263,20 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       el escalamiento y la confirmación «lo vi». *(hecho: `docs/ALARMAS.md`; alerta
       crítica con lista en orden, `/visto` por Telegram o «Lo vi» en la web, aviso al
       cerrar e historial de incidentes)*
-- [ ] **7. Historial de temperaturas exportable** para auditorías y certificaciones.
+- [x] **7. Historial de temperaturas exportable** para auditorías y certificaciones.
+      *(hecho: `docs/SENSORES.md`; CSV por rango de fechas, resumen min/máx/promedio,
+      tiempo fuera de rango por alerta e informe imprimible; cada exportación queda en
+      el registro de accesos)*
 - [ ] **19. Medidor de corriente en cada máquina** (ESP32 + sensor de pinza): sabe
       si la máquina trabaja de verdad, cuenta horas de uso y consumo eléctrico.
       Alimenta la idea 59.
 - [x] **22. Máquina fuera de servicio:** se escanea el QR, se reporta la falla con
       foto y se bloquean las reservas hasta la reparación. Puede reutilizar los
       reportes que ya existen. *(hecho en el módulo Máquinas, con foto y aviso por Telegram)*
-- [ ] **17. Seguridad laboral:** inducciones, capacitaciones vigentes, fichas de
-      seguridad y registro de incidentes.
+- [x] **17. Seguridad laboral:** inducciones, capacitaciones vigentes, fichas de
+      seguridad y registro de incidentes. *(hecho en el módulo Seguridad: capacitaciones
+      generales con vigencia y vencimientos en Plazos, fichas con archivo adjunto y vínculo a
+      máquina o inventario, e incidentes con aviso por Telegram si son graves; ver SEGURIDAD.md)*
 
 ## Etapa 3 · Acceso y uso de máquinas
 
@@ -282,10 +287,11 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
 - [ ] **18. Llave electrónica por máquina:** ESP32 con lector de tarjeta y relé que
       habilita la máquina solo a quien tiene la certificación vigente y registra
       quién la usó y cuánto tiempo.
-- [ ] **2. Reserva de equipos** con calendario sin choques de horario, exigencia de
-      certificación y registro de horas. *(en parte: el módulo Máquinas ya reserva sin
-      choques, con aprobación opcional, recordatorio y exigencia de inducción; falta
-      registrar las horas reales de uso —idea 19—)*
+- [x] **2. Reserva de equipos** con calendario sin choques de horario, exigencia de
+      certificación y registro de horas. *(hecho en el módulo Máquinas: reserva sin
+      choques, con aprobación opcional, recordatorio y exigencia de inducción; y registro
+      de uso real con «Empezar a usar / Terminar» desde la ficha, horas por máquina,
+      persona y proyecto. Con medidor de corriente —idea 19— se medirá solo)*
 - [x] **5. Mantenimiento y calibración:** bitácora por equipo y recordatorios (por
       fecha o por horas de uso: boquilla tras X kg, lente láser tras X horas). *(hecho en
       el módulo Máquinas: plan por días y/o horas de uso, las de fecha en Plazos y las de
@@ -323,8 +329,10 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
 - [ ] **38. Formulario público de pedidos** de fabricación con cotización y
       seguimiento.
 - [ ] **39. Membresías y créditos de horas de máquina** para usuarios externos.
-- [ ] **40. Talleres** con inscripción, cupos, asistencia y certificados en PDF. El
-      Portafolio ya registra talleres; falta la inscripción.
+- [x] **40. Talleres** con inscripción, cupos, asistencia y certificados en PDF. El
+      Portafolio ya registra talleres; falta la inscripción. *(hecho: inscripción con
+      sesión o por enlace público, cupos con lista de espera, asistencia por sesión y
+      certificados con código verificable; ver [TALLERES.md](TALLERES.md))*
 
 ## Etapa 5 · Fabricación
 

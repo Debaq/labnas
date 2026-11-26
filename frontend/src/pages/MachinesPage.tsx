@@ -29,8 +29,9 @@ import { useEvent } from '../events/useEvents'
 import { useToast } from '../components/ToastContext'
 import MachineFormModal from '../components/machines/MachineFormModal'
 import MachineStatusChip from '../components/machines/MachineStatusChip'
+import UsageReportView from '../components/machines/UsageReportView'
 
-type Tab = 'machines' | 'mine' | 'pending' | 'maintenance'
+type Tab = 'machines' | 'mine' | 'pending' | 'maintenance' | 'usage'
 
 export default function MachinesPage() {
   const { canModule } = useAuth()
@@ -101,6 +102,7 @@ export default function MachinesPage() {
     { id: 'mine', label: 'Mis reservas', count: mine.length },
     ...(staff ? [{ id: 'pending' as Tab, label: 'Por aprobar', count: pending.length + certReqs.length }] : []),
     ...(staff ? [{ id: 'maintenance' as Tab, label: 'Mantencion', count: maint.filter(t => t.level !== 'ok').length }] : []),
+    ...(staff ? [{ id: 'usage' as Tab, label: 'Horas de uso' }] : []),
   ]
 
   return (
@@ -152,6 +154,8 @@ export default function MachinesPage() {
             </div>
           )}
         </>
+      ) : tab === 'usage' ? (
+        <UsageReportView />
       ) : tab === 'maintenance' ? (
         <MaintenanceList tasks={maint} />
       ) : tab === 'mine' ? (
@@ -220,6 +224,9 @@ function MachineCard({ m }: { m: Machine }) {
           <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
             Proxima: {shortDateTime(m.next.start)}–{hhmm(m.next.end)}{m.next.kind === 'reserva' ? ` · ${m.next.username}` : ' · bloqueo'}
           </div>
+        )}
+        {m.in_use && (
+          <div className="text-xs font-medium" style={{ color: 'var(--accent)' }}>▶ En uso por {m.in_use.username} desde {hhmm(m.in_use.started_at)}</div>
         )}
         {m.requires_certification && (
           <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>🎓 Requiere induccion</div>

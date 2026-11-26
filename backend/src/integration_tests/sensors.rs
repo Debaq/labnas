@@ -119,3 +119,53 @@ async fn alarma_critica_con_incidente() {
     let log = s.get("/api/audit?limit=100", &admin).await.text;
     assert!(log.contains("Alarma critica abierta") && log.contains("Confirmo la alarma critica") && log.contains("Alarma critica cerrada"));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exportar_historial_y_informe() {
+    let s = Server::start().await;
+    let admin = s.admin().await;
+    let obs = s.user(&admin, "obs", "observador").await;
+
+    for v in [-20.0, -18.0, -10.0, -19.0] {
+        let body = json!({ "mac": MAC, "readings": [{ "key": "temp", "val": v }] });
+        assert_eq!(send(&s, body, None).await, 200);
+    }
+    let id = s.get("/api/sensors/devices", &admin).await.json()[0]["id"].as_str().unwrap().to_string();
+    s.put(&format!("/api/sensors/devices/{}/status", id), &admin, json!({ "status": "accepted" })).await;
+    let alert = json!({ "device_id": id, "key": "temp", "condition": "above", "threshold": -15.0, "critical": true, "escalation": ["obs"] });
+    assert_eq!(s.post("/api/sensors/alerts", &admin, alert).await.status, 200);
+    // lectura fuera de rango tras crear la alerta: abre un incidente
+    send(&s, json!({ "mac": MAC, "readings": [{ "key": "temp", "val": -5.0 }] }), None).await;
+
+    let hoy = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let q = format!("from={}&to={}", hoy, hoy);
+
+    // CSV: adjunto, cabecera y una fila por lectura
+    let csv = s.get(&format!("/api/sensors/devices/{}/export?{}&format=csv", id, q), &obs).await;
+    assert_eq!(csv.status, 200);
+    assert!(csv.header("content-disposition").starts_with("attachment"));
+    assert!(csv.header("content-type").starts_with("text/csv"));
+    let lines: Vec<&str> = csv.text.trim_start_matches('\u{feff}').lines().collect();
+    assert_eq!(lines[0], "fecha_hora_local,clave,valor,unidad");
+    assert_eq!(lines.len(), 6);
+    assert!(lines[1].contains(",temp,-20,"));
+
+    // Informe: resumen por clave y alerta
+    let rep = s.get(&format!("/api/sensors/devices/{}/report?{}", id, q), &obs).await.json();
+    assert_eq!(rep["total_readings"], 5);
+    let k = &rep["keys"][0];
+    assert_eq!(k["key"], "temp");
+    assert_eq!(k["count"], 5);
+    assert_eq!(k["min"], -20.0);
+    assert_eq!(k["max"], -5.0);
+    assert!((k["avg"].as_f64().unwrap() - (-14.4)).abs() < 1e-9);
+    assert_eq!(rep["alerts"][0]["readings_out_of_range"], 2);
+    assert_eq!(rep["alerts"][0]["incidents"], 1);
+
+    // Validaciones: rango invertido, demasiado largo, sensor inexistente
+    let base = format!("/api/sensors/devices/{}/export", id);
+    assert_eq!(s.get(&format!("{}?from=2026-02-01&to=2026-01-01", base), &obs).await.status, 400);
+    assert_eq!(s.get(&format!("{}?from=2024-01-01&to=2026-01-01", base), &obs).await.status, 400);
+    assert_eq!(s.get(&format!("{}?from=ayer&to=hoy", base), &obs).await.status, 400);
+    assert_eq!(s.get(&format!("/api/sensors/devices/nope/report?{}", q), &obs).await.status, 404);
+}

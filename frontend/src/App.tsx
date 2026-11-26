@@ -19,6 +19,8 @@ const MachineDetailPage = lazy(() => import('./pages/MachineDetailPage'))
 const DeviceLinkPage = lazy(() => import('./pages/DeviceLinkPage'))
 const SharedPage = lazy(() => import('./pages/SharedPage'))
 const PublicRecordPage = lazy(() => import('./pages/PublicRecordPage'))
+const PublicWorkshopPage = lazy(() => import('./pages/PublicWorkshopPage'))
+const PublicCertificatePage = lazy(() => import('./pages/PublicCertificatePage'))
 const DisplayPage = lazy(() => import('./pages/DisplayPage'))
 const SetupWizard = lazy(() => import('./components/SetupWizard'))
 
@@ -59,6 +61,15 @@ function AppRoutes() {
   const publicToken = window.location.pathname.match(/^\/p\/([0-9a-f]{48})$/)?.[1]
   if (publicToken) {
     return <Suspense fallback={<LoadingScreen />}><PublicRecordPage token={publicToken} /></Suspense>
+  }
+  // Inscripcion a un taller y verificacion de certificados: sin cuenta (ver handlers/workshops.rs)
+  const workshopToken = window.location.pathname.match(/^\/taller\/([0-9a-f]{32})$/)?.[1]
+  if (workshopToken) {
+    return <Suspense fallback={<LoadingScreen />}><PublicWorkshopPage token={workshopToken} /></Suspense>
+  }
+  const certCode = window.location.pathname.match(/^\/certificado\/([0-9A-Fa-f]{4}(?:-[0-9A-Fa-f]{4}){3})$/)?.[1]
+  if (certCode) {
+    return <Suspense fallback={<LoadingScreen />}><PublicCertificatePage code={certCode} /></Suspense>
   }
   // Pantalla del laboratorio (TV o tablet): sin sesion (ver handlers/display.rs)
   const screenToken = window.location.pathname.match(/^\/pantalla\/([0-9a-f]{40})$/)?.[1]

@@ -543,6 +543,102 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX IF NOT EXISTS idx_inventory_loans_open ON inventory_loans(returned_at, due_on);
     CREATE INDEX IF NOT EXISTS idx_inventory_loans_item ON inventory_loans(item_id);",
+    // 30: sesiones de uso real de maquinas (empezar/terminar desde la ficha)
+    "CREATE TABLE IF NOT EXISTS machine_usage (
+        id TEXT PRIMARY KEY,
+        machine_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        booking_id TEXT,
+        project TEXT NOT NULL DEFAULT '',
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        note TEXT NOT NULL DEFAULT ''
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_machine_usage_open ON machine_usage(machine_id) WHERE ended_at IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_machine_usage_started ON machine_usage(started_at);
+    CREATE INDEX IF NOT EXISTS idx_machine_usage_booking ON machine_usage(booking_id);",
+    // 31: talleres con inscripcion, cupos, asistencia y certificados (idea 40)
+    "CREATE TABLE IF NOT EXISTS workshop_settings (
+        entry_id TEXT PRIMARY KEY,
+        capacity INTEGER NOT NULL DEFAULT 0,
+        registration_open INTEGER NOT NULL DEFAULT 0,
+        public_token TEXT UNIQUE,
+        sessions TEXT NOT NULL DEFAULT '[]',
+        min_attendance INTEGER NOT NULL DEFAULT 75
+    );
+    CREATE TABLE IF NOT EXISTS workshop_registrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL DEFAULT '',
+        username TEXT,
+        affiliation TEXT NOT NULL DEFAULT '',
+        registered_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'inscrito',
+        attended TEXT NOT NULL DEFAULT '[]',
+        certificate_code TEXT UNIQUE,
+        certificate_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_workshop_regs_entry ON workshop_registrations(entry_id, status);",
+    // 32: seguridad laboral (idea 17): capacitaciones generales, fichas de seguridad e incidentes
+    "CREATE TABLE IF NOT EXISTS safety_trainings (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        valid_months INTEGER,
+        mandatory INTEGER NOT NULL DEFAULT 0,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS safety_training_records (
+        training_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        granted_by TEXT NOT NULL,
+        granted_on TEXT NOT NULL,
+        expires_on TEXT,
+        notes TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (training_id, username)
+    );
+    CREATE TABLE IF NOT EXISTS safety_sheets (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'material',
+        content TEXT NOT NULL DEFAULT '',
+        url TEXT NOT NULL DEFAULT '',
+        machine_id TEXT,
+        inventory_item_id TEXT,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS safety_sheet_files (
+        sheet_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        mime TEXT NOT NULL,
+        data BLOB NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS safety_incidents (
+        id TEXT PRIMARY KEY,
+        reported_by TEXT NOT NULL,
+        reported_at TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        place TEXT NOT NULL DEFAULT '',
+        machine_id TEXT,
+        severity TEXT NOT NULL,
+        description TEXT NOT NULL,
+        actions TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'abierto',
+        closed_by TEXT,
+        closed_at TEXT,
+        closing_note TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_safety_incidents_status ON safety_incidents(status, occurred_at);
+    CREATE TABLE IF NOT EXISTS safety_incident_photos (
+        incident_id TEXT PRIMARY KEY,
+        mime TEXT NOT NULL,
+        data BLOB NOT NULL
+    );",
+
 ];
 
 /// Migracion 16. Publicada: no modificar (ver `MIGRATIONS`).

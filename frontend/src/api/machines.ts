@@ -22,6 +22,20 @@ export interface MachineBooking {
   created_at: string
 }
 
+export interface MachineUsageSession {
+  id: string
+  machine_id: string
+  machine_name: string
+  username: string
+  booking_id: string | null
+  project: string
+  /** Hora local `YYYY-MM-DDTHH:MM` */
+  started_at: string
+  ended_at: string | null
+  note: string
+  hours: number | null
+}
+
 export interface MachineFault {
   id: string
   machine_id: string
@@ -55,6 +69,8 @@ export interface Machine {
   current: MachineBooking | null
   next: MachineBooking | null
   open_faults: MachineFault[]
+  /** Sesion de uso abierta: alguien la esta usando */
+  in_use: MachineUsageSession | null
 }
 
 export interface MachineDetail extends Machine {
@@ -376,4 +392,45 @@ export const MACHINE_KINDS: { id: MachineKind; label: string; emoji: string }[] 
 
 export function kindInfo(k: string) {
   return MACHINE_KINDS.find((x) => x.id === k) ?? MACHINE_KINDS[MACHINE_KINDS.length - 1]
+}
+
+// --- Registro de uso real (sesiones empezar / terminar) ---
+
+export interface MachineUsageList {
+  open: MachineUsageSession | null
+  recent: MachineUsageSession[]
+}
+
+export interface UsageReportRow {
+  key: string
+  label: string
+  hours: number
+  sessions: number
+}
+
+export interface UsageReport {
+  from: string
+  to: string
+  total_hours: number
+  sessions: number
+  by_machine: UsageReportRow[]
+  by_user: UsageReportRow[]
+  by_project: UsageReportRow[]
+}
+
+export async function fetchMachineUsage(machineId: string): Promise<MachineUsageList> {
+  return jsonOrThrow(await api(`${mUrl(machineId)}/usage`), 'Error al leer el uso')
+}
+
+export async function startMachineUsage(machineId: string, project: string): Promise<MachineUsageSession> {
+  return jsonOrThrow(await api(`${mUrl(machineId)}/usage/start`, post({ project })), 'No se pudo empezar')
+}
+
+export async function stopMachineUsage(sessionId: string, note: string, project: string): Promise<MachineUsageSession> {
+  return jsonOrThrow(await api(`/api/machines/usage/${encodeURIComponent(sessionId)}/stop`, post({ note, project })), 'No se pudo terminar')
+}
+
+export async function fetchUsageReport(from: string, to: string): Promise<UsageReport> {
+  const q = new URLSearchParams({ from, to })
+  return jsonOrThrow(await api(`/api/machines/usage/report?${q}`), 'Error al leer el informe')
 }

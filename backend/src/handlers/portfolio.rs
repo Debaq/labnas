@@ -203,6 +203,7 @@ pub async fn delete_entry(
             return Err((StatusCode::NOT_FOUND, "Entrada no encontrada".to_string()));
         }
         crate::handlers::access::forget(conn, "proyecto", &id);
+        crate::handlers::workshops::forget(conn, &id);
         Ok(())
     }).await?;
     Ok(StatusCode::NO_CONTENT)

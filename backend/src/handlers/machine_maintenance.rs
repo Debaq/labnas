@@ -7,9 +7,11 @@
 //! - **Bitacora**: cada mantencion, calibracion, reparacion o nota, con quien, cuando, las
 //!   horas de uso de ese momento y foto opcional. No se edita ni se borra. Las fallas
 //!   reparadas entran solas.
-//! - **Horas de uso**: las horas de reservas confirmadas ya terminadas, mas un ajuste que se
-//!   fija leyendo el horometro de la maquina. Cuando exista el medidor de corriente
-//!   (idea 19), se sumara aqui.
+//! - **Horas de uso**: las horas de las sesiones de uso reales ya terminadas (machine_usage,
+//!   «Empezar a usar» en la ficha), mas las de reservas confirmadas ya terminadas que no
+//!   tengan una sesion ligada (con sesion ligada manda la sesion, para no contar doble),
+//!   mas un ajuste que se fija leyendo el horometro de la maquina. Cuando exista el medidor
+//!   de corriente (idea 19), se sumara aqui.
 
 use axum::{
     extract::{Path, State},
@@ -44,14 +46,22 @@ fn round1(v: f64) -> f64 {
     (v * 10.0).round() / 10.0
 }
 
-/// Horas de uso de una maquina: (total, horas de reservas, ajuste por horometro)
+/// Horas de uso de una maquina: (total, horas de sesiones y reservas sin sesion, ajuste por horometro)
 pub fn usage_hours(conn: &Connection, machine_id: &str) -> rusqlite::Result<(f64, f64, f64)> {
-    let booked: f64 = conn.query_row(
-        "SELECT COALESCE(SUM((julianday(end) - julianday(start)) * 24.0), 0) FROM machine_bookings
-         WHERE machine_id = ?1 AND kind = 'reserva' AND status = 'confirmada' AND end <= ?2",
+    let reserved: f64 = conn.query_row(
+        "SELECT COALESCE(SUM((julianday(b.end) - julianday(b.start)) * 24.0), 0) FROM machine_bookings b
+         WHERE b.machine_id = ?1 AND b.kind = 'reserva' AND b.status = 'confirmada' AND b.end <= ?2
+           AND NOT EXISTS (SELECT 1 FROM machine_usage u WHERE u.booking_id = b.id)",
         params![machine_id, now_str()],
         |r| r.get(0),
     )?;
+    let sessions: f64 = conn.query_row(
+        "SELECT COALESCE(SUM((julianday(ended_at) - julianday(started_at)) * 24.0), 0) FROM machine_usage
+         WHERE machine_id = ?1 AND ended_at IS NOT NULL",
+        [machine_id],
+        |r| r.get(0),
+    )?;
+    let booked = reserved + sessions;
     let adjust: f64 = conn
         .query_row("SELECT usage_adjust_hours FROM machines WHERE id = ?1", [machine_id], |r| r.get(0))
         .optional()?

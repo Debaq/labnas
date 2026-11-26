@@ -113,6 +113,8 @@ pub struct Machine {
     /// Proxima reserva (confirmada o pendiente)
     pub next: Option<Booking>,
     pub open_faults: Vec<Fault>,
+    /// Sesion de uso abierta (alguien la esta usando)
+    pub in_use: Option<crate::handlers::machine_usage::UsageSession>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -221,6 +223,7 @@ pub(crate) fn load_machine(conn: &Connection, id: &str) -> rusqlite::Result<Opti
                 current: None,
                 next: None,
                 open_faults: Vec::new(),
+                in_use: None,
             })
         })
         .optional()?;
@@ -241,6 +244,7 @@ pub(crate) fn load_machine(conn: &Connection, id: &str) -> rusqlite::Result<Opti
         )
         .optional()?;
     m.open_faults = load_faults(conn, id, true)?;
+    m.in_use = crate::handlers::machine_usage::open_session(conn, id)?;
     Ok(Some(m))
 }
 
@@ -463,7 +467,7 @@ pub async fn delete_machine(
             .optional()
             .map_err(db_err)?
             .ok_or_else(not_found)?;
-        for table in ["machine_bookings", "machine_faults", "machine_photos", "machine_certifications", "machine_maintenance_tasks", "machine_maintenance_log"] {
+        for table in ["machine_bookings", "machine_faults", "machine_photos", "machine_certifications", "machine_maintenance_tasks", "machine_maintenance_log", "machine_usage"] {
             conn.execute(&format!("DELETE FROM {} WHERE machine_id = ?1", table), [&id]).map_err(db_err)?;
         }
         conn.execute("DELETE FROM machines WHERE id = ?1", [&id]).map_err(db_err)?;

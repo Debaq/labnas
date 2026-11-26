@@ -102,6 +102,8 @@ pub const MODULES: &[Module] = &[
         title: Some("Portafolio Academico"),
         path: "/portfolio",
         api: &["/api/portfolio"],
+        // inscripcion a talleres por enlace secreto y verificacion de certificados (handlers::workshops)
+        public: &["/api/portfolio/taller/", "/api/portfolio/certificado/"],
         ..m("portfolio", "Portafolio", "GraduationCap", "Portafolio academico e investigacion")
     },
     Module {
@@ -137,6 +139,15 @@ pub const MODULES: &[Module] = &[
         path: "/machines",
         api: &["/api/machines"],
         ..m("machines", "Maquinas", "Wrench", "Catalogo de maquinas con QR, reservas sin choques y reporte de fallas")
+    },
+    Module {
+        path: "/safety",
+        api: &["/api/safety"],
+        uses: &[
+            ("machines", "vincular incidentes y fichas a una maquina"),
+            ("inventory", "vincular fichas a un item del inventario"),
+        ],
+        ..m("seguridad", "Seguridad", "ShieldAlert", "Capacitaciones vigentes, fichas de seguridad y registro de incidentes y casi-accidentes")
     },
     Module {
         path: "/deadlines",

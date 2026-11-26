@@ -110,7 +110,7 @@ async fn maquinas_acceso_y_modulo() {
     assert_eq!(s.get("/api/machines", &pend).await.status, 403, "cuenta sin aprobar");
     assert_eq!(s.get("/api/machines", &ana).await.status, 200);
     // modulo apagado: la ruta no existe
-    assert_eq!(s.put("/api/modules/machines", &admin, json!({ "enabled": false })).await.status, 200);
+    assert_eq!(s.put("/api/modules/machines", &admin, json!({ "enabled": false, "force": true })).await.status, 200);
     assert_eq!(s.get("/api/machines", &ana).await.status, 404);
 }
 

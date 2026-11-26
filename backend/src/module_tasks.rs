@@ -59,6 +59,8 @@ fn spawn_for(state: &AppState, id: &str) -> Vec<JoinHandle<()>> {
             tokio::spawn(handlers::machines::reminder_loop(s())),
             // Mantencion por horas de uso: aviso al vencer
             tokio::spawn(handlers::machine_maintenance::alert_loop(s())),
+            // Sesiones de uso abiertas mas de 12 h: cierre automatico
+            tokio::spawn(handlers::machine_usage::auto_close_loop(s())),
         ],
         "deadlines" => vec![tokio::spawn(handlers::deadlines::alert_loop(s()))],
         // Inventario: aviso diario de prestamos atrasados

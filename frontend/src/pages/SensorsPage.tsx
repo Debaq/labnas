@@ -15,6 +15,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import SensorIncidentsPanel from '../components/SensorIncidentsPanel'
+import SensorExportPanel from '../components/SensorExportPanel'
 import type { SensorLatest, SensorAlert, ReceiverStatus, SensorReading } from '../types'
 import { errorMessage } from '../lib/errors'
 import { READING_LABELS, READING_UNITS } from '../lib/sensors'
@@ -408,6 +409,8 @@ export default function SensorsPage() {
                       <span className="text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>{d.mac}</span>
                       {d.device_type && <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{d.device_type}</span>}
                     </div>
+
+                    <SensorExportPanel deviceId={d.id} />
 
                     {/* Chart controls */}
                     {readingKeys.length > 0 && (

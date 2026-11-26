@@ -85,7 +85,7 @@ fn publish(state: &AppState) {
 pub struct Deadline {
     /// Unico entre todas las fuentes: `d:<id>`, `p:<proyecto>` o `m:<proyecto>:<hito>`
     pub key: String,
-    /// manual | proyecto | hito | induccion | mantencion | vencimiento
+    /// manual | proyecto | hito | induccion | mantencion | vencimiento | capacitacion
     pub source: &'static str,
     /// Id del contador suelto (solo `manual`)
     pub id: Option<String>,
@@ -304,6 +304,36 @@ fn inventory_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Result<
     Ok(out)
 }
 
+/// Vencimientos de capacitaciones de seguridad (hasta 30 dias pasados)
+fn safety_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Result<Vec<Deadline>> {
+    if !module_on(conn, "seguridad") {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for (tid, name, user, expires) in crate::handlers::safety::expiring(conn)? {
+        let d = Deadline {
+            key: format!("sg:{}:{}", tid, user),
+            source: "capacitacion",
+            id: None,
+            title: format!("Capacitación {} de {}", name, user),
+            project: None,
+            portfolio_id: None,
+            category: "licencia".into(),
+            due_date: expires,
+            days_left: 0,
+            level: "ok",
+            notes: String::new(),
+            notify: "staff".into(),
+            created_by: None,
+            done_at: None,
+            done_by: None,
+            participants: vec![user],
+        };
+        out.extend(finish(d, today).filter(|d| d.days_left >= -30));
+    }
+    Ok(out)
+}
+
 /// Todos los plazos activos (sin los cumplidos), ordenados por fecha
 fn active_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Result<Vec<Deadline>> {
     let mut stmt = conn.prepare(&format!("{} WHERE d.done_at IS NULL", SELECT))?;
@@ -317,6 +347,7 @@ fn active_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Result<Vec
     list.extend(certification_deadlines(conn, today)?);
     list.extend(maintenance_deadlines(conn, today)?);
     list.extend(inventory_deadlines(conn, today)?);
+    list.extend(safety_deadlines(conn, today)?);
     list.sort_by(|a, b| a.due_date.cmp(&b.due_date).then_with(|| a.title.cmp(&b.title)));
     Ok(list)
 }
@@ -554,6 +585,7 @@ fn recipients(conn: &Connection, d: &Deadline) -> rusqlite::Result<Option<Vec<St
     let module = match d.source {
         "mantencion" => "machines",
         "vencimiento" => "inventory",
+        "capacitacion" => "seguridad",
         _ => "deadlines",
     };
     let staff = || -> rusqlite::Result<Vec<String>> {

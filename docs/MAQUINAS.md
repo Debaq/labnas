@@ -81,12 +81,37 @@ Cada máquina tiene en su ficha un **plan** de tareas que se repiten y una **bit
 - **Bitácora**: quién hizo qué, cuándo y con cuántas horas de uso tenía la máquina. No se
   edita ni se borra; quitar una tarea del plan conserva lo registrado. Las fallas reparadas
   entran solas.
-- **Horas de uso**: se suman las reservas confirmadas ya terminadas. Si la máquina tiene
-  horómetro, un operador lo lee y lo **fija** en la ficha; desde ahí se siguen sumando las
-  reservas. Cuando exista el medidor de corriente (idea 19) se usará su lectura.
+- **Horas de uso**: se suman las sesiones de uso reales ya terminadas (ver «Registro de
+  uso») y las reservas confirmadas ya terminadas que no tengan una sesión ligada (si la
+  tienen, manda la sesión, para no contar doble). Si la máquina tiene horómetro, un operador
+  lo lee y lo **fija** en la ficha; desde ahí se siguen sumando las sesiones y reservas.
+  Cuando exista el medidor de corriente (idea 19) se usará su lectura.
 
 La pestaña **Mantención** de Máquinas (staff) junta las tareas de todas las máquinas, las
 vencidas primero.
+
+## Registro de uso
+
+En la ficha (la que abre el QR), el bloque **Uso** tiene un botón grande **Empezar a usar** y,
+cuando ya empezó, **Terminar** (con proyecto y nota opcionales). Queda una sesión con quién,
+desde cuándo y hasta cuándo; la tarjeta de la máquina muestra «En uso por …» mientras haya una
+abierta.
+
+- Una sola sesión abierta por máquina.
+- No se puede empezar si la máquina está fuera de servicio o retirada, si exige inducción y no
+  la tienes, o si hay una mantención vencida que bloquea. El staff sí puede (salvo con la
+  máquina fuera de servicio).
+- Si tienes una reserva en curso, la sesión se liga a ella.
+- Termina la sesión quien la empezó o el staff.
+- Una sesión abierta más de 12 h se cierra sola, con la nota «cerrada automaticamente» (cuenta
+  solo 12 h) y se avisa por Telegram a quien la tenía.
+- La pestaña **Horas de uso** de Máquinas (staff) da el informe por rango de fechas: horas por
+  máquina, por persona y por proyecto.
+
+Endpoints: `GET /api/machines/{id}/usage` (sesión abierta y recientes),
+`POST /api/machines/{id}/usage/start`, `POST /api/machines/usage/{sid}/stop` (ambos con nivel
+Usar) y `GET /api/machines/usage/report?from=&to=` (staff). `PUT /api/machines/{id}/usage`
+sigue siendo el horómetro.
 
 ## Etiqueta QR
 
@@ -103,5 +128,5 @@ Notificaciones). Sin chat vinculado, la persona solo ve el aviso en la web.
 ## Lo que viene
 
 Este módulo es la base de varias ideas de la hoja de ruta: llave electrónica que solo
-habilita a quien tiene la inducción (18), horas de uso reales con un medidor de corriente
+habilita a quien tiene la inducción (18), horas de uso medidas con un medidor de corriente
 (19) y una sola cola para todas las máquinas (23).

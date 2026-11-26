@@ -164,6 +164,10 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         // --- Tareas, proyectos, calendario (los handlers validan autoria; Gestionar edita lo ajeno) ---
         (_, ["tasks", ..]) | (_, ["projects", ..]) | (_, ["events", ..]) => if read { Ver } else { Usar },
 
+        // --- Talleres del portafolio: inscribirse y cancelar es Usar; gestionar el taller, Gestionar ---
+        ("PUT", ["portfolio", _, "workshop"]) | ("GET", ["portfolio", _, "workshop", "export.csv"]) => Gestionar,
+        (_, ["portfolio", _, "workshop", "registrations", ..]) => Gestionar,
+
         // --- Notas, portafolio, inventario ---
         (_, ["notes", ..]) | (_, ["portfolio", ..]) | (_, ["inventory", ..]) => if read { Ver } else { Usar },
 
@@ -197,11 +201,18 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         ("POST", ["machines", "bookings", _, "cancel"]) => Usar,
         // Bitacora de mantencion: el staff o el responsable de la maquina (lo revisa el handler)
         ("POST", ["machines", _, "maintenance", "log"]) => Usar,
+        ("POST", ["machines", _, "usage", "start"]) | ("POST", ["machines", "usage", _, "stop"]) => Usar,
         // Induccion: pedirla (y retirar la propia solicitud, el handler lo limita)
         ("POST", ["machines", _, "certifications", "request"]) => Usar,
         ("DELETE", ["machines", _, "certifications", _]) => Usar,
         ("DELETE", ["machines", _]) => Admin,
         (_, ["machines", ..]) => Gestionar,
+
+        // --- Seguridad: ver fichas y capacitaciones propias y reportar incidentes (Usar);
+        // el handler limita lo que ve cada quien; Gestionar revisa incidentes y administra ---
+        ("GET", ["safety", ..]) => Ver,
+        ("POST", ["safety", "incidents"]) => Usar,
+        (_, ["safety", ..]) => Gestionar,
 
         // --- Plazos: ver y crear; el handler limita editar, cumplir y borrar a quien lo creo
         // o a quien gestiona ---

@@ -11,6 +11,7 @@ import {
   togglePortfolioRequirement, togglePortfolioMilestone, fetchUsernames,
 } from '../api'
 import { useAuth } from '../auth/AuthContext'
+import WorkshopPanel from '../components/workshops/WorkshopPanel'
 import AccessBadge from '../components/access/AccessBadge'
 import { useAccessLevels } from '../components/access/useAccessLevels'
 import type { PortfolioEntry, PortfolioType, PortfolioStatus, PortfolioScope } from '../types'
@@ -623,6 +624,11 @@ export default function PortfolioPage() {
                         ))}
                       </div>
                     </div>
+                  )}
+
+                  {/* Inscripciones (talleres y cursos) */}
+                  {(entry.entry_type === 'workshop' || entry.entry_type === 'course') && (
+                    <WorkshopPanel entryId={entry.id} canUse={canModule('portfolio', 'usar')} />
                   )}
 
                   {/* Notas */}

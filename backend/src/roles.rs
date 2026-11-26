@@ -82,25 +82,25 @@ impl Grants {
 pub fn template_level(template: &str, module: &str) -> Level {
     use Level::*;
     // files, network, printing, printers3d, tasks, notes, email, inventory, portfolio,
-    // sensors, terminal, music, cameras, machines, deadlines
-    let row: [Level; 15] = match template {
+    // sensors, terminal, music, cameras, machines, deadlines, seguridad
+    let row: [Level; 16] = match template {
         // Rol de antes: preserva lo que podia hacer (gestiona donde habia rutas de operador)
-        "operador" => [Usar, Gestionar, Usar, Gestionar, Gestionar, Usar, Usar, Usar, Usar, Ver, Usar, Usar, Usar, Gestionar, Gestionar],
-        "tecnico" => [Usar, Gestionar, Usar, Gestionar, Usar, Usar, Usar, Gestionar, Ver, Ver, Usar, Usar, Usar, Gestionar, Usar],
-        "investigador" => [Usar, Ver, Usar, Usar, Gestionar, Usar, Usar, Usar, Gestionar, Ver, Ninguno, Usar, Ninguno, Usar, Gestionar],
-        "administrativo" => [Usar, Ninguno, Usar, Ver, Usar, Usar, Usar, Gestionar, Ver, Ninguno, Ninguno, Usar, Ninguno, Ver, Gestionar],
-        "docente" => [Usar, Ver, Usar, Usar, Gestionar, Usar, Usar, Ver, Gestionar, Ver, Ninguno, Usar, Ninguno, Usar, Gestionar],
-        "ayudante" => [Usar, Ver, Usar, Gestionar, Usar, Usar, Usar, Ver, Usar, Ver, Ninguno, Usar, Ninguno, Usar, Usar],
-        "estudiante" => [Ver, Ninguno, Usar, Usar, Usar, Usar, Ninguno, Ver, Usar, Ver, Ninguno, Usar, Ninguno, Usar, Ver],
+        "operador" => [Usar, Gestionar, Usar, Gestionar, Gestionar, Usar, Usar, Usar, Usar, Ver, Usar, Usar, Usar, Gestionar, Gestionar, Gestionar],
+        "tecnico" => [Usar, Gestionar, Usar, Gestionar, Usar, Usar, Usar, Gestionar, Ver, Ver, Usar, Usar, Usar, Gestionar, Usar, Gestionar],
+        "investigador" => [Usar, Ver, Usar, Usar, Gestionar, Usar, Usar, Usar, Gestionar, Ver, Ninguno, Usar, Ninguno, Usar, Gestionar, Usar],
+        "administrativo" => [Usar, Ninguno, Usar, Ver, Usar, Usar, Usar, Gestionar, Ver, Ninguno, Ninguno, Usar, Ninguno, Ver, Gestionar, Usar],
+        "docente" => [Usar, Ver, Usar, Usar, Gestionar, Usar, Usar, Ver, Gestionar, Ver, Ninguno, Usar, Ninguno, Usar, Gestionar, Gestionar],
+        "ayudante" => [Usar, Ver, Usar, Gestionar, Usar, Usar, Usar, Ver, Usar, Ver, Ninguno, Usar, Ninguno, Usar, Usar, Usar],
+        "estudiante" => [Ver, Ninguno, Usar, Usar, Usar, Usar, Ninguno, Ver, Usar, Ver, Ninguno, Usar, Ninguno, Usar, Ver, Usar],
         // Rol de antes: preserva lo que podia hacer (escribir archivos era un permiso aparte)
-        "observador" => [Ver, Usar, Usar, Usar, Usar, Usar, Usar, Usar, Usar, Ver, Ninguno, Usar, Ninguno, Usar, Usar],
-        "externo" => [Ninguno, Ninguno, Ninguno, Usar, Ninguno, Ninguno, Ninguno, Ninguno, Ninguno, Ninguno, Ninguno, Ninguno, Ninguno, Usar, Ninguno],
-        "auditor" => [Ver, Ver, Ver, Ver, Ver, Ver, Ninguno, Ver, Ver, Ver, Ninguno, Ver, Ninguno, Ver, Ver],
+        "observador" => [Ver, Usar, Usar, Usar, Usar, Usar, Usar, Usar, Usar, Ver, Ninguno, Usar, Ninguno, Usar, Usar, Usar],
+        "externo" => [Ninguno, Ninguno, Ninguno, Usar, Ninguno, Ninguno, Ninguno, Ninguno, Ninguno, Ninguno, Ninguno, Ninguno, Ninguno, Usar, Ninguno, Usar],
+        "auditor" => [Ver, Ver, Ver, Ver, Ver, Ver, Ninguno, Ver, Ver, Ver, Ninguno, Ver, Ninguno, Ver, Ver, Ver],
         _ => return Ninguno,
     };
-    const COLS: [&str; 15] = [
+    const COLS: [&str; 16] = [
         "files", "network", "printing", "printers3d", "tasks", "notes", "email", "inventory", "portfolio",
-        "sensors", "terminal", "music", "cameras", "machines", "deadlines",
+        "sensors", "terminal", "music", "cameras", "machines", "deadlines", "seguridad",
     ];
     COLS.iter().position(|c| *c == module).map(|i| row[i]).unwrap_or(Ninguno)
 }

@@ -26,6 +26,13 @@ Casos especiales:
 - **Cámaras:** *Ver* mira las cámaras y descarga grabaciones, *Usar* graba y saca fotos. El aviso
   «se está grabando» lo ve todo el mundo. La detección con IA sigue limitada al admin y a las
   personas autorizadas.
+- **Seguridad:** *Ver* consulta fichas y las capacitaciones propias; *Usar* además reporta
+  incidentes y casi accidentes (cada quien ve solo los suyos); *Gestionar* revisa y cierra
+  incidentes, administra el catálogo de capacitaciones, registra quién las tiene y edita las
+  fichas, y recibe los avisos de incidentes graves y de capacitaciones por vencer. Las
+  plantillas parten así: Operador, Encargado técnico y Docente *Gestionar* (dan las
+  capacitaciones y revisan lo ocurrido); Auditor *Ver*; todos los demás roles, incluidos
+  Estudiante y Usuario externo, *Usar* (reportar un incidente nunca debe depender de un permiso).
 - **Tareas:** *Gestionar* edita tareas, proyectos y eventos ajenos, y recibe las tareas
   asignadas a `@all`.
 

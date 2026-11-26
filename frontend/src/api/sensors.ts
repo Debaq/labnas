@@ -1,4 +1,4 @@
-import { api } from './client'
+import { api, jsonOrThrow } from './client'
 
 // --- Sensors ---
 
@@ -147,4 +147,36 @@ export async function setSensorSecurity(requireToken: boolean): Promise<{ requir
   })
   if (!res.ok) throw new Error((await res.text()) || 'Error al guardar')
   return res.json()
+}
+
+// --- Historial exportable (idea 7) ---
+
+export interface SensorKeySummary {
+  key: string; unit: string; count: number; min: number; max: number; avg: number; first_at: string; last_at: string
+}
+export interface SensorAlertSummary {
+  alert_id: string; key: string; condition: string; threshold: number; critical: boolean
+  minutes_out_of_range: number; readings_out_of_range: number; incidents: number
+}
+export interface SensorReport {
+  device_id: string; device_name: string; from: string; to: string; generated_at: string
+  total_readings: number; keys: SensorKeySummary[]; alerts: SensorAlertSummary[]
+}
+
+export async function fetchSensorReport(id: string, from: string, to: string): Promise<SensorReport> {
+  const res = await api(`/api/sensors/devices/${id}/report?from=${from}&to=${to}`)
+  return jsonOrThrow<SensorReport>(res, 'Error al generar el informe')
+}
+
+/** Descarga el CSV de lecturas; necesita la sesion, por eso no es un <a href> */
+export async function downloadSensorCsv(id: string, from: string, to: string): Promise<void> {
+  const res = await api(`/api/sensors/devices/${id}/export?from=${from}&to=${to}&format=csv`)
+  if (!res.ok) throw new Error((await res.text()) || 'Error al exportar el historial')
+  const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? 'historial.csv'
+  const url = URL.createObjectURL(await res.blob())
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
