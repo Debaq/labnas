@@ -12,6 +12,8 @@ pub mod cameras;
 pub mod restic;
 pub mod audit;
 pub mod ledger;
+pub mod finance;
+pub mod transparency;
 pub mod auth;
 pub mod email;
 pub mod extras;

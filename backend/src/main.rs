@@ -20,6 +20,7 @@ mod proc;
 mod error;
 mod roles;
 mod modules;
+mod finance;
 
 use axum::{
     http::Method,
@@ -920,6 +921,9 @@ fn api_routes() -> Router<AppState> {
         .route("/api/sensors/devices/{id}/token", delete(handlers::sensors::delete_device_token))
         .route("/api/sensors/security", get(handlers::sensors::get_security))
         .route("/api/sensors/security", put(handlers::sensors::set_security))
+        // Finanzas y Transparencia: cada parte declara sus rutas en su archivo
+        .merge(handlers::finance::routes())
+        .merge(handlers::transparency::routes())
 }
 
 #[cfg(test)]

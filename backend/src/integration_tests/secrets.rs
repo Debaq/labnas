@@ -71,6 +71,9 @@ async fn migracion_cifra_secretos_en_claro() {
              ALTER TABLE inventory_items DROP COLUMN min_quantity;
              ALTER TABLE inventory_items DROP COLUMN expires_on;
              ALTER TABLE inventory_items DROP COLUMN loanable;
+             ALTER TABLE inventory_items DROP COLUMN project_id;
+             ALTER TABLE inventory_items DROP COLUMN inventory_number;
+             ALTER TABLE inventory_items DROP COLUMN responsible;
              ALTER TABLE camera_detections DROP COLUMN tg_sent;
              ALTER TABLE camera_detections DROP COLUMN tg_error;",
         )

@@ -22,6 +22,7 @@ const PublicRecordPage = lazy(() => import('./pages/PublicRecordPage'))
 const PublicWorkshopPage = lazy(() => import('./pages/PublicWorkshopPage'))
 const PublicCertificatePage = lazy(() => import('./pages/PublicCertificatePage'))
 const DisplayPage = lazy(() => import('./pages/DisplayPage'))
+const PublicTransparencyPage = lazy(() => import('./pages/PublicTransparencyPage'))
 const SetupWizard = lazy(() => import('./components/SetupWizard'))
 
 function LoadingScreen() {
@@ -70,6 +71,10 @@ function AppRoutes() {
   const certCode = window.location.pathname.match(/^\/certificado\/([0-9A-Fa-f]{4}(?:-[0-9A-Fa-f]{4}){3})$/)?.[1]
   if (certCode) {
     return <Suspense fallback={<LoadingScreen />}><PublicCertificatePage code={certCode} /></Suspense>
+  }
+  // Portal de transparencia: sin cuenta y solo si el modulo esta encendido (handlers/transparency.rs)
+  if (window.location.pathname === '/portal-transparencia' || window.location.pathname.startsWith('/portal-transparencia/')) {
+    return <Suspense fallback={<LoadingScreen />}><PublicTransparencyPage /></Suspense>
   }
   // Pantalla del laboratorio (TV o tablet): sin sesion (ver handlers/display.rs)
   const screenToken = window.location.pathname.match(/^\/pantalla\/([0-9a-f]{40})$/)?.[1]

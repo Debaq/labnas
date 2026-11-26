@@ -99,6 +99,6 @@ async fn plazos_contadores_y_portafolio() {
     // cuenta sin aprobar y modulo apagado
     let pend = s.register("pepe", "pepe-password").await.json()["token"].as_str().unwrap().to_string();
     assert_eq!(s.get("/api/deadlines", &pend).await.status, 403);
-    assert_eq!(s.put("/api/modules/deadlines", &admin, json!({ "enabled": false })).await.status, 200);
+    assert_eq!(s.put("/api/modules/deadlines", &admin, json!({ "enabled": false, "force": true })).await.status, 200);
     assert_eq!(s.get("/api/deadlines", &ana).await.status, 404);
 }

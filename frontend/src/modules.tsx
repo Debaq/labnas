@@ -21,6 +21,8 @@ export const MODULE_PAGES: Record<string, ComponentType> = {
   machines: lazy(() => import('./pages/MachinesPage')),
   deadlines: lazy(() => import('./pages/DeadlinesPage')),
   seguridad: lazy(() => import('./pages/SafetyPage')),
+  finanzas: lazy(() => import('./pages/FinancePage')),
+  transparencia: lazy(() => import('./pages/TransparencyPage')),
 }
 
 // Ajustes propios de cada modulo: aparecen en Configuracion > Modulos solo si el modulo

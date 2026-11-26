@@ -226,6 +226,20 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         // o a quien gestiona ---
         (_, ["deadlines", ..]) => if read { Ver } else { Usar },
 
+        // --- Finanzas (docs/FINANZAS.md). Reglas mas especificas de cada parte arriba del
+        // comodin; el handler revisa la separacion de funciones ---
+        // [presupuesto]
+        // [compras]
+        // [rendicion]
+        // [viajes]
+        ("GET", ["finance", ..]) => Ver,
+        (_, ["finance", ..]) => Gestionar,
+
+        // --- Transparencia: lo publico va por /api/transparency/public/ sin sesion ---
+        // [transparencia]
+        ("GET", ["transparency", ..]) => Ver,
+        (_, ["transparency", ..]) => Gestionar,
+
         // Todo lo demas: admin (usuarios, roles, modulos, telegram, apagar, actualizar,
         // branding, mdns, servicios, limite de subida, raices de almacenamiento...)
         _ => Admin,

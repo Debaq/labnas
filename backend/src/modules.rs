@@ -155,6 +155,26 @@ pub const MODULES: &[Module] = &[
         uses: &[("portfolio", "mostrar los plazos de los proyectos del Portafolio")],
         ..m("deadlines", "Plazos", "Hourglass", "Cuenta regresiva de cierres de proyecto, informes, rendiciones y otros plazos, con avisos por Telegram")
     },
+    Module {
+        path: "/finanzas",
+        api: &["/api/finance"],
+        uses: &[
+            ("portfolio", "los proyectos con presupuesto son los del Portafolio"),
+            ("inventory", "bienes comprados por proyecto"),
+            ("deadlines", "hitos, rendiciones y plazos de pago en Plazos"),
+        ],
+        ..m("finanzas", "Finanzas", "Landmark", "Presupuesto por proyecto, compras con funciones separadas, rendiciones y expediente para auditorias")
+    },
+    Module {
+        path: "/transparencia",
+        api: &["/api/transparency"],
+        // portal y solicitudes de informacion, sin cuenta
+        public: &["/api/transparency/public/"],
+        // apagado hasta que el admin lo active: publica datos hacia afuera
+        default_on: false,
+        uses: &[("finanzas", "proyectos, montos y bienes que se publican")],
+        ..m("transparencia", "Transparencia", "Eye", "Portal publico generado desde los datos reales y solicitudes de informacion con plazo (viene apagado)")
+    },
 ];
 
 pub fn get(id: &str) -> Option<&'static Module> {

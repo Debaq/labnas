@@ -703,7 +703,128 @@ const MIGRATIONS: &[&str] = &[
         created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_recycling_date ON recycling_log(date);",
-
+    // 37: base del modulo Finanzas (etapa 1, ver docs/FINANZAS.md). Esquema comun a
+    // presupuesto, compras, rendicion y transparencia; cada parte agrega sus tablas propias
+    // en migraciones siguientes. Un proyecto es una entrada del Portafolio.
+    "CREATE TABLE IF NOT EXISTS fin_projects (
+        project_id TEXT PRIMARY KEY,
+        currency TEXT NOT NULL DEFAULT 'CLP',
+        responsible TEXT NOT NULL DEFAULT '',
+        alert_pct REAL NOT NULL DEFAULT 80,
+        closed_at TEXT,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS fin_budget_items (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        name TEXT NOT NULL,
+        approved REAL NOT NULL DEFAULT 0,
+        notes TEXT NOT NULL DEFAULT '',
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_fin_budget_project ON fin_budget_items(project_id);
+    CREATE TABLE IF NOT EXISTS fin_commitments (
+        source TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        budget_item_id TEXT,
+        label TEXT NOT NULL DEFAULT '',
+        committed REAL NOT NULL DEFAULT 0,
+        spent REAL NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (source, source_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_fin_commit_item ON fin_commitments(project_id, budget_item_id);
+    CREATE TABLE IF NOT EXISTS fin_files (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        mime TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        sha256 TEXT NOT NULL,
+        data BLOB NOT NULL,
+        uploaded_by TEXT NOT NULL,
+        uploaded_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS fin_purchases (
+        id TEXT PRIMARY KEY,
+        folio INTEGER NOT NULL UNIQUE,
+        project_id TEXT NOT NULL,
+        budget_item_id TEXT,
+        title TEXT NOT NULL,
+        justification TEXT NOT NULL DEFAULT '',
+        estimated_amount REAL NOT NULL DEFAULT 0,
+        final_amount REAL,
+        status TEXT NOT NULL DEFAULT 'solicitud',
+        requested_by TEXT NOT NULL,
+        approved_by TEXT,
+        received_by TEXT,
+        chosen_quote_id TEXT,
+        choice_reason TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_fin_purchases_project ON fin_purchases(project_id, status);
+    CREATE TABLE IF NOT EXISTS fin_purchase_steps (
+        id TEXT PRIMARY KEY,
+        purchase_id TEXT NOT NULL,
+        step TEXT NOT NULL,
+        username TEXT NOT NULL,
+        at TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        passkey INTEGER NOT NULL DEFAULT 0,
+        ledger_seq INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_fin_steps_purchase ON fin_purchase_steps(purchase_id, at);
+    CREATE TABLE IF NOT EXISTS fin_quotes (
+        id TEXT PRIMARY KEY,
+        purchase_id TEXT NOT NULL,
+        supplier TEXT NOT NULL,
+        supplier_rut TEXT NOT NULL DEFAULT '',
+        amount REAL NOT NULL,
+        valid_until TEXT,
+        file_id TEXT,
+        notes TEXT NOT NULL DEFAULT '',
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS fin_documents (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        purchase_id TEXT,
+        kind TEXT NOT NULL,
+        folio TEXT NOT NULL DEFAULT '',
+        issuer_rut TEXT NOT NULL DEFAULT '',
+        issuer_name TEXT NOT NULL DEFAULT '',
+        issued_on TEXT,
+        net_amount REAL,
+        tax_amount REAL,
+        total_amount REAL,
+        file_id TEXT,
+        extracted_by TEXT NOT NULL DEFAULT 'manual',
+        confirmed_by TEXT,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_fin_docs_project ON fin_documents(project_id, kind);
+    CREATE TABLE IF NOT EXISTS fin_receptions (
+        id TEXT PRIMARY KEY,
+        purchase_id TEXT NOT NULL,
+        received_by TEXT NOT NULL,
+        received_at TEXT NOT NULL,
+        conforming INTEGER NOT NULL DEFAULT 1,
+        notes TEXT NOT NULL DEFAULT '',
+        photo_file_id TEXT
+    );
+    ALTER TABLE inventory_items ADD COLUMN project_id TEXT;
+    ALTER TABLE inventory_items ADD COLUMN inventory_number TEXT NOT NULL DEFAULT '';
+    ALTER TABLE inventory_items ADD COLUMN responsible TEXT NOT NULL DEFAULT '';",
+    // 38: (reservada) presupuesto, ejecucion, caja chica e ingresos — agente A
+    // 39: (reservada) flujo de compras — agente B
+    // 40: (reservada) rendicion, expediente, manual y anomalias — agente C
+    // 41: (reservada) transparencia, solicitudes de informacion y viajes — agente D
 ];
 
 /// Migracion 16. Publicada: no modificar (ver `MIGRATIONS`).
