@@ -1,28 +1,15 @@
 import { Suspense, lazy, useState, useEffect } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, FolderOpen, Network, Settings, Server, TerminalSquare, Printer, Box, Power, LogOut, User, ClipboardList, FileText, ChevronLeft, ChevronRight, Mail, Download, Package, GraduationCap, Thermometer, Loader2, Video, Wrench, Hourglass } from 'lucide-react'
+import { Settings, Server, Power, LogOut, User, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react'
 import { useViaBridge } from '../lib/bridge'
 import { useAuth } from '../auth/AuthContext'
 import { shutdownServer, getBranding, fetchHealth, checkUpdate } from '../api'
 import MusicPanel from './MusicPanel'
 import RecordingBanner from './RecordingBanner'
-import type { IconComponent } from '../lib/icons'
+import { moduleIcon } from '../lib/moduleIcons'
 
-const pageTitles: Record<string, string> = {
-  '/dashboard': 'Dashboard',
-  '/files': 'Explorador de Archivos',
-  '/printing': 'Impresion de Documentos',
-  '/printers3d': 'Impresoras 3D',
-  '/network': 'Red Local',
-  '/tasks': 'Tareas / Horario',
-  '/notes': 'Notas',
-  '/terminal': 'Terminal',
-  '/email': 'Correo',
-  '/inventory': 'Inventario',
-  '/portfolio': 'Portafolio Academico',
-  '/sensors': 'Sensores',
-  '/machines': 'Maquinas',
-  '/deadlines': 'Plazos',
+// Paginas que no son de un modulo (los titulos de los modulos vienen del servidor)
+const FIXED_TITLES: Record<string, string> = {
   '/settings': 'Configuracion',
   '/playlists': 'Editor de Playlist',
 }
@@ -34,7 +21,8 @@ export default function Layout() {
   const { user, logout, can, isAdmin, enabledModules, isModuleEnabled } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
-  const pageTitle = pageTitles[location.pathname] || pageTitles['/' + location.pathname.split('/')[1]] || 'LabNAS'
+  const base = '/' + location.pathname.split('/')[1]
+  const pageTitle = FIXED_TITLES[base] || enabledModules.find(m => m.path === base)?.title || 'LabNAS'
   const [shuttingDown, setShuttingDown] = useState(false)
   const [newVersion, setNewVersion] = useState<string | null>(null)
   const [labName, setLabName] = useState('LabNAS')
@@ -116,39 +104,16 @@ export default function Layout() {
     } catch { /* conexion se cortara */ }
   }
 
-  // Module nav registry
-  const moduleNav: Record<string, { to: string; label: string; icon: IconComponent }> = {
-    dashboard:  { to: '/dashboard',  label: 'Dashboard',       icon: LayoutDashboard },
-    files:      { to: '/files',      label: 'Archivos',        icon: FolderOpen },
-    printing:   { to: '/printing',   label: 'Impresion',       icon: Printer },
-    printers3d: { to: '/printers3d', label: 'Impresoras 3D',   icon: Box },
-    network:    { to: '/network',    label: 'Red',             icon: Network },
-    tasks:      { to: '/tasks',      label: 'Tareas / Horario', icon: ClipboardList },
-    notes:      { to: '/notes',      label: 'Notas',           icon: FileText },
-    email:      { to: '/email',      label: 'Correo',          icon: Mail },
-    inventory:  { to: '/inventory',  label: 'Inventario',      icon: Package },
-    portfolio:  { to: '/portfolio',  label: 'Portafolio',      icon: GraduationCap },
-    sensors:    { to: '/sensors',    label: 'Sensores',        icon: Thermometer },
-    terminal:   { to: '/terminal',   label: 'Terminal',        icon: TerminalSquare },
-    cameras:    { to: '/cameras',    label: 'Camaras',         icon: Video },
-    machines:   { to: '/machines',   label: 'Maquinas',        icon: Wrench },
-    deadlines:  { to: '/deadlines',  label: 'Plazos',          icon: Hourglass },
-  }
-
   const viaBridge = useViaBridge()
 
   // Build nav items from enabled modules (sorted by display_order)
   const moduleItems = enabledModules
-    .filter(m => m.enabled && moduleNav[m.id])
+    .filter(m => m.enabled && m.path)
     .sort((a, b) => a.display_order - b.display_order)
-    .filter(m => {
-      // enabledModules ya viene sin lo que el rol no puede ver
-      if (m.id === 'terminal') return can('terminal') && !viaBridge
-      // Camaras: solo en la LAN
-      if (m.id === 'cameras') return !viaBridge
-      return true
-    })
-    .map(m => ({ ...moduleNav[m.id], show: true }))
+    // enabledModules ya viene sin lo que el rol no puede ver
+    .filter(m => !(m.lan_only && viaBridge))
+    .filter(m => m.id !== 'terminal' || can('terminal'))
+    .map(m => ({ to: m.path!, label: m.name ?? m.id, icon: moduleIcon(m.icon), show: true }))
 
   // Fixed items at end
   const navItems = [

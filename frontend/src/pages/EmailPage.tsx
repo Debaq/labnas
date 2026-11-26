@@ -6,7 +6,6 @@ import {
 } from 'lucide-react'
 import ProposalsPanel from '../components/ProposalsPanel'
 import MicrosoftConnect from '../components/MicrosoftConnect'
-import MicrosoftOAuthSection from '../components/MicrosoftOAuthSection'
 import { useEvent } from '../events/useEvents'
 import { useAuth } from '../auth/AuthContext'
 import {
@@ -606,10 +605,9 @@ export default function EmailPage() {
             </div>
           </section>
 
-          {isAdmin && <MicrosoftOAuthSection />}
           {isAdmin && (
             <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-              El proveedor de IA (y su API key) se configura en Configuración &gt; Sistema; lo usan el correo y los demás módulos.
+              La aplicación de Microsoft (para cuentas Outlook) se configura en Configuración &gt; Módulos, y el proveedor de IA en Configuración &gt; Sistema.
             </p>
           )}
         </div>

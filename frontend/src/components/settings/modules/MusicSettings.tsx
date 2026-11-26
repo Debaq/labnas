@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Radio, Music, HelpCircle, X } from 'lucide-react'
-import { setLastfmKey, getMpvArgs, setMpvArgs as saveMpvArgs } from '../../api'
+import { setLastfmKey, getMpvArgs, setMpvArgs as saveMpvArgs } from '../../../api'
 
-export default function MediaTab() {
+export default function MusicSettings() {
   const [lastfmKey, setLastfmKeyInput] = useState('')
   const [lastfmMsg, setLastfmMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [mpvArgs, setMpvArgs] = useState<string[]>([])

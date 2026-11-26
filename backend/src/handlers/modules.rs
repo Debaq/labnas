@@ -22,16 +22,6 @@ pub struct ToggleBody {
     pub force: bool,
 }
 
-/// Aviso si apagar `id` le quita algo a otro modulo encendido (None = nada que avisar)
-pub fn disable_warning(id: &str, enabled: &std::collections::HashSet<String>) -> Option<String> {
-    let users: Vec<String> = db::MODULE_USES
-        .iter()
-        .filter(|(m, u, _)| *u == id && enabled.contains(*m))
-        .map(|(m, _, why)| format!("{} lo usa para {}", db::module_name(m), why))
-        .collect();
-    (!users.is_empty()).then(|| users.join("; "))
-}
-
 pub async fn toggle_module(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -43,7 +33,7 @@ pub async fn toggle_module(
 
     if !body.enabled && !body.force {
         let on = state.enabled_modules.lock().await.clone();
-        if let Some(why) = disable_warning(&id, &on) {
+        if let Some(why) = crate::modules::disable_warning(&id, &on) {
             return Err((StatusCode::CONFLICT, why));
         }
     }
@@ -82,7 +72,7 @@ pub async fn toggle_module(
     // Al encender: lo que usa y esta apagado (la interfaz lo menciona)
     let missing: Vec<&str> = if enabled {
         let on = state.enabled_modules.lock().await;
-        db::module_uses(&id).into_iter().filter(|m| !on.contains(*m)).collect()
+        crate::modules::uses(&id).into_iter().filter(|m| !on.contains(*m)).collect()
     } else {
         Vec::new()
     };
@@ -105,26 +95,4 @@ pub async fn reorder_modules(
         db::set_module_order(conn, &pairs)
     }).await?;
     Ok(Json(serde_json::json!({ "ok": true })))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn avisa_si_otro_modulo_lo_usa() {
-        let on: std::collections::HashSet<String> = ["email".to_string(), "tasks".to_string()].into();
-        assert!(disable_warning("tasks", &on).unwrap().contains("Correo"));
-        assert!(disable_warning("email", &on).is_none());
-        // Plazos apagado: apagar Portafolio no le quita nada a nadie
-        assert!(disable_warning("portfolio", &on).is_none());
-    }
-
-    #[test]
-    fn dependencias_entre_modulos_conocidos() {
-        let ids = db::module_ids();
-        for (m, u, _) in db::MODULE_USES {
-            assert!(ids.contains(m) && ids.contains(u), "{m} -> {u}");
-        }
-    }
 }

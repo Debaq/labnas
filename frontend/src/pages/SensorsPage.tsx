@@ -10,8 +10,9 @@ import {
   fetchSensorLatest, fetchSensorAlerts, fetchReceiverStatus,
   updateSensorDeviceStatus, updateSensorDeviceName, deleteSensorDevice,
   registerSensorDevice, createSensorAlert, updateSensorAlert, deleteSensorAlert,
-  configureReceiver, fetchSensorReadings,
+  fetchSensorReadings,
 } from '../api'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import type { SensorLatest, SensorAlert, ReceiverStatus, SensorReading } from '../types'
 import { errorMessage } from '../lib/errors'
@@ -73,6 +74,7 @@ function MiniChart({ data, width = 200, height = 60 }: { data: number[]; width?:
 
 export default function SensorsPage() {
   const { isAdmin } = useAuth()
+  const navigate = useNavigate()
   const [latest, setLatest] = useState<SensorLatest[]>([])
   const [alerts, setAlerts] = useState<SensorAlert[]>([])
   const [receiver, setReceiver] = useState<ReceiverStatus>({ connected: false, port: null, error: null })
@@ -84,8 +86,6 @@ export default function SensorsPage() {
   const [addForm, setAddForm] = useState({ name: '', mac: '', device_type: '', connection: 'wifi' })
   const [showAddAlert, setShowAddAlert] = useState(false)
   const [alertForm, setAlertForm] = useState({ device_id: '', key: '', condition: 'above', threshold: 0, cooldown_minutes: 30 })
-  const [portInput, setPortInput] = useState('')
-  const [showPortConfig, setShowPortConfig] = useState(false)
   const [chartData, setChartData] = useState<Record<string, SensorReading[]>>({})
   const [chartKey, setChartKey] = useState<Record<string, string>>({})
   const [chartRange, setChartRange] = useState<Record<string, string>>({})
@@ -100,7 +100,6 @@ export default function SensorsPage() {
       setLatest(l)
       setAlerts(a)
       setReceiver(r)
-      if (r.port) setPortInput(r.port)
     } catch {} finally { setLoading(false) }
   }, [])
 
@@ -175,10 +174,6 @@ export default function SensorsPage() {
   async function handleDeleteAlert(id: string) {
     try { await deleteSensorAlert(id); await loadData() } catch {}
   }
-  async function handleConfigPort() {
-    if (!portInput.trim()) return
-    try { await configureReceiver(portInput.trim()); setShowPortConfig(false); await loadData() } catch (e) { alert(errorMessage(e)) }
-  }
 
   const pending = latest.filter(s => s.device?.status === 'pending')
   const accepted = latest.filter(s => s.device?.status === 'accepted')
@@ -215,7 +210,7 @@ export default function SensorsPage() {
           {isAdmin && (
             <>
               <button
-                onClick={() => setShowPortConfig(!showPortConfig)}
+                onClick={() => navigate('/settings?tab=modules&seccion=modulo-sensors')}
                 className="px-3 py-1.5 rounded-lg text-sm flex items-center gap-1.5 transition-colors"
                 style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)' }}
               >
@@ -232,24 +227,6 @@ export default function SensorsPage() {
           )}
         </div>
       </div>
-
-      {/* Config puerto serial */}
-      {showPortConfig && isAdmin && (
-        <div className="p-4 rounded-xl" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-          <div className="flex items-center gap-2">
-            <input
-              value={portInput}
-              onChange={e => setPortInput(e.target.value)}
-              placeholder="/dev/ttyUSB0"
-              className="flex-1 px-3 py-2 rounded-lg text-sm"
-              style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-            />
-            <button onClick={handleConfigPort} className="px-4 py-2 rounded-lg text-sm" style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
-              Guardar
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Formulario agregar dispositivo WiFi */}
       {showAddDevice && isAdmin && (

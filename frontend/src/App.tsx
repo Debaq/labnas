@@ -6,50 +6,18 @@ import EventsProvider from './events/EventsProvider'
 import ThemeSync from './themes/ThemeSync'
 import Layout from './components/Layout'
 import LoginPage from './pages/LoginPage'
+import { MODULE_PAGES } from './modules'
 import DashboardPage from './pages/DashboardPage'
 import { Loader2 } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { fetchSetup, type SetupStatus } from './api'
 
 // Paginas cargadas bajo demanda: el bundle inicial solo trae login, layout y dashboard
-const FilesPage = lazy(() => import('./pages/FilesPage'))
-const NetworkPage = lazy(() => import('./pages/NetworkPage'))
 const SettingsPage = lazy(() => import('./pages/SettingsPage'))
-const TerminalPage = lazy(() => import('./pages/TerminalPage'))
-const Printers3DPage = lazy(() => import('./pages/Printers3DPage'))
-const PrintingPage = lazy(() => import('./pages/PrintingPage'))
-const TasksPage = lazy(() => import('./pages/TasksPage'))
-const NotesPage = lazy(() => import('./pages/NotesPage'))
-const EmailPage = lazy(() => import('./pages/EmailPage'))
-const InventoryPage = lazy(() => import('./pages/InventoryPage'))
-const PortfolioPage = lazy(() => import('./pages/PortfolioPage'))
 const PlaylistEditorPage = lazy(() => import('./pages/PlaylistEditorPage'))
-const SensorsPage = lazy(() => import('./pages/SensorsPage'))
-const CamerasPage = lazy(() => import('./pages/CamerasPage'))
-const MachinesPage = lazy(() => import('./pages/MachinesPage'))
 const MachineDetailPage = lazy(() => import('./pages/MachineDetailPage'))
-const DeadlinesPage = lazy(() => import('./pages/DeadlinesPage'))
 const DeviceLinkPage = lazy(() => import('./pages/DeviceLinkPage'))
 const SetupWizard = lazy(() => import('./components/SetupWizard'))
-
-// Registro de modulos: mapea module_id -> ruta + componente
-const MODULE_ROUTES: Record<string, { path: string; component: React.ComponentType }> = {
-  dashboard:  { path: '/dashboard',  component: DashboardPage },
-  files:      { path: '/files',      component: FilesPage },
-  printing:   { path: '/printing',   component: PrintingPage },
-  printers3d: { path: '/printers3d', component: Printers3DPage },
-  network:    { path: '/network',    component: NetworkPage },
-  tasks:      { path: '/tasks',      component: TasksPage },
-  notes:      { path: '/notes',      component: NotesPage },
-  email:      { path: '/email',      component: EmailPage },
-  inventory:  { path: '/inventory',  component: InventoryPage },
-  portfolio:  { path: '/portfolio',  component: PortfolioPage },
-  sensors:    { path: '/sensors',    component: SensorsPage },
-  terminal:   { path: '/terminal',   component: TerminalPage },
-  cameras:    { path: '/cameras',    component: CamerasPage },
-  machines:   { path: '/machines',   component: MachinesPage },
-  deadlines:  { path: '/deadlines',  component: DeadlinesPage },
-}
 
 function LoadingScreen() {
   const logoUrl = localStorage.getItem('labnas_logo_url')
@@ -82,7 +50,7 @@ function SetupGate() {
 }
 
 function AppRoutes() {
-  const { user, loading, isModuleEnabled, isAdmin } = useAuth()
+  const { user, loading, isModuleEnabled, isAdmin, enabledModules } = useAuth()
 
   if (loading) {
     return <LoadingScreen />
@@ -98,11 +66,14 @@ function AppRoutes() {
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          {Object.entries(MODULE_ROUTES)
-            .filter(([id]) => isModuleEnabled(id))
-            .map(([id, { path, component: Comp }]) => (
-              <Route key={id} path={path} element={<Comp />} />
-            ))}
+          {/* La ruta de cada modulo la dice el servidor; el dashboard existe siempre */}
+          <Route path="/dashboard" element={<DashboardPage />} />
+          {enabledModules
+            .filter(m => m.id !== 'dashboard' && m.enabled && m.path && MODULE_PAGES[m.id])
+            .map(m => {
+              const Page = MODULE_PAGES[m.id]
+              return <Route key={m.id} path={m.path} element={<Page />} />
+            })}
           {/* Ficha de una maquina: a ella lleva el QR pegado en la maquina */}
           {isModuleEnabled('machines') && <Route path="/machines/:id" element={<MachineDetailPage />} />}
           {/* Rutas no-modulo: siempre disponibles */}

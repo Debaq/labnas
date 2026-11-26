@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Building2, Users, Globe, Music, Shield, Bell, Server, SlidersHorizontal, Archive } from 'lucide-react'
+import { Building2, Users, Globe, Blocks, Shield, Bell, Server, SlidersHorizontal, Archive } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useViaBridge } from '../lib/bridge'
 import type { IconComponent } from '../lib/icons'
@@ -9,12 +9,12 @@ import LabTab from '../components/settings/LabTab'
 import UsersTab from '../components/settings/UsersTab'
 import NotificationsTab from '../components/settings/NotificationsTab'
 import NetworkTab from '../components/settings/NetworkTab'
-import MediaTab from '../components/settings/MediaTab'
+import ModulesTab from '../components/settings/ModulesTab'
 import SystemTab from '../components/settings/SystemTab'
 import BackupsTab from '../components/settings/BackupsTab'
 import AdminTab from '../components/settings/AdminTab'
 
-type TabId = 'general' | 'lab' | 'users' | 'notifications' | 'network' | 'media' | 'system' | 'backups' | 'admin'
+type TabId = 'general' | 'lab' | 'users' | 'notifications' | 'network' | 'modules' | 'system' | 'backups' | 'admin'
 
 const TABS: { id: TabId; label: string; icon: IconComponent; adminOnly: boolean }[] = [
   { id: 'general',       label: 'General',        icon: SlidersHorizontal, adminOnly: false },
@@ -22,7 +22,7 @@ const TABS: { id: TabId; label: string; icon: IconComponent; adminOnly: boolean 
   { id: 'users',         label: 'Usuarios',       icon: Users,             adminOnly: true  },
   { id: 'notifications', label: 'Notificaciones', icon: Bell,              adminOnly: true  },
   { id: 'network',       label: 'Red',            icon: Globe,             adminOnly: true  },
-  { id: 'media',         label: 'Multimedia',     icon: Music,             adminOnly: true  },
+  { id: 'modules',       label: 'Modulos',        icon: Blocks,            adminOnly: true  },
   { id: 'system',        label: 'Sistema',        icon: Server,            adminOnly: true  },
   { id: 'backups',       label: 'Respaldos',      icon: Archive,           adminOnly: true  },
   { id: 'admin',         label: 'Administracion', icon: Shield,            adminOnly: true  },
@@ -105,7 +105,7 @@ export default function SettingsPage() {
       {pane('users', <UsersTab />)}
       {pane('notifications', <NotificationsTab />)}
       {pane('network', <NetworkTab />)}
-      {pane('media', <MediaTab />)}
+      {pane('modules', <ModulesTab />)}
       {pane('system', <SystemTab />)}
       {pane('backups', <BackupsTab />)}
       {pane('admin', <AdminTab />)}

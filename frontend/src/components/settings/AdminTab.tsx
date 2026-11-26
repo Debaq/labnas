@@ -1,36 +1,18 @@
 import { useEffect, useState } from 'react'
-import { Power, Loader2, Shield, LayoutDashboard, FolderOpen, Network, Printer, Box, ClipboardList, FileText, Mail, Package, GraduationCap, Thermometer, TerminalSquare, Music, Video, ChevronUp, ChevronDown, AlertTriangle, Wrench, Hourglass } from 'lucide-react'
+import { Power, Loader2, Shield, ChevronUp, ChevronDown, AlertTriangle } from 'lucide-react'
 import { useAuth } from '../../auth/AuthContext'
 import SetupWizard from '../SetupWizard'
 import LedgerSection from '../LedgerSection'
 import AuditLogSection from '../AuditLogSection'
 import { fetchModules, toggleModule, reorderModules, fetchSetup, ModuleInUseError, type SetupStatus } from '../../api'
 import type { ModuleInfo } from '../../types'
-import type { IconComponent } from '../../lib/icons'
-
-const MODULE_META: Record<string, { label: string; icon: IconComponent; description: string }> = {
-  dashboard:  { label: 'Dashboard',        icon: LayoutDashboard, description: 'Panel principal con estadisticas y resumen' },
-  files:      { label: 'Archivos',         icon: FolderOpen,      description: 'Explorador y gestor de archivos' },
-  network:    { label: 'Red',              icon: Network,         description: 'Escaneo y monitoreo de red local' },
-  printing:   { label: 'Impresion',        icon: Printer,         description: 'Impresion de documentos via CUPS' },
-  printers3d: { label: 'Impresoras 3D',    icon: Box,             description: 'Control de impresoras 3D (OctoPrint/Moonraker)' },
-  tasks:      { label: 'Tareas / Horario', icon: ClipboardList,   description: 'Tareas, proyectos y calendario' },
-  notes:      { label: 'Notas',            icon: FileText,        description: 'Notas compartidas del laboratorio' },
-  email:      { label: 'Correo',           icon: Mail,            description: 'Correo electronico IMAP' },
-  inventory:  { label: 'Inventario',       icon: Package,         description: 'Inventario de equipos y materiales' },
-  portfolio:  { label: 'Portafolio',       icon: GraduationCap,   description: 'Portafolio academico e investigacion' },
-  sensors:    { label: 'Sensores',         icon: Thermometer,     description: 'Sensores IoT (ESP-NOW / WiFi)' },
-  terminal:   { label: 'Terminal',         icon: TerminalSquare,  description: 'Terminal web remoto' },
-  music:      { label: 'Musica',           icon: Music,           description: 'Reproductor de musica (yt-dlp + mpv)' },
-  cameras:    { label: 'Camaras',          icon: Video,           description: 'Webcams del servidor y camaras IP: vista, fotos y grabaciones (viene apagado)' },
-  machines:   { label: 'Maquinas',         icon: Wrench,          description: 'Catalogo de maquinas con QR, reservas sin choques y reporte de fallas' },
-  deadlines:  { label: 'Plazos',           icon: Hourglass,       description: 'Cuenta regresiva de cierres de proyecto, informes, rendiciones y otros plazos, con avisos por Telegram' },
-}
+import { moduleIcon } from '../../lib/moduleIcons'
 
 export default function AdminTab() {
   const { refreshModules } = useAuth()
   const [wizard, setWizard] = useState<SetupStatus | null>(null)
   const [modules, setModules] = useState<ModuleInfo[]>([])
+  const label = (id: string) => modules.find(m => m.id === id)?.name ?? id
   const [modulesLoading, setModulesLoading] = useState(true)
   const [toggling, setToggling] = useState<string | null>(null)
   const [needsRestart, setNeedsRestart] = useState(false)
@@ -50,14 +32,14 @@ export default function AdminTab() {
         missing = await toggleModule(mod.id, !mod.enabled)
       } catch (e) {
         // Otro modulo encendido lo usa: confirmar antes de apagar
-        if (!(e instanceof ModuleInUseError) || !confirm(`${e.message}.\n\n¿Apagar ${MODULE_META[mod.id]?.label ?? mod.id} igual?`)) throw e
+        if (!(e instanceof ModuleInUseError) || !confirm(`${e.message}.\n\n¿Apagar ${label(mod.id)} igual?`)) throw e
         missing = await toggleModule(mod.id, false, true)
       }
       setModules(prev => prev.map(m => m.id === mod.id ? { ...m, enabled: !m.enabled } : m))
       await refreshModules()
       setNeedsRestart(true)
       if (missing.length > 0) {
-        alert(`${MODULE_META[mod.id]?.label ?? mod.id} quedo encendido. Usa ${missing.map(m => MODULE_META[m]?.label ?? m).join(', ')}, que esta apagado: enciendelo para tener todo.`)
+        alert(`${label(mod.id)} quedo encendido. Usa ${missing.map(label).join(', ')}, que esta apagado: enciendelo para tener todo.`)
       }
     } catch {}
     setToggling(null)
@@ -143,9 +125,7 @@ export default function AdminTab() {
         ) : (
           <div className="space-y-2">
             {sortedModules.map((mod, idx) => {
-              const meta = MODULE_META[mod.id]
-              if (!meta) return null
-              const Icon = meta.icon
+              const Icon = moduleIcon(mod.icon)
               return (
                 <div
                   key={mod.id}
@@ -165,7 +145,7 @@ export default function AdminTab() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                        {meta.label}
+                        {mod.name ?? mod.id}
                       </span>
                       {mod.locked && (
                         <span
@@ -177,7 +157,7 @@ export default function AdminTab() {
                       )}
                     </div>
                     <p className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>
-                      {meta.description}
+                      {mod.description}
                     </p>
                     {mod.uses && mod.uses.length > 0 && (
                       <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
@@ -185,7 +165,7 @@ export default function AdminTab() {
                           const off = !modules.find(m => m.id === u)?.enabled
                           return (
                             <span key={u} style={{ color: off ? 'var(--warning)' : undefined }} title={off ? 'Apagado: esta parte no funciona' : undefined}>
-                              {MODULE_META[u]?.label ?? u}{off ? ' (apagado)' : ''}
+                              {label(u)}{off ? ' (apagado)' : ''}
                             </span>
                           )
                         }).reduce<React.ReactNode[]>((acc, el, i) => (i ? [...acc, ', ', el] : [el]), [])}

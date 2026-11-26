@@ -33,6 +33,8 @@ interface AuthContextType {
   isAdmin: boolean
   enabledModules: ModuleInfo[]
   isModuleEnabled: (id: string) => boolean
+  /** Nombre visible de un modulo (del registro del servidor) */
+  moduleName: (id: string) => string
   refreshModules: () => Promise<void>
   /** Recarga rol, permisos y modulos desde el servidor */
   refreshUser: () => Promise<void>
@@ -216,6 +218,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return mod?.enabled ?? false
   }
 
+  function moduleName(id: string): string {
+    return enabledModules.find(m => m.id === id)?.name ?? id
+  }
+
   async function refreshUser() {
     if (!user) return
     await refreshFromServer(user).catch(() => {})
@@ -228,7 +234,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, passkeyLogin, register, logout, can, canModule, isAdmin, enabledModules, isModuleEnabled, refreshModules, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, login, passkeyLogin, register, logout, can, canModule, isAdmin, enabledModules, isModuleEnabled, moduleName, refreshModules, refreshUser }}>
       {children}
     </AuthContext.Provider>
   )

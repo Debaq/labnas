@@ -3,7 +3,8 @@ import { Shield, ChevronDown, ChevronRight, Plus, RotateCcw, Trash2, Save } from
 import { fetchRoles, createRole, updateRole, resetRole, deleteRole } from '../../api'
 import type { ModuleLevel, RoleInfo } from '../../types'
 import { errorMessage } from '../../lib/errors'
-import { LEVELS, MODULE_LABELS } from '../../lib/roles'
+import { LEVELS } from '../../lib/roles'
+import { useAuth } from '../../auth/AuthContext'
 
 const LEVEL_COLOR: Record<ModuleLevel, string> = {
   ninguno: 'var(--text-primary)',
@@ -46,6 +47,7 @@ export function LevelPicker({ value, onChange, disabled }: { value: ModuleLevel;
 const inputStyle = { backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }
 
 function RoleCard({ role, modules, onChanged }: { role: RoleInfo; modules: string[]; onChanged: () => void }) {
+  const { moduleName } = useAuth()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState(role.name)
   const [description, setDescription] = useState(role.description)
@@ -119,7 +121,7 @@ function RoleCard({ role, modules, onChanged }: { role: RoleInfo; modules: strin
               <div className="grid gap-x-6 gap-y-1.5 md:grid-cols-2">
                 {modules.map(m => (
                   <div key={m} className="flex items-center justify-between gap-2">
-                    <span className="text-xs" style={{ color: 'var(--text-primary)' }}>{MODULE_LABELS[m] ?? m}</span>
+                    <span className="text-xs" style={{ color: 'var(--text-primary)' }}>{moduleName(m)}</span>
                     <LevelPicker value={levels[m] ?? 'ninguno'} onChange={l => setLevels({ ...levels, [m]: l })} disabled={busy} />
                   </div>
                 ))}

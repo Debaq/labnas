@@ -68,7 +68,7 @@ impl Grants {
 
     /// Niveles de todos los modulos (para la interfaz)
     pub fn all_levels(&self) -> BTreeMap<String, Level> {
-        crate::db::module_ids()
+        crate::modules::ids()
             .into_iter()
             .map(|m| {
                 let l = self.level(m);
@@ -115,7 +115,7 @@ pub fn seed_levels(conn: &Connection) {
         .map(|rows| rows.flatten().collect())
         .unwrap_or_default();
     for (id, template) in roles {
-        for m in crate::db::module_ids() {
+        for m in crate::modules::ids() {
             if m == "dashboard" {
                 continue;
             }
@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn plantillas_cubren_todos_los_modulos() {
         // Si se agrega un modulo, decidir su nivel en cada plantilla (y en COLS)
-        for m in crate::db::module_ids() {
+        for m in crate::modules::ids() {
             if m == "dashboard" {
                 continue;
             }

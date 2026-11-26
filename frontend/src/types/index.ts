@@ -70,6 +70,17 @@ export interface ModuleInfo {
   enabled: boolean
   display_order: number
   locked?: boolean
+  /** Lo que sigue viene del registro de modulos del servidor (backend/src/modules.rs) */
+  name?: string
+  /** Titulo de su pagina */
+  title?: string
+  /** Icono de lucide-react (ver lib/moduleIcons.ts) */
+  icon?: string
+  /** Ruta de su pagina ('' = sin pagina propia) */
+  path?: string
+  description?: string
+  /** Solo en la red del laboratorio (se oculta por el puente) */
+  lan_only?: boolean
   /** Modulos que este usa (sin ellos pierde una parte) */
   uses?: string[]
 }

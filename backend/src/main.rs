@@ -19,6 +19,7 @@ mod ledger;
 mod proc;
 mod error;
 mod roles;
+mod modules;
 
 use axum::{
     http::Method,

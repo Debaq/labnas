@@ -594,7 +594,7 @@ pub async fn set_user_role(
     if role.is_admin() && req.expires_at.is_some() {
         return Err((StatusCode::BAD_REQUEST, "Un administrador no puede tener fecha de termino".into()));
     }
-    let known = crate::db::module_ids();
+    let known = crate::modules::ids();
     if let Some(bad) = req.overrides.keys().find(|m| !known.contains(&m.as_str()) || *m == "dashboard") {
         return Err((StatusCode::BAD_REQUEST, format!("Modulo desconocido: {}", bad)));
     }

@@ -7,36 +7,6 @@ use axum::{
 
 use crate::state::{AppState, SessionInfo};
 
-/// Mapeo modulo -> prefijos de ruta API
-const MODULE_ROUTE_PREFIXES: &[(&str, &[&str])] = &[
-    ("files",      &["/api/files", "/api/shares", "/api/share/", "/api/download-url", "/api/trash", "/api/preview/"]),
-    ("network",    &["/api/network"]),
-    ("printing",   &["/api/printing"]),
-    ("printers3d", &["/api/printers3d"]),
-    ("tasks",      &["/api/tasks", "/api/projects", "/api/events"]),
-    ("notes",      &["/api/notes"]),
-    ("email",      &["/api/email"]),
-    ("inventory",  &["/api/inventory"]),
-    ("portfolio",  &["/api/portfolio"]),
-    ("sensors",    &["/api/sensors"]),
-    ("terminal",   &["/api/terminal"]),
-    ("music",      &["/api/music"]),
-    ("cameras",    &["/api/cameras"]),
-    ("machines",   &["/api/machines"]),
-    ("deadlines",  &["/api/deadlines"]),
-];
-
-fn resolve_module_for_path(path: &str) -> Option<&'static str> {
-    for (module_id, prefixes) in MODULE_ROUTE_PREFIXES {
-        for prefix in *prefixes {
-            if path.starts_with(prefix) {
-                return Some(module_id);
-            }
-        }
-    }
-    None
-}
-
 /// Cabecera que el frontend manda en todo pedido: con sesion por cookie es obligatoria
 /// en metodos que modifican (defensa CSRF junto a SameSite=Strict)
 pub const CSRF_HEADER: &str = "x-labnas-csrf";
@@ -58,7 +28,7 @@ pub fn cookie_token(headers: &axum::http::HeaderMap) -> Option<String> {
 /// WebSockets: se autentican con `?ticket=` (ver events::create_ticket)
 const WS_PATHS: &[&str] = &["/api/terminal", "/api/live"];
 
-/// Rutas sin autenticacion
+/// Rutas sin autenticacion (mas las que declara cada modulo en `crate::modules`)
 fn is_public(path: &str) -> bool {
     matches!(
         path,
@@ -69,14 +39,9 @@ fn is_public(path: &str) -> bool {
             | "/api/auth/passkey/login/options"
             | "/api/auth/passkey/login"
             | "/api/system/branding"
-            | "/api/sensors/data"
             // certificado publico del servidor, para instalarlo como confiable
             | "/api/tls/cert.pem"
-    ) || path.starts_with("/api/share/")
-        // validada por un token de un solo archivo (handlers::files::serve_preview)
-        || path.starts_with("/api/preview/")
-        // cuadro para Obico: token aleatorio de un solo uso (handlers::cameras::obico)
-        || path.starts_with("/api/cameras/frame/")
+    ) || crate::modules::is_public(path)
 }
 
 /// Rutas que no se atienden por el puente PHP (devuelve el motivo)
@@ -98,7 +63,7 @@ pub fn bridge_denied(method: &Method, path: &str) -> Option<&'static str> {
 }
 
 /// Lo que exige una ruta. Ver, Usar y Gestionar son niveles en el modulo de la ruta
-/// (ver `MODULE_ROUTE_PREFIXES` y roles.rs).
+/// (ver `crate::modules` y roles.rs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
     /// Cualquier usuario aprobado, sin importar el modulo
@@ -244,7 +209,7 @@ fn allowed(access: Access, path: &str, s: &SessionInfo) -> bool {
         Access::Gestionar => Level::Gestionar,
     };
     // Un nivel sin modulo no deberia existir (test `niveles_siempre_con_modulo`): solo admin
-    match resolve_module_for_path(path) {
+    match crate::modules::for_path(path) {
         Some(m) => s.can(m, level),
         None => s.is_admin(),
     }
@@ -270,7 +235,7 @@ pub async fn permission_check(
     }
 
     // Modulo desactivado => la ruta no existe
-    if let Some(module_id) = resolve_module_for_path(&path) {
+    if let Some(module_id) = crate::modules::for_path(&path) {
         let enabled = state.enabled_modules.lock().await.contains(module_id);
         if !enabled {
             return (StatusCode::NOT_FOUND, "Modulo no disponible").into_response();
@@ -530,7 +495,7 @@ mod tests {
         for (method, path) in routes {
             let Ok(m) = method.parse::<Method>() else { continue };
             if matches!(required_access(&m, &path), Access::Ver | Access::Usar | Access::Gestionar) {
-                assert!(resolve_module_for_path(&path).is_some(), "{} {} pide nivel pero no tiene modulo", method, path);
+                assert!(crate::modules::for_path(&path).is_some(), "{} {} pide nivel pero no tiene modulo", method, path);
                 checked += 1;
             }
         }

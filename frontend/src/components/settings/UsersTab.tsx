@@ -6,7 +6,7 @@ import type { WebUserRow } from '../../api/auth'
 import type { ModuleLevel, NotificationConfig, RoleInfo } from '../../types'
 import { errorMessage } from '../../lib/errors'
 import RolesSection from './RolesSection'
-import { LEVELS, MODULE_LABELS } from '../../lib/roles'
+import { LEVELS } from '../../lib/roles'
 
 const inputStyle = { backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }
 
@@ -30,6 +30,7 @@ function fromDateInput(v: string): number | null {
 
 /** Vencimiento y excepciones por modulo de una persona */
 function AccessEditor({ u, role, modules, onSaved }: { u: WebUserRow; role?: RoleInfo; modules: string[]; onSaved: () => void }) {
+  const { moduleName } = useAuth()
   const [expires, setExpires] = useState(toDateInput(u.expires_at))
   const [overrides, setOverrides] = useState<Record<string, ModuleLevel>>(u.overrides)
   const [busy, setBusy] = useState(false)
@@ -54,7 +55,7 @@ function AccessEditor({ u, role, modules, onSaved }: { u: WebUserRow; role?: Rol
             const baseLabel = LEVELS.find(l => l.id === base)?.label ?? base
             return (
               <div key={m} className="flex items-center justify-between gap-2">
-                <span className="text-xs" style={{ color: own ? 'var(--warning)' : 'var(--text-primary)' }}>{MODULE_LABELS[m] ?? m}</span>
+                <span className="text-xs" style={{ color: own ? 'var(--warning)' : 'var(--text-primary)' }}>{moduleName(m)}</span>
                 <select value={own ?? ''} onChange={e => {
                   const next = { ...overrides }
                   if (e.target.value) next[m] = e.target.value as ModuleLevel
@@ -83,7 +84,7 @@ function AccessEditor({ u, role, modules, onSaved }: { u: WebUserRow; role?: Rol
 }
 
 export default function UsersTab() {
-  const { user: authUser } = useAuth()
+  const { user: authUser, moduleName } = useAuth()
   const [webUsers, setWebUsers] = useState<WebUserRow[]>([])
   const [notifConfig, setNotifConfig] = useState<NotificationConfig | null>(null)
   const [roles, setRoles] = useState<RoleInfo[]>([])
@@ -146,7 +147,7 @@ export default function UsersTab() {
                         )}
                         {Object.keys(u.overrides).length > 0 && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ backgroundColor: 'var(--warning)' + '20', color: 'var(--warning)' }}
-                            title={Object.entries(u.overrides).map(([m, l]) => `${MODULE_LABELS[m] ?? m}: ${l}`).join(', ')}>
+                            title={Object.entries(u.overrides).map(([m, l]) => `${moduleName(m)}: ${l}`).join(', ')}>
                             {Object.keys(u.overrides).length} {Object.keys(u.overrides).length === 1 ? 'excepcion' : 'excepciones'}
                           </span>
                         )}

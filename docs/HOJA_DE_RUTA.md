@@ -36,7 +36,7 @@ y transparencia, antes que cualquier función de fabricación.
 7. **Cada área nueva es un módulo** que se activa o desactiva en **Configuración >
    Módulos**, como los actuales (archivos, impresión, inventario, sensores...). Un
    módulo apagado desaparece del menú y el middleware bloquea sus rutas
-   (`MODULE_ROUTE_PREFIXES`), incluidas las públicas. Módulos propuestos: `finanzas`
+   (registro de módulos en `backend/src/modules.rs`), incluidas las públicas. Módulos propuestos: `finanzas`
    (etapa 1), `transparencia`, `seguridad`, `maquinas`, `servicios`, `fabricacion`,
    `docencia`.
 
@@ -52,17 +52,22 @@ y transparencia, antes que cualquier función de fabricación.
 
 ## Cómo es modular LabNAS hoy (revisión del código, noviembre 2026)
 
-**Módulos.** Hay 13: `dashboard` (fijo), `files`, `network`, `printing`, `printers3d`,
-`tasks`, `notes`, `email`, `inventory`, `portfolio`, `sensors`, `terminal`, `music`.
-Se encienden, apagan y reordenan en **Configuración > Laboratorio**. Un módulo se
-declara hoy en **cuatro lugares** que hay que mantener a mano:
+**Módulos.** Hay 16: `dashboard` (fijo), `files`, `network`, `printing`, `printers3d`,
+`tasks`, `notes`, `email`, `inventory`, `portfolio`, `sensors`, `terminal`, `music`,
+`cameras`, `machines` y `deadlines`. Se encienden, apagan y reordenan en
+**Configuración > Laboratorio**. Desde noviembre de 2026 un módulo se declara en un
+**registro único** (`backend/src/modules.rs`): id, nombre, título, ícono, ruta en la
+interfaz, rutas de la API (privadas y públicas), si viene encendido, si es solo de la
+LAN y qué otros módulos usa. El menú, el título de cada página, la lista de módulos en
+Configuración y los nombres en roles y Telegram salen de ahí vía `/api/modules`.
+Fuera del registro quedan, a propósito, solo las cosas que son código:
 
 | Dónde | Qué define |
 |---|---|
-| `backend/src/db.rs` → `DEFAULT_MODULES` | id y orden; siempre se crea **encendido** |
-| `backend/src/middleware.rs` → `MODULE_ROUTE_PREFIXES` | rutas de la API; apagado responde 404 |
-| `backend/src/main.rs` | tareas de fondo (correo, monitor 3D, sensores, música, red) |
-| `frontend/src/components/Layout.tsx` → `moduleNav` | entrada del menú (ruta, nombre, ícono) |
+| `frontend/src/modules.tsx` | qué componente dibuja la página del módulo |
+| `backend/src/roles.rs` → `template_level` | nivel del módulo en cada plantilla de rol |
+| `backend/src/module_tasks.rs` | tareas de fondo, si tiene |
+| `frontend/src/lib/moduleIcons.ts` | el ícono, si es uno que aún no se usa |
 
 El bus de eventos en vivo y WebDAV ya respetan el estado del módulo.
 
@@ -113,10 +118,13 @@ Lo que usan todas las demás etapas.
 ### Infraestructura de módulos
 Con 7 módulos nuevos en camino, conviene ordenar esto primero:
 
-- [ ] **Registro único de módulos en el backend:** id, nombre, ícono, rutas
+- [x] **Registro único de módulos en el backend:** id, nombre, ícono, rutas
       privadas y públicas, si viene encendido, de qué otros depende y sus tareas de
       fondo. El menú del frontend se arma desde `/api/modules` en vez de una lista fija.
-      Agregar un módulo pasa de cuatro lugares a uno.
+      Agregar un módulo pasa de cuatro lugares a uno. *(hecho: `backend/src/modules.rs`;
+      reemplaza `DEFAULT_MODULES`, `MODULE_ROUTE_PREFIXES`, `MODULE_USES`, las rutas
+      públicas por módulo y cinco listas fijas del frontend. Las tareas de fondo siguen en
+      `module_tasks.rs` porque son código)*
 - [x] **Encendido por defecto configurable** (`cameras` ya viene apagado; `transparencia` también lo hará).
 - [x] **Dependencias entre módulos:** `transparencia` necesita `finanzas`, y
       `finanzas` usa `inventory` y `portfolio`. No se puede apagar uno del que otro
@@ -125,9 +133,13 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       la lista de módulos muestra qué usa cada uno)*
 - [x] **Tareas de fondo que se encienden y apagan en vivo** junto con su módulo.
 - [x] **Comandos de Telegram ligados a su módulo** (arregla la falla de arriba).
-- [ ] **Ajustes propios de cada módulo:** cada módulo trae su sección de
+- [x] **Ajustes propios de cada módulo:** cada módulo trae su sección de
       configuración, que solo aparece si está encendido. De paso se parte
-      `SettingsPage.tsx`.
+      `SettingsPage.tsx`. *(hecho: pestaña **Configuración > Módulos**, armada desde
+      `MODULE_SETTINGS` en `frontend/src/modules.tsx`; hoy Correo (app de Microsoft),
+      Sensores (puerto del receptor), Música (Last.fm y mpv, antes pestaña Multimedia) y
+      Cámaras (carpeta y duración). Los botones de ajustes de cada página llevan ahí con
+      `?tab=modules&seccion=modulo-<id>`. `SettingsPage.tsx` ya estaba partido en pestañas)*
 - [x] **Tarjetas del dashboard por módulo**, que aparecen solo si está encendido.
       *(hecho: Plazos, Impresoras 3D, Red, Tareas, Máquinas y Sensores; también se ocultan
       si el rol no ve el módulo)*

@@ -1060,103 +1060,60 @@ pub fn get_setting_u32(conn: &Connection, key: &str, default: u32) -> u32 {
 // Module helpers
 // ═══════════════════════════════════════
 
-/// (id, orden, encendido al instalarse). Un modulo nuevo se agrega con su estado por
-/// defecto la primera vez que arranca la version que lo trae; despues manda el admin.
-const DEFAULT_MODULES: &[(&str, i32, bool)] = &[
-    ("dashboard", 0, true),
-    ("files", 1, true),
-    ("network", 2, true),
-    ("printing", 3, true),
-    ("printers3d", 4, true),
-    ("tasks", 5, true),
-    ("notes", 6, true),
-    ("email", 7, true),
-    ("inventory", 8, true),
-    ("portfolio", 9, true),
-    ("sensors", 10, true),
-    ("terminal", 11, true),
-    ("music", 12, true),
-    // Camaras: apagado hasta que el admin lo active (privacidad)
-    ("cameras", 13, false),
-    ("machines", 14, true),
-    ("deadlines", 15, true),
-];
-
-/// Ids de todos los modulos conocidos
-pub fn module_ids() -> Vec<&'static str> {
-    DEFAULT_MODULES.iter().map(|(id, _, _)| *id).collect()
-}
-
+/// Agrega los modulos que aun no estan en la base, con su estado por defecto: un modulo
+/// nuevo aparece la primera vez que arranca la version que lo trae; despues manda el admin.
 fn seed_modules(conn: &Connection) {
-    for (id, order, enabled) in DEFAULT_MODULES {
+    for (order, m) in crate::modules::MODULES.iter().enumerate() {
         conn.execute(
             "INSERT OR IGNORE INTO modules (id, enabled, display_order) VALUES (?1, ?2, ?3)",
-            params![id, enabled, order],
+            params![m.id, m.default_on, order as i32],
         ).ok();
     }
 }
 
+/// Un modulo tal como lo ve la interfaz: lo del registro (`crate::modules`) mas el estado
+/// que decide el admin
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ModuleInfo {
     pub id: String,
     pub enabled: bool,
     pub display_order: i32,
     pub locked: bool,
-    /// Modulos que este usa (ver `MODULE_USES`)
+    pub name: &'static str,
+    pub title: &'static str,
+    pub icon: &'static str,
+    pub path: &'static str,
+    pub description: &'static str,
+    pub lan_only: bool,
+    /// Modulos que este usa
     pub uses: Vec<&'static str>,
-}
-
-/// Modulo -> (modulo que usa, para que). Sin el otro sigue funcionando, pero pierde esa parte;
-/// apagar uno que otro usa pide confirmacion.
-pub const MODULE_USES: &[(&str, &str, &str)] = &[
-    ("email", "tasks", "agendar las propuestas de la IA"),
-    ("deadlines", "portfolio", "mostrar los plazos de los proyectos del Portafolio"),
-    ("cameras", "printers3d", "ver y grabar las camaras de las impresoras 3D"),
-];
-
-/// Nombre visible de un modulo
-pub fn module_name(id: &str) -> &str {
-    match id {
-        "dashboard" => "Dashboard",
-        "files" => "Archivos",
-        "network" => "Red",
-        "printing" => "Impresion",
-        "printers3d" => "Impresoras 3D",
-        "tasks" => "Tareas",
-        "notes" => "Notas",
-        "email" => "Correo",
-        "inventory" => "Inventario",
-        "portfolio" => "Portafolio",
-        "sensors" => "Sensores",
-        "terminal" => "Terminal",
-        "music" => "Musica",
-        "cameras" => "Camaras",
-        "machines" => "Maquinas",
-        "deadlines" => "Plazos",
-        other => other,
-    }
-}
-
-/// Modulos que usa `id`
-pub fn module_uses(id: &str) -> Vec<&'static str> {
-    MODULE_USES.iter().filter(|(m, _, _)| *m == id).map(|(_, u, _)| *u).collect()
 }
 
 pub fn get_modules(conn: &Connection) -> Vec<ModuleInfo> {
     let mut stmt = conn
         .prepare("SELECT id, enabled, display_order FROM modules ORDER BY display_order")
         .unwrap();
-    stmt.query_map([], |row| {
-        let id: String = row.get(0)?;
-        let enabled: bool = row.get(1)?;
-        let display_order: i32 = row.get(2)?;
-        let locked = id == "dashboard";
-        let uses = module_uses(&id);
-        Ok(ModuleInfo { id, enabled, display_order, locked, uses })
-    })
-    .unwrap()
-    .filter_map(|r| r.ok())
-    .collect()
+    stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?, row.get::<_, i32>(2)?)))
+        .unwrap()
+        .filter_map(|r| r.ok())
+        // Un id que ya no esta en el registro (modulo retirado) no se muestra
+        .filter_map(|(id, enabled, display_order)| {
+            let m = crate::modules::get(&id)?;
+            Some(ModuleInfo {
+                locked: id == "dashboard",
+                id,
+                enabled,
+                display_order,
+                name: m.name,
+                title: m.title.unwrap_or(m.name),
+                icon: m.icon,
+                path: m.path,
+                description: m.description,
+                lan_only: m.lan_only,
+                uses: crate::modules::uses(m.id),
+            })
+        })
+        .collect()
 }
 
 pub fn get_enabled_module_ids(conn: &Connection) -> Vec<String> {

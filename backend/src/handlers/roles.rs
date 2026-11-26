@@ -58,7 +58,7 @@ pub fn role_name(conn: &Connection, id: &str) -> String {
 }
 
 fn configurable_modules() -> Vec<&'static str> {
-    crate::db::module_ids().into_iter().filter(|m| *m != "dashboard").collect()
+    crate::modules::ids().into_iter().filter(|m| *m != "dashboard").collect()
 }
 
 fn load_roles(conn: &Connection) -> Result<Vec<RoleOut>, String> {

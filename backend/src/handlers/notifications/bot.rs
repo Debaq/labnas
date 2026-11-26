@@ -151,13 +151,13 @@ pub(super) async fn handle_message(state: &AppState, token: &str, msg: &TgMessag
     // Un modulo apagado lo esta tambien por Telegram (no solo en la web)
     let enabled = state.enabled_modules.lock().await.clone();
     if let Some(off) = command_modules(text).iter().find(|m| !enabled.contains(**m)) {
-        let msg = format!("El modulo *{}* esta desactivado.", module_label(off));
+        let msg = format!("El modulo *{}* esta desactivado.", crate::modules::name(off));
         let _ = send_telegram_message(&state.http_client, token, chat_id, &msg).await;
         return;
     }
     let need = command_level(text);
     if let Some(m) = command_modules(text).iter().find(|m| !grants.can(m, need)) {
-        let msg = format!("Tu rol no permite esto en *{}*.", module_label(m));
+        let msg = format!("Tu rol no permite esto en *{}*.", crate::modules::name(m));
         let _ = send_telegram_message(&state.http_client, token, chat_id, &msg).await;
         return;
     }
@@ -516,18 +516,6 @@ fn chat_grants(conn: &rusqlite::Connection, chat: &TelegramChat) -> (Grants, boo
     }
     let role = chat.role.as_str();
     (crate::roles::grants_for_role(conn, role), false, crate::handlers::roles::role_name(conn, role))
-}
-
-fn module_label(id: &str) -> &str {
-    match id {
-        "terminal" => "Terminal",
-        "tasks" => "Tareas / Horario",
-        "email" => "Correo",
-        "music" => "Musica",
-        "printers3d" => "Impresoras 3D",
-        "network" => "Red",
-        other => other,
-    }
 }
 
 pub(super) fn build_help_message(

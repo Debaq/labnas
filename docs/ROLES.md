@@ -76,8 +76,8 @@ chat sin cuenta usa los niveles de su rol. Los comandos de consulta (`/tareas`, 
 - `backend/src/roles.rs`: niveles, plantillas (`template_level`) y consultas
   (`users_with_level`, `chats_with_level_sql`).
 - `middleware::required_access` devuelve `Any`, `Ver`, `Usar`, `Gestionar` o `Admin`; el nivel
-  se mide en el módulo de la ruta (`MODULE_ROUTE_PREFIXES`). El test
+  se mide en el módulo de la ruta (`crate::modules::for_path`, según el campo `api` del registro). El test
   `niveles_siempre_con_modulo` revisa que toda ruta con nivel tenga módulo.
 - En un handler: `session.can("machines", Level::Gestionar)`; nunca comparar nombres de rol.
-- Módulo nuevo: agregarlo a `DEFAULT_MODULES`, a `MODULE_ROUTE_PREFIXES` y a cada fila de
+- Módulo nuevo: agregarlo al registro `backend/src/modules.rs` y a cada fila de
   `template_level` (el test `plantillas_cubren_todos_los_modulos` lo recuerda).

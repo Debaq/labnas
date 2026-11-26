@@ -3,11 +3,12 @@ import {
   Video, Camera, Circle, Square, Maximize2, X, Loader2, Plus, Pencil, Trash2, Download, Settings2, Search, AlertTriangle, ShieldCheck,
 } from 'lucide-react'
 import {
-  fetchCameras, createCamera, updateCamera, deleteCamera, saveCameraSettings, detectCameraDevices,
+  fetchCameras, createCamera, updateCamera, deleteCamera, detectCameraDevices,
   startCameraRecording, stopCameraRecording, takeCameraPhoto, fetchCameraRecordings, deleteCameraRecording,
   cameraStreamUrl, cameraFrameUrl, cameraRecordingUrl,
 } from '../api'
 import type { CamerasResponse, CameraView, CameraBody, CameraDetect, CameraRecording } from '../types'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { useEvent } from '../events/useEvents'
 import { useToast } from '../components/ToastContext'
@@ -66,16 +67,13 @@ const emptyForm: CameraBody = { name: '', kind: 'usb', device: '', url: '', reso
 export default function CamerasPage() {
   const { isAdmin } = useAuth()
   const { addToast } = useToast()
+  const navigate = useNavigate()
   const [data, setData] = useState<CamerasResponse | null>(null)
   const [recordings, setRecordings] = useState<CameraRecording[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [live, setLive] = useState<CameraView | null>(null)
   const [now, setNow] = useState(() => Date.now())
-  // Ajustes (admin)
-  const [showSettings, setShowSettings] = useState(false)
-  const [folder, setFolder] = useState('')
-  const [maxMinutes, setMaxMinutes] = useState(60)
   // Formulario de camara (admin)
   const [editing, setEditing] = useState<string | null>(null)
   const [form, setForm] = useState<CameraBody | null>(null)
@@ -83,11 +81,7 @@ export default function CamerasPage() {
 
   const load = useCallback(() => {
     fetchCameras()
-      .then((d) => {
-        setData(d)
-        setFolder(d.folder)
-        setMaxMinutes(d.max_minutes)
-      })
+      .then(setData)
       .catch((e) => setError(errorMessage(e)))
     fetchCameraRecordings().then(setRecordings).catch(() => {})
   }, [])
@@ -155,7 +149,7 @@ export default function CamerasPage() {
         </div>
         {isAdmin && (
           <div className="flex gap-2">
-            <button onClick={() => setShowSettings(!showSettings)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm" style={btn}>
+            <button onClick={() => navigate('/settings?tab=modules&seccion=modulo-cameras')} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm" style={btn}>
               <Settings2 size={15} /> Ajustes
             </button>
             <button onClick={() => openForm()} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm" style={btn}>
@@ -180,28 +174,6 @@ export default function CamerasPage() {
         <p className="text-sm flex items-center gap-2" style={{ color: 'var(--warning)' }}>
           <AlertTriangle size={15} /> Falta elegir la carpeta donde se guardan fotos y grabaciones{isAdmin ? ' (Ajustes).' : ': pidelo al administrador.'}
         </p>
-      )}
-
-      {isAdmin && showSettings && (
-        <div className="rounded-xl p-4 grid grid-cols-1 md:grid-cols-3 gap-3 items-end" style={card}>
-          <label className="text-xs space-y-1 md:col-span-2" style={{ color: 'var(--text-secondary)' }}>
-            <span>Carpeta del NAS para fotos y grabaciones (una subcarpeta por camara)</span>
-            <input value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="/home/lab/Camaras" className="w-full rounded-lg px-2 py-1.5 text-sm font-mono" style={input} />
-          </label>
-          <label className="text-xs space-y-1" style={{ color: 'var(--text-secondary)' }}>
-            <span>Duracion maxima por grabacion (minutos)</span>
-            <input type="number" min={1} max={600} value={maxMinutes} onChange={(e) => setMaxMinutes(Number(e.target.value))} className="w-full rounded-lg px-2 py-1.5 text-sm" style={input} />
-          </label>
-          <div className="md:col-span-3 flex justify-end">
-            <button
-              disabled={busy === 'settings'}
-              onClick={() => run('settings', async () => { await saveCameraSettings(folder.trim(), maxMinutes); addToast('Ajustes guardados', 'success') })}
-              className="px-3 py-1.5 rounded-lg text-sm" style={btn}
-            >
-              Guardar
-            </button>
-          </div>
-        </div>
       )}
 
       {isAdmin && form && (
