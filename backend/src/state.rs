@@ -158,7 +158,6 @@ pub struct LinkCode {
 }
 
 impl AppState {
-    /// Registra un evento en la auditoria (tabla `audit_log`). Nunca falla hacia el caller.
     /// Registro de accesos (idea 72): quien vio o descargo que. El mismo acceso de la misma
     /// persona se anota una vez cada 10 minutos (un cliente WebDAV lee muchas veces).
     pub async fn log_access(&self, details: &str, user: &str) {
@@ -168,6 +167,7 @@ impl AppState {
         self.log_activity(ACCESS_ACTION, details, user).await;
     }
 
+    /// Registra un evento en la auditoria (tabla `audit_log`). Nunca falla hacia el caller.
     pub async fn log_activity(&self, action: &str, details: &str, user: &str) {
         let (action, details, user) = (action.to_string(), details.to_string(), user.to_string());
         let res = crate::db::db_op(&self.db, move |conn| {

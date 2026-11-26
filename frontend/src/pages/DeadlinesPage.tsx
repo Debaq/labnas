@@ -11,6 +11,8 @@ import { useAuth } from '../auth/AuthContext'
 import { useEvent } from '../events/useEvents'
 import { useToast } from '../components/ToastContext'
 import DeadlineCard from '../components/deadlines/DeadlineCard'
+import AccessBadge from '../components/access/AccessBadge'
+import { useAccessLevels } from '../components/access/useAccessLevels'
 import DeadlineFormModal from '../components/deadlines/DeadlineFormModal'
 
 type Filter = 'todos' | 'urgentes' | string
@@ -42,6 +44,11 @@ export default function DeadlinesPage() {
   useEvent('deadlines', load, load)
 
   const canEdit = (d: Deadline) => d.source === 'manual' && (staff || d.created_by === user?.username)
+  // Nivel de acceso: solo los contadores sueltos (los del Portafolio siguen al proyecto)
+  const access = useAccessLevels('plazo', [...list, ...done].flatMap(d => (d.id ? [d.id] : [])))
+  const accessFor = (d: Deadline) => d.id
+    ? <AccessBadge kind="plazo" id={d.id} level={access.level(d.id)} canManage={canEdit(d)} compact onChanged={v => access.set(d.id!, v)} />
+    : undefined
 
   const markDone = async (d: Deadline, value: boolean) => {
     if (!d.id) return
@@ -125,7 +132,7 @@ export default function DeadlinesPage() {
       ) : (
         <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
           {shown.map((d) => (
-            <DeadlineCard key={d.key} d={d} editable={canEdit(d)} onEdit={setEditing} onDone={markDone} onDelete={remove} />
+            <DeadlineCard key={d.key} d={d} editable={canEdit(d)} onEdit={setEditing} onDone={markDone} onDelete={remove} access={accessFor(d)} />
           ))}
         </div>
       )}
@@ -140,7 +147,7 @@ export default function DeadlinesPage() {
             : (
               <div className="grid gap-3 grid-cols-1 md:grid-cols-2 mt-3 opacity-80">
                 {done.map((d) => (
-                  <DeadlineCard key={d.key} d={d} editable={canEdit(d)} onDone={markDone} onDelete={remove} />
+                  <DeadlineCard key={d.key} d={d} editable={canEdit(d)} onDone={markDone} onDelete={remove} access={accessFor(d)} />
                 ))}
               </div>
             )

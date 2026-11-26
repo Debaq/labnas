@@ -10,6 +10,9 @@ import {
   fetchPortfolio, createPortfolioEntry, updatePortfolioEntry, deletePortfolioEntry,
   togglePortfolioRequirement, togglePortfolioMilestone, fetchUsernames,
 } from '../api'
+import { useAuth } from '../auth/AuthContext'
+import AccessBadge from '../components/access/AccessBadge'
+import { useAccessLevels } from '../components/access/useAccessLevels'
 import type { PortfolioEntry, PortfolioType, PortfolioStatus, PortfolioScope } from '../types'
 import { errorMessage } from '../lib/errors'
 
@@ -64,6 +67,9 @@ const emptyForm = (): Partial<PortfolioEntry> => ({
 
 export default function PortfolioPage() {
   const [entries, setEntries] = useState<PortfolioEntry[]>([])
+  const { canModule } = useAuth()
+  const canManagePortfolio = canModule('portfolio', 'gestionar')
+  const access = useAccessLevels('proyecto', entries.map(e => e.id))
   const [loading, setLoading] = useState(true)
   const [filterType, setFilterType] = useState<PortfolioType | 'all'>('all')
   const [filterStatus, setFilterStatus] = useState<PortfolioStatus | 'all'>('all')
@@ -423,6 +429,9 @@ export default function PortfolioPage() {
                     <span className="text-[11px] px-2 py-0.5 rounded-full font-medium flex-shrink-0"
                       style={{ backgroundColor: stCfg.color + '22', color: stCfg.color }}>
                       {stCfg.label}
+                    </span>
+                    <span onClick={e => e.stopPropagation()} className="flex-shrink-0">
+                      <AccessBadge kind="proyecto" id={entry.id} level={access.level(entry.id)} canManage={canManagePortfolio} onChanged={v => access.set(entry.id, v)} />
                     </span>
                     {entry.scope && entry.scope !== 'own' && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0"

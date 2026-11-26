@@ -1,9 +1,9 @@
 import { Suspense, lazy, useState, useEffect } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Settings, Server, Power, LogOut, User, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react'
+import { Settings, Handshake, Server, Power, LogOut, User, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react'
 import { useViaBridge } from '../lib/bridge'
 import { useAuth } from '../auth/AuthContext'
-import { shutdownServer, getBranding, fetchHealth, checkUpdate } from '../api'
+import { shutdownServer, getBranding, fetchHealth, checkUpdate, fetchShared } from '../api'
 import MusicPanel from './MusicPanel'
 import RecordingBanner from './RecordingBanner'
 import { moduleIcon } from '../lib/moduleIcons'
@@ -11,6 +11,7 @@ import { moduleIcon } from '../lib/moduleIcons'
 // Paginas que no son de un modulo (los titulos de los modulos vienen del servidor)
 const FIXED_TITLES: Record<string, string> = {
   '/settings': 'Configuracion',
+  '/compartido': 'Compartido conmigo',
   '/playlists': 'Editor de Playlist',
 }
 
@@ -106,6 +107,16 @@ export default function Layout() {
 
   const viaBridge = useViaBridge()
 
+  // Registros que otros me autorizaron (niveles de acceso)
+  const [sharedCount, setSharedCount] = useState(0)
+  useEffect(() => {
+    if (!user || user.role === 'pendiente') return
+    const load = () => fetchShared().then(s => setSharedCount(s.length)).catch(() => {})
+    load()
+    const t = setInterval(load, 5 * 60 * 1000)
+    return () => clearInterval(t)
+  }, [user])
+
   // Build nav items from enabled modules (sorted by display_order)
   const moduleItems = enabledModules
     .filter(m => m.enabled && m.path)
@@ -118,6 +129,8 @@ export default function Layout() {
   // Fixed items at end
   const navItems = [
     ...moduleItems,
+    // Solo si alguien me autorizo algo (o ya estoy en la pagina)
+    { to: '/compartido', label: 'Compartido conmigo', icon: Handshake, show: sharedCount > 0 || location.pathname === '/compartido' },
     { to: '/settings', label: 'Configuracion', icon: Settings, show: true },
   ]
 

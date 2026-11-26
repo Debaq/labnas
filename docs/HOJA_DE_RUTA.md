@@ -154,8 +154,11 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       administrativo, docente, estudiante, usuario externo, auditor (solo lectura y con
       fecha de término). *(hecho, más encargado técnico y ayudante; la fecha de término
       vale para cualquier cuenta)*
-- [ ] **Niveles de acceso** privado / con autorización / público, aplicables a
-      cualquier registro o archivo.
+- [x] **Niveles de acceso** privado / con autorización / público, aplicables a
+      cualquier registro o archivo. *(hecho: `docs/ACCESO.md`; proyectos, bienes, notas,
+      plazos y archivos, con autorizaciones por persona con fecha de término, enlace
+      público, «Compartido conmigo» y todo en la auditoría. Es la base de la idea 66
+      —acceso de un auditor— y del portal de transparencia, idea 70)*
 - [x] **Catálogo único de máquinas y bienes con QR:** cada equipo tiene una ficha
       a la que llevan las ideas de reservas, mantenimiento, inventario y uso.
       *(hecho: módulo Máquinas, ver `docs/MAQUINAS.md`; los bienes de inventario aún no tienen QR)*

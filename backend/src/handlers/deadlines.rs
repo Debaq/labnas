@@ -449,6 +449,7 @@ pub async fn delete_deadline(
         let d = can_edit(conn, &id, &s)?;
         conn.execute("DELETE FROM deadlines WHERE id = ?1", [&id]).map_err(db_err)?;
         conn.execute("DELETE FROM deadline_alerts WHERE key = ?1", [format!("d:{}", id)]).map_err(db_err)?;
+        crate::handlers::access::forget(conn, "plazo", &id);
         Ok(d)
     })
     .await?;

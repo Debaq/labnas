@@ -42,6 +42,8 @@ fn is_public(path: &str) -> bool {
             // certificado publico del servidor, para instalarlo como confiable
             | "/api/tls/cert.pem"
     ) || crate::modules::is_public(path)
+        // fichas publicas por token (handlers::access; el modulo del registro tiene que estar encendido)
+        || path.starts_with("/api/public/")
 }
 
 /// Rutas que no se atienden por el puente PHP (devuelve el motivo)
@@ -97,6 +99,12 @@ pub fn required_access(method: &Method, path: &str) -> Access {
 
         // --- Modulos ---
         ("GET", ["modules"]) => Any,
+
+        // --- Niveles de acceso: cada handler revisa el modulo del registro (gestionar, o
+        // haberlo creado) o la autorizacion vigente de la persona (handlers::access) ---
+        ("GET", ["access"]) | ("PUT", ["access"]) | ("GET", ["access", "levels"]) => Any,
+        ("POST", ["access", "grants"]) | ("DELETE", ["access", "grants", _]) => Any,
+        ("GET", ["shared"]) | ("GET", ["shared", "view"]) | ("GET", ["shared", "download"]) => Any,
 
         // --- Eventos en tiempo real (cada evento se filtra por el nivel en su modulo) ---
         ("POST", ["live", "ticket"]) | ("GET", ["live"]) | ("GET", ["live", "poll"]) | ("GET", ["live", "notices"]) => Any,
@@ -230,16 +238,20 @@ pub async fn permission_check(
         }
     }
 
-    if !path.starts_with("/api/") || is_public(&path) {
+    if !path.starts_with("/api/") {
         return next.run(request).await;
     }
 
-    // Modulo desactivado => la ruta no existe
+    // Modulo desactivado => la ruta no existe, tambien las publicas (enlaces, sensores WiFi)
     if let Some(module_id) = crate::modules::for_path(&path) {
         let enabled = state.enabled_modules.lock().await.contains(module_id);
         if !enabled {
             return (StatusCode::NOT_FOUND, "Modulo no disponible").into_response();
         }
+    }
+
+    if is_public(&path) {
+        return next.run(request).await;
     }
 
     // Token por header. Los WebSocket (el navegador no permite headers) usan un

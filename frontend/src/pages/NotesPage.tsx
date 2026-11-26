@@ -1,6 +1,9 @@
 import { useEffect, useState, useRef } from 'react'
 import { Plus, Trash2, Save, FileText, Edit3, Loader2, X, Users, Globe } from 'lucide-react'
 import { fetchNotes, createNote, updateNote, deleteNote, fetchUsernames } from '../api'
+import { useAuth } from '../auth/AuthContext'
+import AccessBadge from '../components/access/AccessBadge'
+import { useAccessLevels } from '../components/access/useAccessLevels'
 import type { Note } from '../types/notes'
 
 function renderMarkdown(md: string): string {
@@ -21,6 +24,8 @@ function renderMarkdown(md: string): string {
 
 export default function NotesPage() {
   const [notes, setNotes] = useState<Note[]>([])
+  const { user, canModule } = useAuth()
+  const access = useAccessLevels('nota', notes.map(n => n.id))
   const [loading, setLoading] = useState(true)
   const [selectedNote, setSelectedNote] = useState<Note | null>(null)
   const [editing, setEditing] = useState(false)
@@ -292,7 +297,7 @@ export default function NotesPage() {
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={editIsPublic} onChange={e => setEditIsPublic(e.target.checked)} />
                   <Globe size={12} style={{ color: editIsPublic ? 'var(--success)' : 'var(--text-secondary)' }} />
-                  <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Nota publica (visible para todos)</span>
+                  <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Visible para todo el laboratorio</span>
                 </label>
               </div>
             )}
@@ -301,7 +306,12 @@ export default function NotesPage() {
             <div className="px-4 py-2 text-[10px] flex justify-between" style={{ borderTop: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
               <span className="flex items-center gap-2">
                 Por: {selectedNote.created_by}
-                {selectedNote.is_public && <span className="px-1.5 py-0.5 rounded text-[9px]" style={{ backgroundColor: 'var(--success)' + '20', color: 'var(--success)' }}>Publica</span>}
+                <AccessBadge
+                  kind="nota" id={selectedNote.id} level={access.level(selectedNote.id)}
+                  canManage={canModule('notes', 'gestionar') || (selectedNote.created_by === user?.username && canModule('notes', 'usar'))}
+                  onChanged={v => access.set(selectedNote.id, v)}
+                />
+                {selectedNote.is_public && <span className="px-1.5 py-0.5 rounded text-[9px]" style={{ backgroundColor: 'var(--success)' + '20', color: 'var(--success)' }}>Todo el lab</span>}
                 {(selectedNote.shared_with?.length > 0) && <span className="px-1.5 py-0.5 rounded text-[9px]" style={{ backgroundColor: 'var(--accent)' + '20', color: 'var(--accent)' }}>Compartida</span>}
               </span>
               <span>Editado: {new Date(selectedNote.updated_at).toLocaleString('es-ES')} por {selectedNote.updated_by}</span>

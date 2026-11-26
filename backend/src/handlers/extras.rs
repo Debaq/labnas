@@ -606,6 +606,7 @@ pub async fn delete_note(
         if rows == 0 {
             return Err((StatusCode::NOT_FOUND, "Nota no encontrada".to_string()));
         }
+        crate::handlers::access::forget(conn, "nota", &id);
         Ok(())
     }).await?;
 

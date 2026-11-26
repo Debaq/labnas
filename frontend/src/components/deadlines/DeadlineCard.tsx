@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Check, Pencil, RotateCcw, Trash2 } from 'lucide-react'
 import { categoryInfo, countdownLabel, levelColor, longDate, type Deadline } from '../../api'
@@ -10,10 +11,12 @@ interface Props {
   onEdit?: (d: Deadline) => void
   onDone?: (d: Deadline, done: boolean) => void
   onDelete?: (d: Deadline) => void
+  /** Nivel de acceso (insignia o boton), solo contadores sueltos */
+  access?: ReactNode
 }
 
 /** Tarjeta con la cuenta regresiva de un plazo; el color cambia al acercarse la fecha */
-export default function DeadlineCard({ d, editable, compact, onEdit, onDone, onDelete }: Props) {
+export default function DeadlineCard({ d, editable, compact, onEdit, onDone, onDelete, access }: Props) {
   const color = levelColor(d.level)
   const c = countdownLabel(d)
   const cat = categoryInfo(d.category)
@@ -47,8 +50,10 @@ export default function DeadlineCard({ d, editable, compact, onEdit, onDone, onD
               <div className="text-xs mt-1 line-clamp-2" style={{ color: 'var(--text-secondary)' }}>{d.notes}</div>
             )}
           </div>
+          {!compact && access && !editable && <div className="shrink-0">{access}</div>}
           {editable && !compact && d.id && (
-            <div className="flex gap-0.5 shrink-0" style={{ color: 'var(--text-secondary)' }}>
+            <div className="flex items-center gap-0.5 shrink-0" style={{ color: 'var(--text-secondary)' }}>
+              {access}
               {d.done_at ? (
                 <button className={btn} title="Reabrir" onClick={() => onDone?.(d, false)}><RotateCcw size={14} /></button>
               ) : (

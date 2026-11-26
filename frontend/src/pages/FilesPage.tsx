@@ -36,6 +36,8 @@ import { useAuth } from '../auth/AuthContext'
 import TrashPanel from '../components/TrashPanel'
 import PreviewModal from '../components/PreviewModal'
 import { previewKind } from '../lib/preview'
+import AccessButton from '../components/access/AccessButton'
+import { useAccessLevels } from '../components/access/useAccessLevels'
 import { fetchFiles, uploadFile, downloadFile, deleteFile, createDirectory, fetchQuickAccess, fetchCupsPrinters, fetchPrinterOptions, printFilePath, createShare, downloadFromUrl } from '../api'
 import type { FileEntry, QuickAccess, CupsPrinter, PrinterOption } from '../types'
 
@@ -95,7 +97,9 @@ function formatDate(dateStr: string): string {
 
 export default function FilesPage() {
   const [files, setFiles] = useState<FileEntry[]>([])
-  const { isAdmin } = useAuth()
+  // Nivel de acceso de los archivos de la carpeta (privado / con autorizacion / publico)
+  const access = useAccessLevels('archivo', files.filter(f => !f.is_dir).map(f => f.path))
+  const { isAdmin, canModule } = useAuth()
   const [showTrash, setShowTrash] = useState(false)
   const [preview, setPreview] = useState<FileEntry | null>(null)
   const [currentPath, setCurrentPath] = useState('/')
@@ -714,6 +718,11 @@ export default function FilesPage() {
                         >
                           <Share2 size={16} />
                         </button>
+                      )}
+                      {!entry.is_dir && canModule('files', 'usar') && (
+                        <span onClick={e => e.stopPropagation()}>
+                          <AccessButton kind="archivo" id={entry.path} level={access.level(entry.path)} compact onChanged={v => access.set(entry.path, v)} />
+                        </span>
                       )}
                       {isPrintable(entry) && cupsPrinters.length > 0 && (
                         <button

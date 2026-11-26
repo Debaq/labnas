@@ -262,6 +262,7 @@ pub async fn delete_item(
         if changed == 0 {
             return Err((StatusCode::NOT_FOUND, "Item no encontrado".to_string()));
         }
+        crate::handlers::access::forget(conn, "bien", &id);
         Ok(())
     }).await?;
     Ok(StatusCode::NO_CONTENT)

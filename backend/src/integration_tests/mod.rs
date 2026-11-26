@@ -30,6 +30,7 @@ mod shares;
 mod twofa;
 mod smart;
 mod telegram;
+mod access;
 mod snapshots;
 mod timelapse;
 mod webdav;

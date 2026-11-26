@@ -7,6 +7,9 @@ import {
   fetchInventoryCategories, createInventoryCategory, updateInventoryCategory, deleteInventoryCategory,
   fetchInventoryItems, createInventoryItem, updateInventoryItem, deleteInventoryItem,
 } from '../api'
+import { useAuth } from '../auth/AuthContext'
+import AccessBadge from '../components/access/AccessBadge'
+import { useAccessLevels } from '../components/access/useAccessLevels'
 import type { InventoryCategory, InventoryItem, ItemStatus } from '../types'
 import { errorMessage } from '../lib/errors'
 
@@ -23,6 +26,9 @@ const FILAMENT_DENSITIES: Record<string, number> = { PLA: 1.24, ABS: 1.04, PETG:
 export default function InventoryPage() {
   const [categories, setCategories] = useState<InventoryCategory[]>([])
   const [items, setItems] = useState<InventoryItem[]>([])
+  const { canModule } = useAuth()
+  const canManageInventory = canModule('inventory', 'gestionar')
+  const access = useAccessLevels('bien', items.map(i => i.id))
   const [loading, setLoading] = useState(true)
   const [selectedCat, setSelectedCat] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -233,6 +239,7 @@ export default function InventoryPage() {
                       {item.cost > 0 && <div className="text-[10px] font-mono" style={{ color: 'var(--accent)' }}>${(item.cost * item.quantity).toLocaleString()}</div>}
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
+                      <AccessBadge kind="bien" id={item.id} level={access.level(item.id)} canManage={canManageInventory} compact onChanged={v => access.set(item.id, v)} />
                       <button onClick={(e) => { e.stopPropagation(); openEditItem(item) }} className="p-1 rounded hover:opacity-80" style={{ color: 'var(--text-secondary)' }}><Pencil size={14} /></button>
                       <button onClick={(e) => { e.stopPropagation(); handleDeleteItem(item.id) }} className="p-1 rounded hover:opacity-80" style={{ color: 'var(--danger)' }}><Trash2 size={14} /></button>
                       {isExpanded ? <ChevronUp size={14} style={{ color: 'var(--text-secondary)' }} /> : <ChevronDown size={14} style={{ color: 'var(--text-secondary)' }} />}

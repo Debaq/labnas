@@ -34,3 +34,4 @@ pub mod portfolio;
 pub mod reports;
 pub mod sensors;
 pub mod roles;
+pub mod access;

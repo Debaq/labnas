@@ -431,6 +431,29 @@ const MIGRATIONS: &[&str] = &[
         UNION ALL SELECT username, 'printing', 1 FROM web_users WHERE role IN ('operador', 'observador') AND perm_impresion = 0
         UNION ALL SELECT username, 'files', 1 FROM web_users WHERE role = 'operador' AND perm_archivos_escritura = 0
         UNION ALL SELECT username, 'files', 2 FROM web_users WHERE role = 'observador' AND perm_archivos_escritura = 1;",
+    // 25: niveles de acceso de cualquier registro o archivo (handlers::access): privado,
+    // con autorizacion (personas con fecha de termino) o publico (enlace con token)
+    "CREATE TABLE IF NOT EXISTS record_access (
+        kind TEXT NOT NULL,
+        record_id TEXT NOT NULL,
+        visibility TEXT NOT NULL DEFAULT 'privado' CHECK (visibility IN ('privado', 'autorizado', 'publico')),
+        public_token TEXT UNIQUE,
+        updated_by TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (kind, record_id)
+    );
+    CREATE TABLE IF NOT EXISTS record_grants (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        record_id TEXT NOT NULL,
+        username TEXT NOT NULL REFERENCES web_users(username) ON DELETE CASCADE ON UPDATE CASCADE,
+        expires_at INTEGER NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        granted_by TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_record_grants_user ON record_grants(username, expires_at);
+    CREATE INDEX IF NOT EXISTS idx_record_grants_record ON record_grants(kind, record_id);",
 ];
 
 /// Migracion 16. Publicada: no modificar (ver `MIGRATIONS`).

@@ -17,6 +17,8 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 const PlaylistEditorPage = lazy(() => import('./pages/PlaylistEditorPage'))
 const MachineDetailPage = lazy(() => import('./pages/MachineDetailPage'))
 const DeviceLinkPage = lazy(() => import('./pages/DeviceLinkPage'))
+const SharedPage = lazy(() => import('./pages/SharedPage'))
+const PublicRecordPage = lazy(() => import('./pages/PublicRecordPage'))
 const SetupWizard = lazy(() => import('./components/SetupWizard'))
 
 function LoadingScreen() {
@@ -52,6 +54,12 @@ function SetupGate() {
 function AppRoutes() {
   const { user, loading, isModuleEnabled, isAdmin, enabledModules } = useAuth()
 
+  // Ficha publica: se ve sin cuenta (ver handlers/access.rs)
+  const publicToken = window.location.pathname.match(/^\/p\/([0-9a-f]{48})$/)?.[1]
+  if (publicToken) {
+    return <Suspense fallback={<LoadingScreen />}><PublicRecordPage token={publicToken} /></Suspense>
+  }
+
   if (loading) {
     return <LoadingScreen />
   }
@@ -79,6 +87,8 @@ function AppRoutes() {
           {/* Rutas no-modulo: siempre disponibles */}
           <Route path="/playlists/:id" element={<PlaylistEditorPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          {/* Lo que otros me autorizaron a ver (niveles de acceso) */}
+          <Route path="/compartido" element={<SharedPage />} />
           {/* labnas-tray: autorizar un dispositivo (se abre desde la bandeja) */}
           <Route path="/vincular" element={<DeviceLinkPage />} />
           <Route path="/admin" element={<Navigate to="/settings" replace />} />
