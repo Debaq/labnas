@@ -161,6 +161,11 @@ fn load_tasks(conn: &Connection, machine_id: Option<&str>) -> rusqlite::Result<V
     Ok(out)
 }
 
+/// Tareas de todas las maquinas en uso (para la pantalla del laboratorio)
+pub fn load_all(conn: &Connection) -> rusqlite::Result<Vec<Task>> {
+    load_tasks(conn, None)
+}
+
 /// Tarea vencida que bloquea las reservas de la maquina (para create_booking)
 pub fn blocking_task(conn: &Connection, machine_id: &str) -> rusqlite::Result<Option<String>> {
     Ok(load_tasks(conn, Some(machine_id))?.into_iter().find(|t| t.blocks && t.level == "vencida").map(|t| t.title))

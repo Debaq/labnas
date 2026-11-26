@@ -19,6 +19,7 @@ const MachineDetailPage = lazy(() => import('./pages/MachineDetailPage'))
 const DeviceLinkPage = lazy(() => import('./pages/DeviceLinkPage'))
 const SharedPage = lazy(() => import('./pages/SharedPage'))
 const PublicRecordPage = lazy(() => import('./pages/PublicRecordPage'))
+const DisplayPage = lazy(() => import('./pages/DisplayPage'))
 const SetupWizard = lazy(() => import('./components/SetupWizard'))
 
 function LoadingScreen() {
@@ -58,6 +59,11 @@ function AppRoutes() {
   const publicToken = window.location.pathname.match(/^\/p\/([0-9a-f]{48})$/)?.[1]
   if (publicToken) {
     return <Suspense fallback={<LoadingScreen />}><PublicRecordPage token={publicToken} /></Suspense>
+  }
+  // Pantalla del laboratorio (TV o tablet): sin sesion (ver handlers/display.rs)
+  const screenToken = window.location.pathname.match(/^\/pantalla\/([0-9a-f]{40})$/)?.[1]
+  if (screenToken) {
+    return <Suspense fallback={<LoadingScreen />}><DisplayPage token={screenToken} /></Suspense>
   }
 
   if (loading) {

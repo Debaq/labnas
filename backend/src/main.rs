@@ -756,6 +756,10 @@ fn api_routes() -> Router<AppState> {
         .route("/api/machines/{id}/certifications", post(handlers::machine_certs::grant))
         .route("/api/machines/{id}/certifications/request", post(handlers::machine_certs::request))
         .route("/api/machines/{id}/certifications/{username}", delete(handlers::machine_certs::revoke))
+        // Pantalla del laboratorio (handlers::display): admin y datos publicos por token
+        .route("/api/display/screens", get(handlers::display::list_screens).post(handlers::display::create_screen))
+        .route("/api/display/screens/{token}", put(handlers::display::update_screen).delete(handlers::display::delete_screen))
+        .route("/api/pantalla/{token}", get(handlers::display::display_data))
         // Niveles de acceso: privado / con autorizacion / publico (handlers::access)
         .route("/api/access", get(handlers::access::get_access).put(handlers::access::set_access))
         .route("/api/access/levels", get(handlers::access::get_levels))

@@ -65,6 +65,21 @@ fn finish_timelapse(state: &AppState, printer_name: String, dir: std::path::Path
     });
 }
 
+/// Ultimo estado de cada impresora segun el monitor: (nombre, estado si respondio). Lo usa
+/// la pantalla del laboratorio para no consultar las impresoras en cada recarga.
+type StatusSnapshot = (Option<std::time::Instant>, Vec<(String, Option<Printer3DStatus>)>);
+static LAST_STATUS: std::sync::LazyLock<std::sync::Mutex<StatusSnapshot>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// Estado de las impresoras visto por el monitor en los ultimos 2 minutos (vacio si no corre)
+pub fn cached_statuses() -> Vec<(String, Option<Printer3DStatus>)> {
+    let Ok(m) = LAST_STATUS.lock() else { return Vec::new() };
+    match m.0 {
+        Some(at) if at.elapsed() < Duration::from_secs(120) => m.1.clone(),
+        _ => Vec::new(),
+    }
+}
+
 /// Ultimo estado visto de cada impresora (imprimiendo, cuando): la deteccion de
 /// impresion fallida solo analiza mientras imprime
 static PRINTING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, (bool, std::time::Instant)>>> =
@@ -185,6 +200,10 @@ pub async fn printer_monitor_loop(state: AppState) {
             printers.iter().map(|p| async move { fetch_status(client, p).await.ok().map(|Json(s)| s) }),
         )
         .await;
+
+        if let Ok(mut m) = LAST_STATUS.lock() {
+            *m = (Some(std::time::Instant::now()), printers.iter().map(|p| p.name.clone()).zip(results.iter().cloned()).collect());
+        }
 
         if live {
             let map: std::collections::HashMap<&str, &Printer3DStatus> = printers

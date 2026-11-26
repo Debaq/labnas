@@ -3,6 +3,7 @@ import { Building2, ExternalLink, Plus, Pencil, Trash2 } from 'lucide-react'
 import { themes, getThemeNames, type ThemeName } from '../../themes/themes'
 import { getBranding, setBranding, getServices, addService, deleteService, updateService, fetchHealth, type LabBranding, type LabService } from '../../api'
 import { errorMessage } from '../../lib/errors'
+import DisplayScreensSection from './DisplayScreensSection'
 
 export default function LabTab() {
   const [branding, setBrandingState] = useState<LabBranding | null>(null)
@@ -292,6 +293,8 @@ export default function LabTab() {
           )}
         </div>
       </section>
+
+      <DisplayScreensSection />
     </>
   )
 }

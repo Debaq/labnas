@@ -269,6 +269,11 @@ fn maintenance_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Resul
     Ok(out)
 }
 
+/// Plazos sin cumplir que vencen dentro de `days` dias (y los vencidos), para la pantalla
+pub(crate) fn upcoming(conn: &Connection, days: i64) -> rusqlite::Result<Vec<Deadline>> {
+    Ok(active_deadlines(conn, today())?.into_iter().filter(|d| d.days_left <= days).collect())
+}
+
 /// Todos los plazos activos (sin los cumplidos), ordenados por fecha
 fn active_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Result<Vec<Deadline>> {
     let mut stmt = conn.prepare(&format!("{} WHERE d.done_at IS NULL", SELECT))?;

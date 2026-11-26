@@ -13,6 +13,7 @@ mod ledger;
 mod machines;
 mod maintenance;
 mod deadlines;
+mod display;
 mod device_tokens;
 mod files;
 mod folders;

@@ -44,6 +44,8 @@ fn is_public(path: &str) -> bool {
     ) || crate::modules::is_public(path)
         // fichas publicas por token (handlers::access; el modulo del registro tiene que estar encendido)
         || path.starts_with("/api/public/")
+        // pantalla del laboratorio: solo lectura, por token (handlers::display)
+        || path.starts_with("/api/pantalla/")
 }
 
 /// Rutas que no se atienden por el puente PHP (devuelve el motivo)

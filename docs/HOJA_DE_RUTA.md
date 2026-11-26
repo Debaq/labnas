@@ -293,8 +293,10 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
 - [ ] **23. Una sola cola para todas las máquinas** (3D, láser, CNC, vinilo) con
       tiempo y costo estimados. Generaliza la cola que ya tiene el módulo de
       impresoras 3D.
-- [ ] **8 + 47. Pantalla de estado** (tablet o TV): máquinas en uso, tiempo
-      restante, cola del día, temperaturas, alertas y ocupación.
+- [x] **8 + 47. Pantalla de estado** (tablet o TV): máquinas en uso, tiempo
+      restante, cola del día, temperaturas, alertas y ocupación. *(hecho:
+      `docs/PANTALLA.md`; enlace secreto de solo lectura por pantalla, con secciones a
+      elegir. La ocupación de personas llega con el registro de entrada, idea 48)*
 - [ ] **48. Registro de entrada** con QR o tarjeta: cuántas personas vienen y de qué
       carrera.
 

@@ -486,6 +486,15 @@ const MIGRATIONS: &[&str] = &[
         done_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_maint_log_machine ON machine_maintenance_log(machine_id, done_at);",
+    // 27: pantallas del laboratorio (ideas 8 y 47): enlace secreto de solo lectura por equipo
+    "CREATE TABLE IF NOT EXISTS display_screens (
+        token TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        sections TEXT NOT NULL DEFAULT '[]',
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        last_seen_at TEXT
+    );",
 ];
 
 /// Migracion 16. Publicada: no modificar (ver `MIGRATIONS`).
