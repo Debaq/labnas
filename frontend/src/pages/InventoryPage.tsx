@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Scissors,
+import { Scissors, Recycle,
   Package, Plus, Trash2, Pencil, X, Loader2, Search,
   MapPin, ChevronDown, ChevronUp, ExternalLink,
 } from 'lucide-react'
@@ -13,6 +13,7 @@ import AccessBadge from '../components/access/AccessBadge'
 import ItemLoans from '../components/inventory/ItemLoans'
 import LoansPanel from '../components/inventory/LoansPanel'
 import OffcutsPanel from '../components/inventory/OffcutsPanel'
+import RecyclingPanel from '../components/inventory/RecyclingPanel'
 import { useAccessLevels } from '../components/access/useAccessLevels'
 import type { InventoryCategory, InventoryItem, ItemStatus } from '../types'
 import { errorMessage } from '../lib/errors'
@@ -41,7 +42,7 @@ export default function InventoryPage() {
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
   const [editingCat, setEditingCat] = useState<InventoryCategory | null>(null)
   const [expandedItem, setExpandedItem] = useState<string | null>(null)
-  const [showOffcuts, setShowOffcuts] = useState(false)
+  const [view, setView] = useState<'items' | 'retazos' | 'reciclaje'>('items')
 
   // Form state
   const [form, setForm] = useState<Partial<InventoryItem>>({})
@@ -203,9 +204,13 @@ export default function InventoryPage() {
               className="w-full pl-9 pr-3 py-2 rounded-lg text-sm outline-none"
               style={inputStyle} />
           </div>
-          <button onClick={() => setShowOffcuts(v => !v)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium shrink-0"
-            style={{ backgroundColor: showOffcuts ? 'var(--accent)' : 'var(--bg-tertiary)', color: showOffcuts ? '#fff' : 'var(--text-primary)' }}>
+          <button onClick={() => setView(v => (v === 'retazos' ? 'items' : 'retazos'))} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium shrink-0"
+            style={{ backgroundColor: view === 'retazos' ? 'var(--accent)' : 'var(--bg-tertiary)', color: view === 'retazos' ? '#fff' : 'var(--text-primary)' }}>
             <Scissors size={16} /> Retazos
+          </button>
+          <button onClick={() => setView(v => (v === 'reciclaje' ? 'items' : 'reciclaje'))} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium shrink-0"
+            style={{ backgroundColor: view === 'reciclaje' ? 'var(--accent)' : 'var(--bg-tertiary)', color: view === 'reciclaje' ? '#fff' : 'var(--text-primary)' }}>
+            <Recycle size={16} /> Reciclaje
           </button>
           <button onClick={() => openNewItem()} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium shrink-0"
             style={{ backgroundColor: 'var(--accent)', color: '#fff' }}>
@@ -213,8 +218,10 @@ export default function InventoryPage() {
           </button>
         </div>
 
-        {showOffcuts ? (
+        {view === 'retazos' ? (
           <OffcutsPanel />
+        ) : view === 'reciclaje' ? (
+          <RecyclingPanel />
         ) : loading ? (
           <div className="flex justify-center py-16"><Loader2 size={24} className="animate-spin" style={{ color: 'var(--accent)' }} /></div>
         ) : filteredItems.length === 0 ? (

@@ -691,6 +691,18 @@ const MIGRATIONS: &[&str] = &[
         taken_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_offcuts_open ON offcuts(taken_at, material);",
+    // 36: reciclaje: kilos triturados, filamento recuperado y desecho por material (idea 36)
+    "CREATE TABLE IF NOT EXISTS recycling_log (
+        id TEXT PRIMARY KEY,
+        date TEXT NOT NULL,
+        material TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        kg REAL NOT NULL,
+        notes TEXT NOT NULL DEFAULT '',
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_recycling_date ON recycling_log(date);",
 
 ];
 

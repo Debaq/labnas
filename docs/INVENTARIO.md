@@ -31,3 +31,10 @@ material, espesor, medidas, dónde está y foto.
   muestran los retazos que alcanzan, los más chicos primero (se pueden girar).
 - Quien lo usa toca **Lo tomé** y sale de la lista.
 - Lo agrega cualquiera con acceso a Inventario; lo borra quien lo subió o quien gestiona.
+
+## Reciclaje
+
+Botón **Reciclaje** en Inventario: se anota cada movimiento de plástico con fecha, material
+y kilos, en tres tipos: **triturado**, **filamento recuperado** y **desecho** (lo que no se
+pudo reciclar). Arriba se ven los totales del último año y el porcentaje reaprovechado, un
+gráfico por mes y la lista de movimientos. Sirve para informes de sostenibilidad.

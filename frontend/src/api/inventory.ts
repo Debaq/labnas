@@ -147,3 +147,43 @@ export async function deleteOffcut(id: string): Promise<void> {
 export function offcutPhotoUrl(id: string): string {
   return `/api/inventory/offcuts/${encodeURIComponent(id)}/photo`
 }
+
+// --- Reciclaje (backend/src/handlers/recycling.rs) ---
+
+export type RecyclingKind = 'triturado' | 'recuperado' | 'desecho'
+
+export interface RecyclingEntry {
+  id: string
+  date: string
+  material: string
+  kind: RecyclingKind
+  kg: number
+  notes: string
+  created_by: string
+}
+
+export interface RecyclingSummary {
+  entries: RecyclingEntry[]
+  by_month: [string, RecyclingKind, number][]
+  by_material: [string, RecyclingKind, number][]
+  total_triturado: number
+  total_recuperado: number
+  total_desecho: number
+}
+
+export async function fetchRecycling(): Promise<RecyclingSummary> {
+  const res = await api('/api/inventory/recycling')
+  if (!res.ok) throw new Error('Error al leer el reciclaje')
+  return res.json()
+}
+
+export async function addRecycling(data: { date: string; material: string; kind: RecyclingKind; kg: number; notes: string }): Promise<RecyclingEntry> {
+  const res = await api('/api/inventory/recycling', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al guardar')
+  return res.json()
+}
+
+export async function deleteRecycling(id: string): Promise<void> {
+  const res = await api(`/api/inventory/recycling/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al borrar')
+}

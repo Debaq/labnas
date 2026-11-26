@@ -324,8 +324,9 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       ítems prestables, préstamo con fecha de devolución y aviso diario si se atrasa)*
 - [ ] **35. Lista de materiales desde KiCad:** revisa el stock y arma el pedido de lo
       que falta.
-- [ ] **36. Reciclaje:** kilos triturados y filamento recuperado, para métricas de
-      sostenibilidad.
+- [x] **36. Reciclaje:** kilos triturados y filamento recuperado, para métricas de
+      sostenibilidad. *(hecho en Inventario: movimientos por material, totales del año,
+      porcentaje reaprovechado y gráfico por mes)*
 - [ ] **37. Cotizador automático:** gramos, superficie cortada, minutos de máquina y
       energía → precio. La impresión de papel ya calcula costo por usuario; se extiende
       al resto de las máquinas.

@@ -115,3 +115,29 @@ async fn retazos() {
     assert_eq!(s.delete(&format!("/api/inventory/offcuts/{}", g), &bob).await.status, 403);
     assert_eq!(s.delete(&format!("/api/inventory/offcuts/{}", g), &ana).await.status, 204);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reciclaje() {
+    let s = Server::start().await;
+    let admin = s.admin().await;
+    let ana = s.user(&admin, "ana", "observador").await;
+    let bob = s.user(&admin, "bob", "observador").await;
+    let hoy = day(0);
+
+    assert_eq!(s.post("/api/inventory/recycling", &ana, json!({ "date": day(1), "material": "PLA", "kind": "triturado", "kg": 1 })).await.status, 400, "futuro");
+    assert_eq!(s.post("/api/inventory/recycling", &ana, json!({ "date": hoy, "material": "PLA", "kind": "quemado", "kg": 1 })).await.status, 400);
+    let e = s.post("/api/inventory/recycling", &ana, json!({ "date": hoy, "material": "PLA", "kind": "triturado", "kg": 2.5 })).await;
+    assert_eq!(e.status, 201);
+    s.post("/api/inventory/recycling", &bob, json!({ "date": hoy, "material": "PLA", "kind": "recuperado", "kg": 1.5 })).await;
+    s.post("/api/inventory/recycling", &bob, json!({ "date": hoy, "material": "TPU", "kind": "desecho", "kg": 0.5 })).await;
+
+    let r = s.get("/api/inventory/recycling", &ana).await.json();
+    assert_eq!(r["total_triturado"], 2.5);
+    assert_eq!(r["total_recuperado"], 1.5);
+    assert_eq!(r["total_desecho"], 0.5);
+    assert_eq!(r["entries"].as_array().unwrap().len(), 3);
+
+    let id = e.json()["id"].as_str().unwrap().to_string();
+    assert_eq!(s.delete(&format!("/api/inventory/recycling/{}", id), &bob).await.status, 403);
+    assert_eq!(s.delete(&format!("/api/inventory/recycling/{}", id), &ana).await.status, 204);
+}
