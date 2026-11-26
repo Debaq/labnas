@@ -9,7 +9,7 @@ export type DeadlineNotify = 'creador' | 'staff' | 'todos'
 export interface Deadline {
   /** Unico entre fuentes: `d:<id>`, `p:<proyecto>`, `m:<proyecto>:<hito>` */
   key: string
-  source: 'manual' | 'proyecto' | 'hito' | 'induccion'
+  source: 'manual' | 'proyecto' | 'hito' | 'induccion' | 'mantencion'
   /** Solo los contadores sueltos (`manual`) */
   id: string | null
   title: string

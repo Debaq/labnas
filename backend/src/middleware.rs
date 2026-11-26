@@ -191,6 +191,8 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         ("GET", ["machines", ..]) => Ver,
         ("POST", ["machines", _, "bookings"]) | ("POST", ["machines", _, "faults"]) => Usar,
         ("POST", ["machines", "bookings", _, "cancel"]) => Usar,
+        // Bitacora de mantencion: el staff o el responsable de la maquina (lo revisa el handler)
+        ("POST", ["machines", _, "maintenance", "log"]) => Usar,
         // Induccion: pedirla (y retirar la propia solicitud, el handler lo limita)
         ("POST", ["machines", _, "certifications", "request"]) => Usar,
         ("DELETE", ["machines", _, "certifications", _]) => Usar,

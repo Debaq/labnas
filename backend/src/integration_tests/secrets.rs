@@ -64,6 +64,7 @@ async fn migracion_cifra_secretos_en_claro() {
              ALTER TABLE backup_jobs DROP COLUMN restic_password;
              ALTER TABLE backup_jobs DROP COLUMN restic_env;
              ALTER TABLE machines DROP COLUMN requires_certification;
+             ALTER TABLE machines DROP COLUMN usage_adjust_hours;
              ALTER TABLE camera_detections DROP COLUMN tg_sent;
              ALTER TABLE camera_detections DROP COLUMN tg_error;",
         )

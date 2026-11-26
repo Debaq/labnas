@@ -284,8 +284,12 @@ Con 7 módulos nuevos en camino, conviene ordenar esto primero:
       certificación y registro de horas. *(en parte: el módulo Máquinas ya reserva sin
       choques, con aprobación opcional, recordatorio y exigencia de inducción; falta
       registrar las horas reales de uso —idea 19—)*
-- [ ] **5. Mantenimiento y calibración:** bitácora por equipo y recordatorios (por
-      fecha o por horas de uso: boquilla tras X kg, lente láser tras X horas).
+- [x] **5. Mantenimiento y calibración:** bitácora por equipo y recordatorios (por
+      fecha o por horas de uso: boquilla tras X kg, lente láser tras X horas). *(hecho en
+      el módulo Máquinas: plan por días y/o horas de uso, las de fecha en Plazos y las de
+      horas con aviso por Telegram, tareas que bloquean reservas al vencer, bitácora con
+      foto y horómetro. Las horas salen de las reservas hasta que exista el medidor de la
+      idea 19; los kilos de filamento quedan pendientes)*
 - [ ] **23. Una sola cola para todas las máquinas** (3D, láser, CNC, vinilo) con
       tiempo y costo estimados. Generaliza la cola que ya tiene el módulo de
       impresoras 3D.

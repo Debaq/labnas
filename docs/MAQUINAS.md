@@ -15,7 +15,9 @@ Viene encendido. Se apaga en **Configuración > Laboratorio > Módulos**.
 | Crear y editar máquinas, cambiar la foto, imprimir el QR | Operadores y administradores |
 | Aprobar o rechazar reservas, bloquear horarios, cancelar reservas ajenas, marcar fallas reparadas | Operadores y administradores |
 | Dar, renovar o quitar inducciones | Operadores y administradores |
-| Eliminar una máquina (con sus reservas y fallas) | Administradores |
+| Armar el plan de mantención y fijar las horas de uso | Operadores, técnicos y administradores |
+| Registrar mantenciones en la bitácora | El responsable de la máquina, operadores, técnicos y administradores |
+| Eliminar una máquina (con sus reservas, fallas y bitácora) | Administradores |
 
 Todo queda en la **auditoría** (Configuración > Sistema).
 
@@ -61,6 +63,31 @@ pedirla de nuevo.
 
 El historial de fallas queda en la ficha.
 
+## Mantención y calibración
+
+Cada máquina tiene en su ficha un **plan** de tareas que se repiten y una **bitácora**.
+
+- **Tareas del plan** (las arma un operador o técnico): por ejemplo «Limpiar el lente»
+  cada 40 horas de uso o «Calibrar la cama» cada 30 días; pueden ser por fecha, por horas
+  o por lo que pase primero. Cada una muestra cuánto falta: *al día*, *pronto* o *vencida*.
+  - Las de **fecha** aparecen en **Plazos**, con sus avisos a 30, 7 y 1 día y el mismo día.
+  - Las de **horas de uso** avisan por Telegram al vencer, al responsable de la máquina y a
+    quienes gestionan Máquinas.
+  - Una tarea puede **bloquear las reservas** mientras esté vencida (revisiones de
+    seguridad); el staff igual puede reservar, por ejemplo para hacer la mantención.
+- **Registrar**: el responsable de la máquina, un operador o un técnico toca **Hecho** en la
+  tarea (con nota y foto opcionales) y la tarea vuelve a contar desde ese momento. También se
+  puede **anotar en la bitácora** algo suelto: una calibración, una reparación, una nota.
+- **Bitácora**: quién hizo qué, cuándo y con cuántas horas de uso tenía la máquina. No se
+  edita ni se borra; quitar una tarea del plan conserva lo registrado. Las fallas reparadas
+  entran solas.
+- **Horas de uso**: se suman las reservas confirmadas ya terminadas. Si la máquina tiene
+  horómetro, un operador lo lee y lo **fija** en la ficha; desde ahí se siguen sumando las
+  reservas. Cuando exista el medidor de corriente (idea 19) se usará su lectura.
+
+La pestaña **Mantención** de Máquinas (staff) junta las tareas de todas las máquinas, las
+vencidas primero.
+
 ## Etiqueta QR
 
 En la ficha, **Etiqueta QR → Imprimir etiqueta**. El QR lleva la dirección con que se
@@ -76,5 +103,5 @@ Notificaciones). Sin chat vinculado, la persona solo ve el aviso en la web.
 ## Lo que viene
 
 Este módulo es la base de varias ideas de la hoja de ruta: llave electrónica que solo
-habilita a quien tiene la inducción (18), mantenimiento por horas de uso (5) y una sola
-cola para todas las máquinas (23).
+habilita a quien tiene la inducción (18), horas de uso reales con un medidor de corriente
+(19) y una sola cola para todas las máquinas (23).

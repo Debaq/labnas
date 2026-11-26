@@ -267,7 +267,7 @@ fn operator_usernames(conn: &Connection) -> rusqlite::Result<Vec<String>> {
 // ─── Fotos ───
 
 /// Decodifica una foto en base64 (acepta prefijo `data:...;base64,`) y valida que sea JPEG o PNG
-fn decode_photo(data: &str) -> Result<(Vec<u8>, &'static str), ApiError> {
+pub(crate) fn decode_photo(data: &str) -> Result<(Vec<u8>, &'static str), ApiError> {
     let b64 = data.split_once("base64,").map(|(_, b)| b).unwrap_or(data).trim();
     if b64.len() > MAX_PHOTO * 4 / 3 + 8 {
         return Err(bad("La foto pesa mas de 2 MB"));
@@ -286,7 +286,7 @@ fn decode_photo(data: &str) -> Result<(Vec<u8>, &'static str), ApiError> {
     Ok((bytes, mime))
 }
 
-fn insert_photo(conn: &Connection, machine_id: &str, bytes: &[u8], mime: &str, user: &str) -> rusqlite::Result<String> {
+pub(crate) fn insert_photo(conn: &Connection, machine_id: &str, bytes: &[u8], mime: &str, user: &str) -> rusqlite::Result<String> {
     let id = new_id();
     conn.execute(
         "INSERT INTO machine_photos (id, machine_id, data, mime, created_by, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -463,7 +463,7 @@ pub async fn delete_machine(
             .optional()
             .map_err(db_err)?
             .ok_or_else(not_found)?;
-        for table in ["machine_bookings", "machine_faults", "machine_photos", "machine_certifications"] {
+        for table in ["machine_bookings", "machine_faults", "machine_photos", "machine_certifications", "machine_maintenance_tasks", "machine_maintenance_log"] {
             conn.execute(&format!("DELETE FROM {} WHERE machine_id = ?1", table), [&id]).map_err(db_err)?;
         }
         conn.execute("DELETE FROM machines WHERE id = ?1", [&id]).map_err(db_err)?;
@@ -691,6 +691,11 @@ pub async fn create_booking(
                 "fuera_servicio" => return Err(conflict("La maquina esta fuera de servicio hasta que la reparen")),
                 "retirada" => return Err(conflict("La maquina fue retirada")),
                 _ => {}
+            }
+            if !staff {
+                if let Some(t) = crate::handlers::machine_maintenance::blocking_task(&tx, &machine_id).map_err(db_err)? {
+                    return Err(conflict(format!("La mantencion «{}» de {} esta vencida: no se puede reservar hasta que la registren", t, m.name)));
+                }
             }
             if m.requires_certification && !staff && !crate::handlers::machine_certs::is_certified(&tx, &machine_id, &user).map_err(db_err)? {
                 return Err(forbidden(&format!("Para reservar {} necesitas la induccion. Pidela desde la ficha de la maquina.", m.name)));
@@ -970,6 +975,10 @@ pub async fn resolve_fault(
                 .map_err(db_err)?
                 > 0;
         let name: String = tx.query_row("SELECT name FROM machines WHERE id = ?1", [&f.machine_id], |r| r.get(0)).unwrap_or_default();
+        // La reparacion queda en la bitacora de mantencion
+        let what: String = f.description.chars().take(100).collect();
+        crate::handlers::machine_maintenance::insert_log(&tx, &f.machine_id, None, "reparacion", &format!("Falla reparada: {}", what), &note, None, &user)
+            .map_err(db_err)?;
         let mut owners = if available { future_booking_users(&tx, &f.machine_id, &user).map_err(db_err)? } else { Vec::new() };
         if f.reported_by != user && !owners.contains(&f.reported_by) {
             owners.push(f.reported_by.clone());

@@ -454,6 +454,38 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX IF NOT EXISTS idx_record_grants_user ON record_grants(username, expires_at);
     CREATE INDEX IF NOT EXISTS idx_record_grants_record ON record_grants(kind, record_id);",
+    // 26: mantenimiento y calibracion por maquina (idea 5): plan de tareas por dias y/o
+    // horas de uso, bitacora que no se edita y ajuste de horas por horometro
+    "ALTER TABLE machines ADD COLUMN usage_adjust_hours REAL NOT NULL DEFAULT 0;
+    CREATE TABLE IF NOT EXISTS machine_maintenance_tasks (
+        id TEXT PRIMARY KEY,
+        machine_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'mantencion',
+        every_days INTEGER,
+        every_hours REAL,
+        instructions TEXT NOT NULL DEFAULT '',
+        blocks INTEGER NOT NULL DEFAULT 0,
+        last_done_at TEXT,
+        last_done_hours REAL,
+        hours_alerted REAL,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_maint_tasks_machine ON machine_maintenance_tasks(machine_id);
+    CREATE TABLE IF NOT EXISTS machine_maintenance_log (
+        id TEXT PRIMARY KEY,
+        machine_id TEXT NOT NULL,
+        task_id TEXT,
+        kind TEXT NOT NULL,
+        title TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        usage_hours REAL NOT NULL DEFAULT 0,
+        photo_id TEXT,
+        done_by TEXT NOT NULL,
+        done_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_maint_log_machine ON machine_maintenance_log(machine_id, done_at);",
 ];
 
 /// Migracion 16. Publicada: no modificar (ver `MIGRATIONS`).

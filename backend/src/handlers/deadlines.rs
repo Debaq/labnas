@@ -85,7 +85,7 @@ fn publish(state: &AppState) {
 pub struct Deadline {
     /// Unico entre todas las fuentes: `d:<id>`, `p:<proyecto>` o `m:<proyecto>:<hito>`
     pub key: String,
-    /// manual | proyecto | hito | induccion
+    /// manual | proyecto | hito | induccion | mantencion
     pub source: &'static str,
     /// Id del contador suelto (solo `manual`)
     pub id: Option<String>,
@@ -236,6 +236,39 @@ fn certification_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Res
     Ok(out)
 }
 
+/// Mantenciones y calibraciones por fecha de las maquinas (hasta 30 dias pasadas: despues
+/// siguen vencidas en la ficha de la maquina)
+fn maintenance_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Result<Vec<Deadline>> {
+    if !module_on(conn, "machines") {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for (t, responsible) in crate::handlers::machine_maintenance::dated_tasks(conn)? {
+        let Some(due) = t.due_date.clone() else { continue };
+        let what = if t.kind == "calibracion" { "Calibracion" } else { "Mantencion" };
+        let d = Deadline {
+            key: format!("mt:{}:{}", t.id, due),
+            source: "mantencion",
+            id: None,
+            title: format!("{}: {} ({})", what, t.title, t.machine_name),
+            project: None,
+            portfolio_id: None,
+            category: "otro".into(),
+            due_date: due,
+            days_left: 0,
+            level: "ok",
+            notes: String::new(),
+            notify: "staff".into(),
+            created_by: None,
+            done_at: None,
+            done_by: None,
+            participants: responsible.into_iter().collect(),
+        };
+        out.extend(finish(d, today).filter(|d| d.days_left >= -30));
+    }
+    Ok(out)
+}
+
 /// Todos los plazos activos (sin los cumplidos), ordenados por fecha
 fn active_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Result<Vec<Deadline>> {
     let mut stmt = conn.prepare(&format!("{} WHERE d.done_at IS NULL", SELECT))?;
@@ -247,6 +280,7 @@ fn active_deadlines(conn: &Connection, today: NaiveDate) -> rusqlite::Result<Vec
         .collect();
     list.extend(portfolio_deadlines(conn, today)?);
     list.extend(certification_deadlines(conn, today)?);
+    list.extend(maintenance_deadlines(conn, today)?);
     list.sort_by(|a, b| a.due_date.cmp(&b.due_date).then_with(|| a.title.cmp(&b.title)));
     Ok(list)
 }
@@ -480,8 +514,10 @@ fn countdown_text(days: i64) -> String {
 
 /// Quienes reciben el aviso: `None` = todos los chats aprobados
 fn recipients(conn: &Connection, d: &Deadline) -> rusqlite::Result<Option<Vec<String>>> {
+    // Las mantenciones de maquinas van a quienes gestionan Maquinas
+    let module = if d.source == "mantencion" { "machines" } else { "deadlines" };
     let staff = || -> rusqlite::Result<Vec<String>> {
-        crate::roles::users_with_level(conn, "deadlines", crate::roles::Level::Gestionar)
+        crate::roles::users_with_level(conn, module, crate::roles::Level::Gestionar)
     };
     let mut users: Vec<String> = match (d.source, d.notify.as_str()) {
         ("manual", "todos") => return Ok(None),

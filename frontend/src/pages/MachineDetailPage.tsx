@@ -30,6 +30,7 @@ import { useToast } from '../components/ToastContext'
 import MachineFormModal from '../components/machines/MachineFormModal'
 import MachineStatusChip from '../components/machines/MachineStatusChip'
 import InductionPanel from '../components/machines/InductionPanel'
+import MaintenancePanel from '../components/machines/MaintenancePanel'
 
 const inputStyle = { backgroundColor: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--input-border)' }
 const card = { backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)' }
@@ -246,6 +247,8 @@ export default function MachineDetailPage() {
       )}
 
       <InductionPanel machine={m} certs={certs} me={user?.username ?? ''} staff={staff} onChange={load} />
+
+      <MaintenancePanel machine={m} me={user?.username ?? ''} staff={staff} />
 
       {/* Reservas del dia */}
       <div className="rounded-xl p-4 space-y-3" style={card}>

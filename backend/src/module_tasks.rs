@@ -53,7 +53,11 @@ fn spawn_for(state: &AppState, id: &str) -> Vec<JoinHandle<()>> {
             tokio::spawn(handlers::cameras::detect::detection_loop(s())),
         ],
         // Maquinas: recordatorio por Telegram antes de cada reserva
-        "machines" => vec![tokio::spawn(handlers::machines::reminder_loop(s()))],
+        "machines" => vec![
+            tokio::spawn(handlers::machines::reminder_loop(s())),
+            // Mantencion por horas de uso: aviso al vencer
+            tokio::spawn(handlers::machine_maintenance::alert_loop(s())),
+        ],
         "deadlines" => vec![tokio::spawn(handlers::deadlines::alert_loop(s()))],
         _ => Vec::new(),
     }

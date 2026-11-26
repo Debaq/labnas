@@ -202,6 +202,120 @@ export async function resolveFault(faultId: string, note: string): Promise<Machi
   return jsonOrThrow(await api(`/api/machines/faults/${encodeURIComponent(faultId)}/resolve`, post({ note })), 'Error al cerrar la falla')
 }
 
+// --- Mantenimiento y calibracion (idea 5) ---
+
+export type MaintenanceLevel = 'ok' | 'pronto' | 'vencida'
+
+export interface MaintenanceTask {
+  id: string
+  machine_id: string
+  machine_name: string
+  title: string
+  kind: 'mantencion' | 'calibracion'
+  every_days: number | null
+  every_hours: number | null
+  instructions: string
+  /** Mientras este vencida, la maquina no admite reservas (salvo el staff) */
+  blocks: boolean
+  last_done_at: string | null
+  last_done_hours: number
+  created_at: string
+  due_date: string | null
+  days_left: number | null
+  hours_left: number | null
+  level: MaintenanceLevel
+}
+
+export interface MaintenanceLog {
+  id: string
+  machine_id: string
+  task_id: string | null
+  kind: 'mantencion' | 'calibracion' | 'reparacion' | 'nota'
+  title: string
+  note: string
+  usage_hours: number
+  photo_id: string | null
+  done_by: string
+  done_at: string
+}
+
+export interface MaintenanceOverview {
+  usage_hours: number
+  booked_hours: number
+  adjust_hours: number
+  tasks: MaintenanceTask[]
+  log: MaintenanceLog[]
+}
+
+export interface MaintenanceTaskInput {
+  title: string
+  kind: 'mantencion' | 'calibracion'
+  every_days: number | null
+  every_hours: number | null
+  instructions: string
+  blocks: boolean
+}
+
+const mUrl = (id: string) => `/api/machines/${encodeURIComponent(id)}`
+
+export async function fetchMaintenance(machineId: string): Promise<MaintenanceOverview> {
+  return jsonOrThrow(await api(`${mUrl(machineId)}/maintenance`), 'Error al leer la mantencion')
+}
+
+export async function fetchAllMaintenance(): Promise<MaintenanceTask[]> {
+  return jsonOrThrow(await api('/api/machines/maintenance'), 'Error al leer la mantencion')
+}
+
+export async function createMaintenanceTask(machineId: string, data: MaintenanceTaskInput): Promise<MaintenanceTask> {
+  return jsonOrThrow(await api(`${mUrl(machineId)}/maintenance/tasks`, post(data)), 'Error al crear la tarea')
+}
+
+export async function updateMaintenanceTask(taskId: string, data: MaintenanceTaskInput): Promise<MaintenanceTask> {
+  return jsonOrThrow(await api(`/api/machines/maintenance/tasks/${encodeURIComponent(taskId)}`, { ...post(data), method: 'PUT' }), 'Error al guardar la tarea')
+}
+
+export async function deleteMaintenanceTask(taskId: string): Promise<void> {
+  const res = await api(`/api/machines/maintenance/tasks/${encodeURIComponent(taskId)}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error((await res.text()) || 'Error al quitar la tarea')
+}
+
+export async function addMaintenanceLog(
+  machineId: string,
+  data: { task_id?: string; kind?: string; title?: string; note?: string; photo?: string },
+): Promise<MaintenanceOverview> {
+  return jsonOrThrow(await api(`${mUrl(machineId)}/maintenance/log`, post(data)), 'Error al registrar')
+}
+
+export async function setMachineUsage(machineId: string, hours: number): Promise<MaintenanceOverview> {
+  return jsonOrThrow(await api(`${mUrl(machineId)}/usage`, { ...post({ hours }), method: 'PUT' }), 'Error al fijar las horas')
+}
+
+export const MAINTENANCE_LEVEL: Record<MaintenanceLevel, { label: string; color: string }> = {
+  ok: { label: 'Al dia', color: 'var(--success)' },
+  pronto: { label: 'Pronto', color: 'var(--warning, #d97706)' },
+  vencida: { label: 'Vencida', color: 'var(--danger)' },
+}
+
+/** Cuanto falta para una tarea, en texto */
+export function maintenanceDue(t: MaintenanceTask): string {
+  const parts: string[] = []
+  if (t.days_left !== null) {
+    parts.push(t.days_left < 0 ? `vencio hace ${-t.days_left} d` : t.days_left === 0 ? 'toca hoy' : `en ${t.days_left} d`)
+  }
+  if (t.hours_left !== null) {
+    parts.push(t.hours_left <= 0 ? `pasada por ${Math.abs(t.hours_left)} h de uso` : `en ${t.hours_left} h de uso`)
+  }
+  return parts.join(' · ')
+}
+
+/** Cada cuanto se hace, en texto */
+export function maintenanceEvery(t: { every_days: number | null; every_hours: number | null }): string {
+  const parts: string[] = []
+  if (t.every_days) parts.push(`cada ${t.every_days} dias`)
+  if (t.every_hours) parts.push(`cada ${t.every_hours} h de uso`)
+  return parts.join(' o ')
+}
+
 // --- Utilidades de fecha (hora local, mismo formato que el servidor) ---
 
 const pad = (n: number) => String(n).padStart(2, '0')

@@ -18,6 +18,11 @@ import {
   type MachineBooking,
   type MachineCertification,
   type MachineKind,
+  type MaintenanceTask,
+  fetchAllMaintenance,
+  maintenanceDue,
+  maintenanceEvery,
+  MAINTENANCE_LEVEL,
 } from '../api'
 import { useAuth } from '../auth/AuthContext'
 import { useEvent } from '../events/useEvents'
@@ -25,7 +30,7 @@ import { useToast } from '../components/ToastContext'
 import MachineFormModal from '../components/machines/MachineFormModal'
 import MachineStatusChip from '../components/machines/MachineStatusChip'
 
-type Tab = 'machines' | 'mine' | 'pending'
+type Tab = 'machines' | 'mine' | 'pending' | 'maintenance'
 
 export default function MachinesPage() {
   const { canModule } = useAuth()
@@ -37,6 +42,7 @@ export default function MachinesPage() {
   const [mine, setMine] = useState<MachineBooking[]>([])
   const [pending, setPending] = useState<MachineBooking[]>([])
   const [certReqs, setCertReqs] = useState<MachineCertification[]>([])
+  const [maint, setMaint] = useState<MaintenanceTask[]>([])
   const [loading, setLoading] = useState(true)
   const [kind, setKind] = useState<MachineKind | ''>('')
   const [creating, setCreating] = useState(false)
@@ -44,16 +50,18 @@ export default function MachinesPage() {
   const load = useCallback(async () => {
     try {
       const now = localDateTime(new Date())
-      const [m, b, p, c] = await Promise.all([
+      const [m, b, p, c, mt] = await Promise.all([
         fetchMachines(),
         fetchBookings({ mine: true, from: now }),
         staff ? fetchBookings({ status: 'pendiente', from: now }) : Promise.resolve([]),
         staff ? fetchAllCertifications({ status: 'solicitada' }) : Promise.resolve([]),
+        staff ? fetchAllMaintenance() : Promise.resolve([]),
       ])
       setMachines(m)
       setMine(b)
       setPending(p)
       setCertReqs(c)
+      setMaint(mt)
     } catch (e) {
       addToast((e as Error).message, 'error')
     } finally {
@@ -92,6 +100,7 @@ export default function MachinesPage() {
     { id: 'machines', label: 'Maquinas' },
     { id: 'mine', label: 'Mis reservas', count: mine.length },
     ...(staff ? [{ id: 'pending' as Tab, label: 'Por aprobar', count: pending.length + certReqs.length }] : []),
+    ...(staff ? [{ id: 'maintenance' as Tab, label: 'Mantencion', count: maint.filter(t => t.level !== 'ok').length }] : []),
   ]
 
   return (
@@ -143,6 +152,8 @@ export default function MachinesPage() {
             </div>
           )}
         </>
+      ) : tab === 'maintenance' ? (
+        <MaintenanceList tasks={maint} />
       ) : tab === 'mine' ? (
         <BookingList list={mine} empty="No tienes reservas proximas" actions={(b) => [{ label: 'Cancelar', icon: X, danger: true, run: () => act(b, 'cancel') }]} />
       ) : (
@@ -218,6 +229,27 @@ function MachineCard({ m }: { m: Machine }) {
         )}
       </div>
     </Link>
+  )
+}
+
+/** Todas las tareas de mantencion y calibracion, vencidas primero */
+function MaintenanceList({ tasks }: { tasks: MaintenanceTask[] }) {
+  if (tasks.length === 0) {
+    return <p className="text-center py-16 text-sm" style={{ color: 'var(--text-secondary)' }}>Ninguna maquina tiene plan de mantencion. Se arma desde la ficha de cada maquina.</p>
+  }
+  return (
+    <div className="space-y-2">
+      {tasks.map(t => (
+        <Link key={t.id} to={`/machines/${t.machine_id}`} className="flex items-center justify-between gap-3 p-3 rounded-xl"
+          style={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--card-border)', borderLeft: `4px solid ${MAINTENANCE_LEVEL[t.level].color}` }}>
+          <span className="min-w-0">
+            <span className="block text-sm truncate" style={{ color: 'var(--text-primary)' }}>{t.title} · <b>{t.machine_name}</b></span>
+            <span className="block text-xs" style={{ color: 'var(--text-secondary)' }}>{maintenanceEvery(t)}{t.blocks ? ' · bloquea reservas' : ''}</span>
+          </span>
+          <span className="text-xs shrink-0" style={{ color: MAINTENANCE_LEVEL[t.level].color }}>{maintenanceDue(t)}</span>
+        </Link>
+      ))}
+    </div>
   )
 }
 
